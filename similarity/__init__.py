@@ -1,36 +1,82 @@
+import os
+import json
 import pandas as pd
 from scipy.spatial.distance import cosine
+import pretty_midi
+
+from utils.midi import all_metrics
 
 from typing import List
 
 
 class Similarity():
+    table: pd.DataFrame
+    metrics = {}
   
-    def __init__(self, params):
+    def __init__(self, input_dir, output_dir, params) -> None:
         """"""
+        self.input_dir = input_dir
+        self.output_dir = output_dir
         self.params = params
 
 
-    def build_similarity_table(self, vectors: List) -> pd.DataFrame:
+    def buid_metrics(self):
+        dict_file = os.path.join(self.input_dir, f"{self.input_dir.replace(' ', '_')}_metrics.json")
+
+        if os.path.exists(dict_file):
+            print(f"found existing metrics file '{dict_file}'")
+            with open(dict_file, 'r') as f:
+                self.metrics = json.load(f)
+                print(f"loaded metrics for {len(list(self.metrics.keys()))} files")
+        else:
+            print(f"calculating metrics from '{self.input_dir}'")
+            for file in os.listdir(self.input_dir):
+                if file.endswith('.mid') or file.endswith('.midi'):
+                    file_path = os.path.join(self.input_dir, file)
+                    midi = pretty_midi.PrettyMIDI(file_path)
+                    metrics = all_metrics(midi, self.params)
+                    self.metrics[file] = {
+                    "notes": [],
+                    "metrics": metrics,
+                    "played": 0,
+                    }
+            print(f"calculated metrics for {len(list(self.metrics.keys()))} files")
+
+            with open(dict_file, 'w') as f:
+                json.dump(self.metrics, f)
+
+            if os.path.exists(dict_file):
+                print(f"succesfully saved metrics file '{dict_file}'")
+            else:
+                print(f"error saving metrics file '{dict_file}'")
+                raise FileNotFoundError
+
+
+
+    def build_similarity_table(self):
         """"""
-        # Extract names and vectors
+        vectors = [
+            {'name': filename, 'metric': details['metrics']['pitch_histogram']}
+            for filename, details in self.metrics.items()
+        ]
+
         names = [v['name'] for v in vectors]
         vecs = [v['metric'] for v in vectors]
 
-        # Initialize an empty DataFrame
-        df = pd.DataFrame(index=names, columns=names, dtype="float64")
+        self.table = pd.DataFrame(index=names, columns=names, dtype="float64")
 
-        # Compute cosine similarity for each pair of vectors
+        # compute cosine similarity for each pair of vectors
         for i in range(len(vecs)):
             for j in range(len(vecs)):
                 if i != j:
-                    # Compute cosine similarity and store in DataFrame
-                    df.iloc[i, j] = 1 - cosine(vecs[i], vecs[j]) # type: ignore
+                    self.table.iloc[i, j] = 1 - cosine(vecs[i], vecs[j]) # type: ignore
                 else:
-                    # Cosine similarity of a vector with itself is 1
-                    df.iloc[i, j] = 1
+                    self.table.iloc[i, j] = 1
 
-        return df
+        
+        print(f"Generated a similarity table of shape {self.table.shape}")
+
+        return self.table
 
 
     def get_most_similar_file(self, filename, different_parent=True):
@@ -39,13 +85,13 @@ class Similarity():
         similarity = 1
         next_file_played = 1
         next_filename = filename
-        midi_metrics[filename]["played"] = 1
+        self.metrics[filename]["played"] = 1
 
         while next_file_played:
-            nl = similarity_table.loc[filename].nlargest(n)
+            nl = self.table.loc[filename].nlargest(n)
             next_filename = nl.index[-1]
             similarity = nl.iloc[-1]
-            next_file_played = midi_metrics[next_filename]["played"]
+            next_file_played = self.metrics[next_filename]["played"]
             n += 1
 
         return next_filename, similarity
@@ -64,3 +110,8 @@ class Similarity():
                 most_similar_vector = name
 
         return most_similar_vector
+    
+
+    def reset_plays(self):
+        for k in self.metrics.keys():
+            self.metrics[k]["played"] = 0

@@ -5,6 +5,7 @@ import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from mido import MidiFile
 
 from typing import Dict
 
@@ -277,6 +278,20 @@ def lstrip_midi(mid: pretty_midi.PrettyMIDI):
       note.start -= first_note_start
       note.end -= first_note_start
   return mid
+
+
+def stretch_midi_file(midi: MidiFile, new_duration_seconds) -> MidiFile:
+    """"""
+    print(f"rescaling file from {midi.length:.02f}s to {new_duration_seconds:.02f}s ({new_duration_seconds / midi.length:.03f})")
+    # Calculate stretch factor based on the original duration
+    stretch_factor = new_duration_seconds / midi.length
+    
+    # Scale the time attribute of each message by the stretch factor
+    for track in midi.tracks:
+        for msg in track:
+            msg.time = int(msg.time * stretch_factor)
+    
+    return midi
 
 
 #################################  random  ###################################
