@@ -8,7 +8,9 @@ from omegaconf import OmegaConf
 from playback import Player
 from similarity import Similarity
 
+
 if __name__=="__main__":
+    # load args and params
     parser = ArgumentParser(description="Argparser description")
     parser.add_argument(
         "--data_dir", default=None, help="location of MIDI files"
@@ -27,8 +29,9 @@ if __name__=="__main__":
     print(f"running with arguments:\n{args}")
     print(f"running with parameters:\n{params}")
 
-    output_dir = f"{datetime.now().strftime('%y-%m-%d')}"
-    # output_dir = f"{datetime.now().strftime('%y-%m-%d_%H%M%S')}"
+    # filesystem setup
+    output_dir = f"{datetime.now().strftime('%y-%m-%d')}"   # daily output dirs
+    # output_dir = f"{datetime.now().strftime('%y-%m-%d_%H%M%S')}"  # unique output dirs
     log_dir = os.path.join(args.output_dir, output_dir, "logs")
     record_dir = os.path.join(args.output_dir, output_dir, "records")
     
@@ -42,6 +45,7 @@ if __name__=="__main__":
         print(f"creating new recordings folder: '{record_dir}'")
         os.mkdir(record_dir)
 
+    # logger setup [UNUSED]
     logFormatter = logging.Formatter("%(asctime)s [%(name)-6.6s] [%(levelname)-5.5s]  %(message)s")
     rootLogger = logging.getLogger("main")
 
@@ -56,7 +60,10 @@ if __name__=="__main__":
     consoleHandler.setLevel(logging.INFO)
     rootLogger.addHandler(consoleHandler)
 
+    # run!
     similarity = Similarity(args.data_dir, os.path.join(args.output_dir, output_dir), params.similarity)
+    similarity.build_metrics()
+    similarity.build_similarity_table()
 
     player = Player(similarity, record_dir, params)
     player.start_recording()

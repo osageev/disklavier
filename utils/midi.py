@@ -67,9 +67,9 @@ def draw_piano_roll(piano_roll, fs=100, title='Piano Roll'):
 # TODO add manually-calculated "valid tempo range"
 
 def all_metrics(midi: pretty_midi.PrettyMIDI, config) -> Dict:
-    num_bins = int(math.ceil(midi.get_end_time() / config["bin_length"]))
+    num_bins = int(math.ceil(midi.get_end_time() / config.bin_length))
     metrics = {
-        "pitch_histogram": list(midi.get_pitch_class_histogram(use_duration=config["ph_weight_dur"], use_velocity=config["ph_weight_vel"])),
+        "pitch_histogram": list(midi.get_pitch_class_histogram(use_duration=config.ph_weight_dur, use_velocity=config.ph_weight_vel)),
         "tempo": midi.estimate_tempo(),
         "file_len": midi.get_end_time(),
         "note_count": sum(len(instrument.notes) for instrument in midi.instruments),

@@ -5,17 +5,20 @@ import threading
 from datetime import datetime
 import time
 
+from similarity import Similarity
+
 
 class Player():
     is_recording = False
     recorded_notes = []
     ctrl = 67  # soft pedal
     active_midi_file = None
+    is_playing = False
 
-    def __init__(self, similarity, record_dir: str, params) -> None:
+    def __init__(self, similarity: Similarity, record_dir: str, params) -> None:
         print("player initializing")
-        print(f"found input ports: {mido.get_input_names()}")
-        print(f"found output ports: {mido.get_output_names()}")
+        print(f"found input ports: {mido.get_input_names()}") # type: ignore
+        print(f"found output ports: {mido.get_output_names()}") # type: ignore
 
         self.params = params
         self.record_dir = record_dir
@@ -29,7 +32,7 @@ class Player():
     def start_recording(self) -> None:
         """Starts monitoring MIDI input and recording when pedal is pressed."""
         print(f"listening on port {self.input_port}")
-        threading.Thread(target=self._record_loop).start()
+        threading.Thread(target=self._record_loop, name="recording").start()
 
 
     def _record_loop(self) -> None:
@@ -41,7 +44,7 @@ class Player():
 
         dtpb = 480
 
-        with mido.open_input(self.input_port) as inport:
+        with mido.open_input(self.input_port) as inport: # type: ignore
             print(f"recording at {dtpb}tpb... Press Ctrl+C to stop.")
             try:
                 for msg in inport:
@@ -58,9 +61,11 @@ class Player():
                             print(f"stopping recording at {end_time - start_time:.02f}s...")
                             self.is_recording = False
 
+                            # start playback
                             self._stretch_midi_file(end_time - start_time)
-                            path = self.save_midi()
-                            self.play_midi_file(MidiFile(path))
+                            self.save_midi()
+                            threading.Thread(target=self.playback_loop(), name="playing").start()
+                            print(f"playback thread started")
                             self.active_midi_file = None
                         elif self.is_recording == False:
                             print(f"recording...")
@@ -76,7 +81,48 @@ class Player():
                 end_time = time.time()
                 print(f"stopping recording at {end_time}...")
 
-    def save_midi(self):
+
+    def playback_loop(self):
+        """"""
+        time_elapsed = 0.
+        self.playing = True
+        self.playing_file_path = self.last_recorded_file
+        recorded_ph = self.similarity.midi_to_ph(self.last_recorded_file)
+        next_file, similarity = self.similarity.find_most_similar_vector(recorded_ph)
+        next_file_path = os.path.join(self.similarity.input_dir, next_file)
+        first_loop = True
+
+        while next_file is not None:
+            self.playing_file = os.path.basename(self.playing_file_path)
+            print(f"{self.playing_file_path}\t{self.playing_file}")
+            print(f"{next_file_path}\t{next_file}")
+            if not first_loop: # bad code!
+                print(f"getting next file for {self.playing_file_path}")
+                self.similarity.metrics[self.playing_file]['played'] = 1
+                next_file, similarity = self.similarity.get_most_similar_file(self.playing_file)
+                next_file_path = os.path.join(self.similarity.input_dir, next_file)
+
+            print(f"[{int(time_elapsed):04d}]\tPlaying {self.playing_file}\t(next up is {next_file})\tsim={similarity:.3f}")
+            time_elapsed += MidiFile(self.playing_file_path).length
+
+            self.play_midi_file(self.playing_file_path)
+            self.playing_file_path = next_file_path
+            first_loop = False
+        
+
+    def play_midi_file(self, midi_path: str) -> None:
+        midi_data = MidiFile(midi_path)
+        with mido.open_output(self.output_port) as outport: # type: ignore
+            t = 0.
+            for msg in midi_data.play():
+                self._printProgressBar(t, midi_data.length, suffix='s')
+                t += msg.time # type: ignore
+                if not msg.is_meta:
+                    outport.send(msg)
+            self._printProgressBar(midi_data.length, midi_data.length, suffix='s')
+
+
+    def save_midi(self) -> None:
         """Saves the recorded notes to a MIDI file."""
         self.outfile = f"recording_{datetime.now().strftime('%y-%m-%d_%H%M%S')}.mid"
         print(f"saving recording '{self.outfile}'")
@@ -87,21 +133,9 @@ class Player():
 
         if os.path.exists(os.path.join(self.record_dir, self.outfile)):
             print(f"successfully saved recording '{self.outfile}'")
+            self.last_recorded_file = os.path.join(self.record_dir, self.outfile)
         else:
             print(f"failed to save recording '{self.outfile}'")
-
-        return os.path.join(self.record_dir, self.outfile)
-
-
-    def play_midi_file(self, midi_data: mido.MidiFile) -> None:
-        with mido.open_output(self.output_port) as outport:
-            t = 0
-            for msg in midi_data.play():
-                self._printProgressBar(t, midi_data.length, suffix='s')
-                t += msg.time # type: ignore
-                if not msg.is_meta:
-                    outport.send(msg)
-            self._printProgressBar(midi_data.length, midi_data.length, suffix='s')
 
 
     def _stretch_midi_file(self, new_duration_seconds):
@@ -114,6 +148,7 @@ class Player():
         for track in self.active_midi_file.tracks:
             for msg in track:
                 msg.time = int(msg.time * stretch_factor)
+
 
     def _new_midi_obj(self) -> None:
         self.active_midi_file = MidiFile()
