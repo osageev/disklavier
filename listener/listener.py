@@ -35,7 +35,7 @@ class Listener:
                 # mido doesn't do this by default for some reason
                 current_time = time.time()
                 msg.time = int((current_time - last_note_time) * dtpb)
-                console.log(f"{self.p}\t{msg.dict()}")
+                console.log(f"{self.p}\t{msg}")
                 last_note_time = current_time 
 
                 if msg.type == 'control_change' and msg.control == self.params.ctrl:
