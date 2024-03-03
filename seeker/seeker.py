@@ -103,6 +103,7 @@ class Seeker():
         """finds the filename and similarity of the next most similar unplayed file in the similarity table
             NOTE: will go into an infinite loop once all files are played!
         """
+        console.log(f"{self.p}finding most similar file to '{filename}'")
         n = 1
         similarity = 1
         next_file_played = 1
@@ -116,17 +117,23 @@ class Seeker():
             next_file_played = self.metrics[next_filename]["played"]
             n += 1
 
+        console.log(f"{self.p}found '{next_filename}' with similarity {similarity:03f}")
+
         return next_filename, similarity
         
 
     def midi_to_ph(self, midi_file: str):
         """"""
+        console.log(f"{self.p}calculating pitch histogram for '{midi_file}'")
+
         midi = pretty_midi.PrettyMIDI(midi_file)
+
         return midi.get_pitch_class_histogram()
         
     
     def find_most_similar_vector(self, target_vector):
-        """unused"""
+        """"""
+        console.log(f"{self.p}finding most similar vector to {target_vector}")
         most_similar_vector = None
         highest_similarity = -1  # since cosine similarity ranges from -1 to 1
         vector_array = [
@@ -140,6 +147,8 @@ class Seeker():
             if similarity > highest_similarity:
                 highest_similarity = similarity
                 most_similar_vector = name
+
+        console.log(f"{self.p}found '{most_similar_vector}' with similarity {similarity:03f}")
 
         return most_similar_vector, highest_similarity
     

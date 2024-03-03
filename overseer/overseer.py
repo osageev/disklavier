@@ -3,7 +3,7 @@ from datetime import datetime
 import mido
 from mido import MidiFile, MidiTrack
 from queue import Queue
-from threading import Thread
+from threading import Thread, Event
 import time
 
 from player.player import Player
@@ -15,8 +15,9 @@ from utils import console
 
 class Overseer:
     p = '[yellow]ovrsee[/yellow]: '
+    playing_file = ''
     
-    def __init__(self, params, data_dir, output_dir, record_dir):
+    def __init__(self, params, data_dir: str, output_dir: str, record_dir: str):
         console.log(f"{self.p}initializing")
 
         self.params = params
@@ -26,29 +27,52 @@ class Overseer:
 
         self._init_midi() # make sure MIDI port is available first
 
+        # set up events & queues
+        self.recording_ready_event = Event()
+        self.playback_begun = Event()
+        self.kill_event = Event()
+        self.player_queue = Queue()
+
         self.seeker = Seeker(self.data_dir, self.output_dir, self.params.seeker)
         self.seeker.build_metrics()
         self.seeker.build_similarity_table()
 
-        self.listener = Listener(self.params.listener, self.record_dir)
-
-        self.player = Player(self.params.player, self.record_dir)
+        self.listener = Listener(self.params.listener, self.record_dir, self.recording_ready_event, self.kill_event)
+        self.player = Player(self.params.player, self.record_dir, self.playback_begun, self.player_queue)
 
         
     def start(self):
-        listen_thread = Thread(target=self.listener.listen, args=())
+        listen_thread = Thread(target=self.listener.listen, args=(), name="listener")
 
         listen_thread.start()
 
-        while self.listener.is_recording is False:
-            console.log(f"{self.p}tick")
-            time.sleep(1)
-            console.log(f"{self.p}tock")
-            time.sleep(1)
+        try:
+            while True:
+                # check for recordings
+                if self.recording_ready_event.is_set():
+                    console.log(f"{self.p}triggering playback from recording '{self.listener.outfile}'")
+
+                    recorded_ph = self.seeker.midi_to_ph(os.path.join(self.record_dir, self.listener.outfile))
+                    first_link = self.seeker.find_most_similar_vector(recorded_ph)
+
+                    playback_thread = Thread(target=self.player.playback_loop, args=(recorded_ph,), name="player")
+                    self.player_queue.put((os.path.join(self.data_dir, str(first_link[0])), float(first_link[1])))
+
+                    playback_thread.start()
+                    self.listener.outfile = ''
+                    self.recording_ready_event.clear()
+
+                # check for next file requests
+                if self.playback_begun:
+                    pass
+
+        except KeyboardInterrupt:
+            # stop on Ctrl+C
+            console.log(f"{self.p}shutting down")
+            self.kill_event.set()
 
         listen_thread.join()
-
-        console.log(f"{self.p}done")
+        playback_thread.join()
 
 
     def _init_midi(self):
