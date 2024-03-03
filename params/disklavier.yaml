@@ -1,5 +1,6 @@
-ctrl: 67
-in_port: 'Disklavier'
+listener:
+  ctrl: 67
+  in_port: 'Disklavier'
 out_port: 'Disklavier'
 similarity:
   w1: 0.5 

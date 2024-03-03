@@ -3,14 +3,15 @@ import json
 import pandas as pd
 from scipy.spatial.distance import cosine
 import pretty_midi
-from tqdm.auto import tqdm
+from rich.progress import track, Progress
+from queue import Queue
 
+from utils import console
 from utils.midi import all_metrics
 
-from typing import List
 
-
-class Similarity():
+class Seeker():
+    p = '[blue]seek[/blue]  : '
     table: pd.DataFrame | None
     metrics = {}
   
@@ -25,13 +26,13 @@ class Similarity():
         dict_file = os.path.join(self.output_dir, f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}_metrics.json")
 
         if os.path.exists(dict_file):
-            print(f"found existing metrics file '{dict_file}'")
+            console.log(f"{self.p}found existing metrics file '{dict_file}'")
             with open(dict_file, 'r') as f:
                 self.metrics = json.load(f)
-                print(f"loaded metrics for {len(list(self.metrics.keys()))} files")
+                console.log(f"{self.p}loaded metrics for {len(list(self.metrics.keys()))} files")
         else:
-            print(f"calculating metrics from '{self.input_dir}'")
-            for file in os.listdir(self.input_dir):
+            console.log(f"{self.p}calculating metrics from '{self.input_dir}'")
+            for file in track(os.listdir(self.input_dir), description="calculating metrics"):
                 if file.endswith('.mid') or file.endswith('.midi'):
                     file_path = os.path.join(self.input_dir, file)
                     midi = pretty_midi.PrettyMIDI(file_path)
@@ -41,15 +42,15 @@ class Similarity():
                     "metrics": metrics,
                     "played": 0,
                     }
-            print(f"calculated metrics for {len(list(self.metrics.keys()))} files")
+            console.log(f"{self.p}calculated metrics for {len(list(self.metrics.keys()))} files")
 
             with open(dict_file, 'w') as f:
                 json.dump(self.metrics, f)
 
             if os.path.isfile(dict_file):
-                print(f"succesfully saved metrics file '{dict_file}'")
+                console.log(f"{self.p}succesfully saved metrics file '{dict_file}'")
             else:
-                print(f"error saving metrics file '{dict_file}'")
+                console.log(f"{self.p}error saving metrics file '{dict_file}'")
                 raise FileNotFoundError
             
         self.reset_plays()
@@ -61,7 +62,7 @@ class Similarity():
         self.table = self.load_similarities(parquet)
 
         if self.table is not None:
-            print(f"loaded existing similarity file from '{parquet}'")
+            console.log(f"{self.p}loaded existing similarity file from '{parquet}'")
         else:
             vectors = [
                 {'name': filename, 'metric': details['metrics']['pitch_histogram']}
@@ -71,27 +72,30 @@ class Similarity():
             names = [v['name'] for v in vectors]
             vecs = [v['metric'] for v in vectors]
 
-            print(f"building similarity table for {len(vecs)} vectors")
+            console.log(f"{self.p}building similarity table for {len(vecs)} vectors")
 
             self.table = pd.DataFrame(index=names, columns=names, dtype="float64")
 
             # compute cosine similarity for each pair of vectors
-            for i in tqdm(range(len(vecs)), unit="vectors"):
-                for j in range(len(vecs)):
-                    if i != j:
-                        self.table.iloc[i, j] = 1 - cosine(vecs[i], vecs[j]) # type: ignore
-                    else:
-                        self.table.iloc[i, j] = 1
+            with Progress() as progress:
+                sims_task = progress.add_task("calculating sims", total=len(vecs) ** 2)
+                for i in range(len(vecs)):
+                    for j in range(len(vecs)):
+                        if i != j:
+                            self.table.iloc[i, j] = 1 - cosine(vecs[i], vecs[j]) # type: ignore
+                        else:
+                            self.table.iloc[i, j] = 1
+                        progress.update(sims_task, advance=1)
 
             
-            print(f"Generated a similarity table of shape {self.table.shape}")
+            console.log(f"{self.p}Generated a similarity table of shape {self.table.shape}")
 
             self.table.to_parquet(parquet, index=False)
 
             if os.path.isfile(parquet):
-                print(f"succesfully saved similarities file '{parquet}'")
+                console.log(f"{self.p}succesfully saved similarities file '{parquet}'")
             else:
-                print(f"error saving similarities file '{parquet}'")
+                console.log(f"{self.p}error saving similarities file '{parquet}'")
                 raise FileNotFoundError
 
 
