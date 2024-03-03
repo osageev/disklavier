@@ -5,9 +5,7 @@ from datetime import datetime
 from argparse import ArgumentParser
 from omegaconf import OmegaConf
 
-from playback import Player
-from playback.listener import Listener
-from seeker import Seeker
+from overseer.overseer import Overseer
 from utils import console
 
 
@@ -55,13 +53,8 @@ if __name__=="__main__":
     console.log(f"{p}filesystem is set up")
 
     # run!
-    seeker = Seeker(args.data_dir, os.path.join(args.output_dir, output_dir), params.similarity)
-    seeker.build_metrics()
-    seeker.build_similarity_table()
+    overseer = Overseer(params, args.data_dir, os.path.join(args.output_dir, output_dir), record_dir)
+    overseer.start()
 
-    listener = Listener(params.listener)
-
-    player = Player(seeker, listener, record_dir, params)
-    player.start_recording()
     console.log(f"{p}[green bold]session complete, saving log")
     console.save_text(os.path.join(log_dir, f"{datetime.now().strftime('%y-%m-%d_%H%M%S')}.log"))

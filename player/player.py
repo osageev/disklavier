@@ -1,13 +1,10 @@
 import os
 import mido
 from mido import MidiFile, MidiTrack, Message
-import threading
+from threading import Thread
 from datetime import datetime
 import time
-from queue import Queue
-
-from seeker import Seeker
-from playback.listener import Listener
+from queue import LifoQueue
 from utils import console
 
 
@@ -19,27 +16,15 @@ class Player():
     active_midi_file = None
     is_playing = False
 
-    def __init__(self, seeker: Seeker, listener: Listener, record_dir: str, params) -> None:
-        console.log(f"{self.p}player initializing")
-        console.log(f"{self.p}found input ports: {mido.get_input_names()}") # type: ignore
-        console.log(f"{self.p}found output ports: {mido.get_output_names()}") # type: ignore
-
+    def __init__(self, params, record_dir: str) -> None:
         self.params = params
         self.record_dir = record_dir
-        self.seeker = seeker
-        self.input_port = self.params.in_port
-        self.output_port = self.params.out_port
-        self.listener = listener
-        self.queue = Queue()
 
 
     def start(self) -> None:
-        self.listen_thread = self.listener.start_recording()
-
-    def start_recording(self) -> None:
         """Starts monitoring MIDI input and recording when pedal is pressed."""
         console.log(f"{self.p}listening on port {self.input_port}")
-        threading.Thread(target=self._record_loop, name="recording").start()
+        Thread(target=self.listener.listen(), name="listening").start()
 
 
     def _record_loop(self) -> None:
@@ -119,7 +104,7 @@ class Player():
 
     def play_midi_file(self, midi_path: str) -> None:
         midi_data = MidiFile(midi_path)
-        with mido.open_output(self.output_port) as outport: # type: ignore
+        with mido.open_output(self.params.out_port) as outport: # type: ignore
             t = 0.
             for msg in midi_data.play():
                 self._printProgressBar(t, midi_data.length, suffix='s')
@@ -157,10 +142,4 @@ class Player():
                 msg.time = int(msg.time * stretch_factor)
 
 
-    def _new_midi_obj(self) -> None:
-        self.active_midi_file = MidiFile()
-        track = MidiTrack()
-        self.active_midi_file.tracks.append(track)
-        track.append(Message('program_change', program=12)) # dunno what this does tbh
-
-    def wait_for_msg(self) -> None:
+    # def wait_for_msg(self) -> None:

@@ -1,14 +1,18 @@
+in_port: 'Disklavier'
+out_port: 'Disklavier'
 listener:
   ctrl: 67
   in_port: 'Disklavier'
-out_port: 'Disklavier'
-similarity:
+player:
+  in_port: 'Disklavier'
+  out_port: 'Disklavier'
+  loop_chance: 0.0
+  play_time: 6000
+  time_elapsed: 0
+  loop_time: 8
+seeker:
   w1: 0.5 
   w2: 0.5
   bin_length: 1.0
   ph_weight_dur: False
   ph_weight_vel: False
-loop_chance: 0.0
-play_time: 6000
-time_elapsed: 0
-loop_time: 8
