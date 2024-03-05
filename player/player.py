@@ -1,6 +1,6 @@
 import os
 import mido
-from mido import MidiFile, MidiTrack, Message
+from mido import MidiFile, MidiTrack, MetaMessage
 from threading import Event
 from queue import Queue
 from utils import console
@@ -16,6 +16,7 @@ class Player():
         self.record_dir = record_dir
         self.get_next = playback_event
         self.file_queue = filename_queue
+        self.out_port = mido.open_output(self.params.out_port) # type: ignore
 
 
     def playback_loop(self, seed_file_path: str, recorded_ph: List):
@@ -35,7 +36,7 @@ class Player():
                 next_file = os.path.basename(next_file_path)
             self.get_next.set()
 
-            console.log(f"{self.p}Playing {self.playing_file}\t(next up is {next_file})\tsim={similarity:.3f}")
+            console.log(f"{self.p}playing {self.playing_file}\t(next up is {next_file})\tsim={similarity:.3f}")
 
             self.play_midi_file(self.playing_file_path)
             self.playing_file_path = next_file_path
@@ -43,10 +44,11 @@ class Player():
         
 
     def play_midi_file(self, midi_path: str) -> None:
-        midi_data = MidiFile(midi_path)
-        with mido.open_output(self.params.out_port) as outport: # type: ignore
-            t = 0.
-            for msg in midi_data.play():
-                t += msg.time # type: ignore
-                if not msg.is_meta:
-                    outport.send(msg)
+        playback_bpm = int(midi_path.split('-')[1])
+        console.log(f"{self.p}playback bpm is {playback_bpm}")
+
+        t = 0.0
+        for msg in MidiFile(midi_path).play():
+            t += msg.time # type: ignore
+            self.out_port.send(msg)
+

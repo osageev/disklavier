@@ -129,7 +129,7 @@ def all_metrics(midi: pretty_midi.PrettyMIDI, config) -> Dict:
     return metrics
 
 
-############################  individual functions  ###########################
+#############################  individual metrics  ############################
 
 
 def average_note_length(midi: pretty_midi.PrettyMIDI) -> float:
@@ -268,32 +268,6 @@ def norm(data):
     return (data - np.min(data)) / (np.max(data) - np.min(data))
 
 
-def lstrip_midi(mid: pretty_midi.PrettyMIDI):
-  """Modify MIDI object so that the first note is at 0.0s."""
-  for instrument in mid.instruments:
-    if not instrument.notes:
-      continue
-    first_note_start = instrument.notes[0].start
-    for note in instrument.notes:
-      note.start -= first_note_start
-      note.end -= first_note_start
-  return mid
-
-
-def stretch_midi_file(midi: MidiFile, new_duration_seconds) -> MidiFile:
-    """"""
-    print(f"rescaling file from {midi.length:.02f}s to {new_duration_seconds:.02f}s ({new_duration_seconds / midi.length:.03f})")
-    # Calculate stretch factor based on the original duration
-    stretch_factor = new_duration_seconds / midi.length
-    
-    # Scale the time attribute of each message by the stretch factor
-    for track in midi.tracks:
-        for msg in track:
-            msg.time = int(msg.time * stretch_factor)
-    
-    return midi
-
-
 #################################  random  ###################################
 def quantize_midi(filename, sections_per_beat):
     """
@@ -344,3 +318,29 @@ def trim_piano_roll(piano_roll, min=None, max=None):
     trimmed_piano_roll = piano_roll[lowest_note:highest_note+1, :]
 
     return trimmed_piano_roll
+
+
+def lstrip_midi(mid: pretty_midi.PrettyMIDI):
+  """Modify MIDI object so that the first note is at 0.0s."""
+  for instrument in mid.instruments:
+    if not instrument.notes:
+      continue
+    first_note_start = instrument.notes[0].start
+    for note in instrument.notes:
+      note.start -= first_note_start
+      note.end -= first_note_start
+  return mid
+
+
+def stretch_midi_file(midi: MidiFile, new_duration_seconds) -> MidiFile:
+    """"""
+    print(f"rescaling file from {midi.length:.02f}s to {new_duration_seconds:.02f}s ({new_duration_seconds / midi.length:.03f})")
+    # Calculate stretch factor based on the original duration
+    stretch_factor = new_duration_seconds / midi.length
+    
+    # Scale the time attribute of each message by the stretch factor
+    for track in midi.tracks:
+        for msg in track:
+            msg.time = int(msg.time * stretch_factor)
+    
+    return midi
