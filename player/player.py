@@ -1,6 +1,6 @@
 import os
 import mido
-from mido import MidiFile, MidiTrack, MetaMessage
+from mido import MidiFile
 from threading import Event
 from queue import Queue
 from utils import console
@@ -44,7 +44,7 @@ class Player():
         
 
     def play_midi_file(self, midi_path: str) -> None:
-        playback_bpm = int(midi_path.split('-')[1])
+        playback_bpm = int(os.path.basename(midi_path).split('-')[1])
         console.log(f"{self.p}playback bpm is {playback_bpm}")
 
         t = 0.0

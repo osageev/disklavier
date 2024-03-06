@@ -70,30 +70,13 @@ def all_metrics(midi: pretty_midi.PrettyMIDI, config) -> Dict:
     num_bins = int(math.ceil(midi.get_end_time() / config.bin_length))
     metrics = {
         "pitch_histogram": list(midi.get_pitch_class_histogram(use_duration=config.ph_weight_dur, use_velocity=config.ph_weight_vel)),
-        "tempo": midi.estimate_tempo(),
+        # "tempo": midi.estimate_tempo(),
         "file_len": midi.get_end_time(),
         "note_count": sum(len(instrument.notes) for instrument in midi.instruments),
         "velocities": [{"total_velocity": 0, "count": 0} for _ in range(num_bins)],
         "lengths": [0.0] * num_bins,
         "energies": [0.0] * num_bins,
         "simultaneous_counts": [0] * num_bins,
-        "key": ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
-        # "unique_notes": set() # removed, modify to be able to write to JSON
-    }
-
-    notes_in_keys = {
-        "C": ['C', 'D', 'E', 'F', 'G', 'A', 'B'], # C Major
-        "C#": ['C#', 'D#', 'F', 'F#', 'G#', 'A#', 'C'], # C# (or Db) Major
-        "D": ['D', 'E', 'F#', 'G', 'A', 'B', 'C#'], # D Major
-        "D#": ['D#', 'F', 'G', 'G#', 'A#', 'C', 'D'], # D# (or Eb) Major
-        "E": ['E', 'F#', 'G#', 'A', 'B', 'C#', 'D#'], # E Major
-        "F": ['F', 'G', 'A', 'A#', 'C', 'D', 'E'], # F Major
-        "F#": ['F#', 'G#', 'A#', 'B', 'C#', 'D#', 'F'], # F# (or Gb) Major
-        "G": ['G', 'A', 'B', 'C', 'D', 'E', 'F#'], # G Major
-        "G#": ['G#', 'A#', 'C', 'C#', 'D#', 'F', 'G'], # G# (or Ab) Major
-        "A": ['A', 'B', 'C#', 'D', 'E', 'F#', 'G#'], # A Major
-        "A#": ['A#', 'C', 'D', 'D#', 'F', 'G', 'A'], # A# (or Bb) Major
-        "B": ['B', 'C#', 'D#', 'E', 'F#', 'G#', 'A#'] # B Major
     }
 
     # metrics that are calculated from notes
@@ -103,18 +86,11 @@ def all_metrics(midi: pretty_midi.PrettyMIDI, config) -> Dict:
             start_bin = int(note.start // config["bin_length"])
             end_bin = int(note.end // config["bin_length"])
             metrics["lengths"].append(note.end - note.start)
-            # metrics["unique_notes"].add(pretty_midi.note_number_to_name(note.pitch)[:-1])
-
 
             for bin in range(start_bin, min(end_bin + 1, num_bins)):
                 metrics["velocities"][bin]["total_velocity"] += note.velocity
                 metrics["velocities"][bin]["count"] += 1
                 metrics["simultaneous_counts"][bin] += 1
-
-            # key
-            for k in metrics["key"]:
-                if note_name not in notes_in_keys[k]:
-                    metrics["key"].remove(k)
 
     metrics["lengths"] = sum(metrics["lengths"]) / len(metrics["lengths"])
 

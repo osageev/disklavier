@@ -1,6 +1,6 @@
 import os
-import logging
-import logging.config
+# import logging
+# import logging.config
 from datetime import datetime
 from argparse import ArgumentParser
 from omegaconf import OmegaConf
@@ -28,11 +28,21 @@ if __name__=="__main__":
         default=None,
         help="where the logging config file is found",
     )
+    parser.add_argument(
+        "--force_rebuild",
+        action="store_true",
+        help="whether to rebuild similarity metrics",
+    )
+    parser.add_argument(
+        "--kickstart",
+        action="store_true",
+        help="dont wait for user input, just start playing",
+    )
     args = parser.parse_args()
     params = OmegaConf.load(args.param_file)
 
-    logging.config.fileConfig(args.log_config)
-    logger = logging.getLogger('main')
+    # logging.config.fileConfig(args.log_config)
+    # logger = logging.getLogger('main')
     p = '[white]main[/white]  : '
 
     # filesystem setup
@@ -53,7 +63,7 @@ if __name__=="__main__":
     console.log(f"{p}filesystem is set up")
 
     # run!
-    overseer = Overseer(params, args.data_dir, os.path.join(args.output_dir, output_dir), record_dir)
+    overseer = Overseer(params, args.data_dir, os.path.join(args.output_dir, output_dir), record_dir, args.force_rebuild, args.kickstart)
     overseer.start()
 
     console.log(f"{p}[green bold]session complete, saving log")

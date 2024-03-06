@@ -15,24 +15,26 @@ class Seeker():
     table: pd.DataFrame | None
     metrics = {}
   
-    def __init__(self, input_dir: str, output_dir: str, params) -> None:
+    def __init__(self, params, input_dir: str, output_dir: str, force_rebuild: bool = False) -> None:
         """"""
+        self.params = params
         self.input_dir = input_dir
         self.output_dir = output_dir
-        self.params = params
+        self.force_rebuild = force_rebuild
 
 
     def build_metrics(self):
         dict_file = os.path.join(self.output_dir, f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}_metrics.json")
 
-        if os.path.exists(dict_file):
+        if os.path.exists(dict_file) and not self.force_rebuild:
             console.log(f"{self.p}found existing metrics file '{dict_file}'")
             with open(dict_file, 'r') as f:
                 self.metrics = json.load(f)
                 console.log(f"{self.p}loaded metrics for {len(list(self.metrics.keys()))} files")
         else:
             console.log(f"{self.p}calculating metrics from '{self.input_dir}'")
-            for file in track(os.listdir(self.input_dir), description="calculating metrics"):
+            for file in track(os.listdir(self.input_dir), description=f"{self.p}calculating metrics"):
+                # console.log(f"{self.p}calculating metrics for '{file}'")
                 if file.endswith('.mid') or file.endswith('.midi'):
                     file_path = os.path.join(self.input_dir, file)
                     midi = pretty_midi.PrettyMIDI(file_path)
@@ -78,7 +80,7 @@ class Seeker():
 
             # compute cosine similarity for each pair of vectors
             with Progress() as progress:
-                sims_task = progress.add_task("calculating sims", total=len(vecs) ** 2)
+                sims_task = progress.add_task(f"{self.p}calculating sims", total=len(vecs) ** 2)
                 for i in range(len(vecs)):
                     for j in range(len(vecs)):
                         if i != j:
@@ -99,12 +101,12 @@ class Seeker():
                 raise FileNotFoundError
 
 
-    def get_most_similar_file(self, filename, different_parent=True):
+    def get_most_similar_file(self, filename: str, different_parent: bool=True):
         """finds the filename and similarity of the next most similar unplayed file in the similarity table
             NOTE: will go into an infinite loop once all files are played!
         """
         console.log(f"{self.p}finding most similar file to '{filename}'")
-        n = 1
+        n = 3
         similarity = 1
         next_file_played = 1
         next_filename = None
@@ -159,5 +161,5 @@ class Seeker():
 
 
     def load_similarities(self, parquet_path) -> pd.DataFrame | None:
-        if os.path.isfile(parquet_path):
+        if os.path.isfile(parquet_path) and not self.force_rebuild:
             return pd.read_parquet(parquet_path)

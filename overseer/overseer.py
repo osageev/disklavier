@@ -15,7 +15,7 @@ class Overseer:
     p = '[yellow]ovrsee[/yellow]: '
     playing_file = ''
     
-    def __init__(self, params, data_dir: str, output_dir: str, record_dir: str):
+    def __init__(self, params, data_dir: str, output_dir: str, record_dir: str, force_rebuild:bool=False, do_kickstart: bool=False):
         console.log(f"{self.p}initializing")
 
         self.params = params
@@ -24,6 +24,8 @@ class Overseer:
         self.record_dir = record_dir
 
         self._init_midi() # make sure MIDI port is available first
+        if len(os.listdir(self.data_dir)) < 10:
+            console.log(f"{self.p}[red]less than 10 files in input folder. are you sure you didnt screw something up?")
 
         # set up events & queues
         self.recording_ready_event = Event()
@@ -32,7 +34,7 @@ class Overseer:
         self.player_queue = Queue()
 
         # initialize objects to be overseen
-        self.seeker = Seeker(self.data_dir, self.output_dir, self.params.seeker)
+        self.seeker = Seeker(self.params.seeker, self.data_dir, self.output_dir, force_rebuild)
         self.seeker.build_metrics()
         self.seeker.build_similarity_table()
         self.listener = Listener(self.params.listener, self.record_dir, self.recording_ready_event, self.kill_event)
@@ -79,13 +81,9 @@ class Overseer:
                 next_file_path = os.path.join(self.data_dir, str(next_file))
                 self.change_tempo(next_file_path)
 
-                if num_played == 5:
-                    next_file_path = None
-                    similarity = -1
-
                 self.player_queue.put((next_file_path, similarity))
 
-                console.log(f"{self.p}added next file '{next_file}' to queue with similarity {similarity}")
+                console.log(f"{self.p}added next file '{next_file}' to queue with similarity {similarity:.03f}")
                 
                 self.give_next_event.clear()
                 num_played += 1
@@ -131,27 +129,27 @@ class Overseer:
         if self.params.in_port in available_inputs:
             self.input_port = mido.open_input(self.params.in_port) # type: ignore
         elif len(available_inputs) > 0:
-            console.log(f"{self.p}[orange]unable to find MIDI device[/orange] '{self.params.in_port}' [orange]defaulting to[/orange]'{available_inputs[0]}'")
+            console.log(f"{self.p}unable to find MIDI device '{self.params.in_port}' falling back on '{available_inputs[0]}'")
             self.input_port = mido.open_input(available_inputs[0]) # type: ignore
-            self.params.player.in_port = mido.open_input(available_inputs[0]) # type: ignore
-            self.params.listener.in_port = mido.open_input(available_inputs[0]) # type: ignore
+            self.params.player.in_port = available_inputs[0]
+            self.params.listener.in_port = available_inputs[0]
         else:
-            console.log(f"{self.p}[orange]no MIDI input devices available")
+            console.log(f"{self.p}no MIDI input devices available")
 
         if self.params.out_port in available_inputs:
             self.output_port = mido.open_output(self.params.out_port) # type: ignore
         elif len(available_outputs) > 0:
-            console.log(f"{self.p}[orange]unable to find MIDI device[/orange] '{self.params.out_port}' [orange]defaulting to[/orange]'{available_outputs[0]}'")
+            console.log(f"{self.p}unable to find MIDI device '{self.params.out_port}' falling back on '{available_outputs[0]}'")
             self.output_port = mido.open_output(available_outputs[0]) # type: ignore
-            self.params.player.out_port = mido.open_input(available_outputs[0]) # type: ignore
-            self.params.listener.out_port = mido.open_input(available_outputs[0]) # type: ignore
+            self.params.player.out_port = available_outputs[0]
+            self.params.listener.out_port = available_outputs[0]
         else:
-            console.log(f"{self.p}[orange]no MIDI output devices available")
+            console.log(f"{self.p}no MIDI output devices available")
 
 
     def change_tempo(self, midi_file_path):
         midi_file = mido.MidiFile(midi_file_path)
-        new_tempo_bpm = int(midi_file_path.split('-')[1])
+        new_tempo_bpm = int(os.path.basename(midi_file_path).split('-')[1])
         new_tempo = mido.bpm2tempo(new_tempo_bpm)  # Convert BPM to microseconds per beat
         console.log(f"{self.p}new tempo is {new_tempo} (from {new_tempo_bpm})")
         new_message = mido.MetaMessage('set_tempo', tempo=new_tempo, time=0)
