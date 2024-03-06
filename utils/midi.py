@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from mido import MidiFile
 
+from utils import console
+
 from typing import Dict
 
 DARK = True
@@ -308,9 +310,9 @@ def lstrip_midi(mid: pretty_midi.PrettyMIDI):
   return mid
 
 
-def stretch_midi_file(midi: MidiFile, new_duration_seconds) -> MidiFile:
+def stretch_midi_file(midi: MidiFile, new_duration_seconds: float, caller: str = "[cyan]utils : [/cyan]") -> MidiFile:
     """"""
-    print(f"rescaling file from {midi.length:.02f}s to {new_duration_seconds:.02f}s ({new_duration_seconds / midi.length:.03f})")
+    console.log(f"rescaling file from {midi.length:.02f}s to {new_duration_seconds:.02f}s ({new_duration_seconds / midi.length:.03f})")
     # Calculate stretch factor based on the original duration
     stretch_factor = new_duration_seconds / midi.length
     

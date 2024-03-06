@@ -9,6 +9,11 @@ from overseer.overseer import Overseer
 from utils import console
 
 
+def check_tempo(tempo):
+    console.log(f"[white]main[/white]  : running at {tempo}bpm")
+    pass
+
+
 if __name__=="__main__":
     # load args and params
     parser = ArgumentParser(description="Argparser description")
@@ -38,6 +43,11 @@ if __name__=="__main__":
         action="store_true",
         help="dont wait for user input, just start playing",
     )
+    parser.add_argument(
+        "--tempo",
+        default=None,
+        help="tempo to record and play at, in bpm",
+    )
     args = parser.parse_args()
     params = OmegaConf.load(args.param_file)
 
@@ -62,8 +72,11 @@ if __name__=="__main__":
         os.mkdir(record_dir)
     console.log(f"{p}filesystem is set up")
 
+    if args.tempo:
+        check_tempo(args.tempo)
+
     # run!
-    overseer = Overseer(params, args.data_dir, os.path.join(args.output_dir, output_dir), record_dir, args.force_rebuild, args.kickstart)
+    overseer = Overseer(params, args.data_dir, os.path.join(args.output_dir, output_dir), record_dir, args.tempo, args.force_rebuild, args.kickstart)
     overseer.start()
 
     console.log(f"{p}[green bold]session complete, saving log")

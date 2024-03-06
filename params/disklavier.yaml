@@ -2,10 +2,7 @@ in_port: 'Disklavier'
 out_port: 'Disklavier'
 listener:
   ctrl: 67
-  in_port: 'Disklavier'
 player:
-  in_port: 'Disklavier'
-  out_port: 'Disklavier'
   loop_chance: 0.0
   play_time: 6000
   time_elapsed: 0

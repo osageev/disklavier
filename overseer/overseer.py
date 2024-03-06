@@ -15,13 +15,16 @@ class Overseer:
     p = '[yellow]ovrsee[/yellow]: '
     playing_file = ''
     
-    def __init__(self, params, data_dir: str, output_dir: str, record_dir: str, force_rebuild:bool=False, do_kickstart: bool=False):
+    def __init__(self, params, data_dir: str, output_dir: str, record_dir: str, tempo:int, force_rebuild:bool=False, do_kickstart: bool=False):
         console.log(f"{self.p}initializing")
 
         self.params = params
         self.data_dir = data_dir
         self.output_dir = output_dir
         self.record_dir = record_dir
+        self.tempo = tempo
+        self.params.listener.tempo = int(tempo)
+        self.params.player.tempo = int(tempo)
 
         self._init_midi() # make sure MIDI port is available first
         if len(os.listdir(self.data_dir)) < 10:
@@ -125,9 +128,12 @@ class Overseer:
 
         if len(available_inputs) == 0 or len(available_outputs) == 0:
             console.log(f"{self.p}no MIDI device detected")
+            raise ValueError # wrong error type i know
 
         if self.params.in_port in available_inputs:
             self.input_port = mido.open_input(self.params.in_port) # type: ignore
+            self.params.player.in_port = self.params.in_port
+            self.params.listener.in_port = self.params.in_port
         elif len(available_inputs) > 0:
             console.log(f"{self.p}unable to find MIDI device '{self.params.in_port}' falling back on '{available_inputs[0]}'")
             self.input_port = mido.open_input(available_inputs[0]) # type: ignore
@@ -138,6 +144,8 @@ class Overseer:
 
         if self.params.out_port in available_inputs:
             self.output_port = mido.open_output(self.params.out_port) # type: ignore
+            self.params.player.out_port = self.params.out_port
+            self.params.listener.out_port = self.params.out_port
         elif len(available_outputs) > 0:
             console.log(f"{self.p}unable to find MIDI device '{self.params.out_port}' falling back on '{available_outputs[0]}'")
             self.output_port = mido.open_output(available_outputs[0]) # type: ignore

@@ -1,8 +1,11 @@
 import os
 import mido
+import time
 from mido import MidiFile
 from threading import Event
 from queue import Queue
+import simpleaudio as sa
+
 from utils import console
 
 from typing import List
@@ -47,8 +50,26 @@ class Player():
         playback_bpm = int(os.path.basename(midi_path).split('-')[1])
         console.log(f"{self.p}playback bpm is {playback_bpm}")
 
-        t = 0.0
+        tick_interval = 60./playback_bpm
+        next_tick = tick_interval
+        start_time = time.time()
         for msg in MidiFile(midi_path).play():
-            t += msg.time # type: ignore
             self.out_port.send(msg)
+            # current_time = time.time() - start_time
+            # if current_time >= next_tick:
+            #     self._tick()
+            #     next_tick += tick_interval
+
+        # Ensure the function runs for the total duration of the MIDI file
+        while time.time() - start_time < MidiFile(midi_path).length:
+            current_time = time.time() - start_time
+            if current_time >= next_second:
+                self._tick()
+                next_second += tick_interval
+            time.sleep(0.01)  # Sleep briefly to avoid a busy wait
+
+
+    def _tick(self):
+        tick = sa.WaveObject.from_wave_file("data/tick.wav")
+        tick.play()
 
