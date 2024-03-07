@@ -12,7 +12,7 @@ from overseer.overseer import Overseer
 from utils import console, tick
 
 
-p = '[white]main[/white]  : '
+p = '[white]main[/white]  :'
 
 def check_tempo(tempo) -> int:
     console.log(f"{p} running at {tempo}bpm")
@@ -97,7 +97,7 @@ if __name__=="__main__":
         os.mkdir(record_dir)
     if os.path.exists("data/playlist"):
         for file in os.listdir("data/playlist"):
-            os.remove(os.path.join(args.output_dir, file))
+            os.remove(os.path.join("data/playlist", file))
     else:
         console.log(f"{p} creating new playlist folder: 'data/playlist'")
         os.mkdir("data/playlist")

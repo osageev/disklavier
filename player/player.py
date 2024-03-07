@@ -12,11 +12,12 @@ class Player():
     p = '[blue]play[/blue]  :'
     is_playing = False
 
-    def __init__(self, params, record_dir: str, playback_event: Event, filename_queue: Queue, kill_event: Event) -> None:
+    def __init__(self, params, record_dir: str, playback_event: Event, filename_queue: Queue, progress_queue: Queue, kill_event: Event) -> None:
         self.params = params
         self.record_dir = record_dir
         self.get_next = playback_event
         self.file_queue = filename_queue
+        self.playback_progress = progress_queue
         self.kill_event = kill_event
         self.out_port = mido.open_output(self.params.out_port) # type: ignore
 
@@ -43,7 +44,7 @@ class Player():
             first_loop = False
             # console.log(f"{self.p} kill event status: {self.kill_event.is_set()}")
             
-        console.log(f"{self.p} shutting down")
+        console.log(f"{self.p} [orange]shutting down")
 
 
     def play_midi_file(self, midi_path: str) -> None:
@@ -51,6 +52,7 @@ class Player():
         midi = MidiFile(midi_path)
         file_tempo = int(os.path.basename(midi_path).split('-')[1])
         found_tempo = -1
+        printed_msg = False
 
         for track in midi.tracks:
             for msg in track:
@@ -64,6 +66,11 @@ class Player():
             if not tick_thread.is_alive():
                 tick_thread.start()
             self.out_port.send(msg)
+            self.playback_progress.put(msg.time) # type: ignore
+
+            if self.kill_event.isSet() and not printed_msg:
+                console.log(f"{self.p} [yellow]finishing playback of the current file")
+                printed_msg = True
             
         stop_tick.set()
         tick_thread.join()

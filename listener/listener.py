@@ -69,7 +69,7 @@ class Listener:
                     self.recorded_notes.append(msg)
                 
                 if self.kill_event.is_set():
-                    console.log(f"{self.p} shutting down")
+                    console.log(f"{self.p} [orange]shutting down")
                     return
 
 

@@ -1,4 +1,5 @@
 import os
+from pretty_midi import PrettyMIDI
 import mido
 from queue import Queue
 from threading import Thread, Event
@@ -35,14 +36,15 @@ class Overseer:
         self.recording_ready_event = Event()
         self.give_next_event = Event()
         self.kill_event = Event()
-        self.player_queue = Queue()
+        self.playlist_queue = Queue()
+        self.progress_queue = Queue()
 
         # initialize objects to be overseen
         self.seeker = Seeker(self.params.seeker, self.data_dir, self.output_dir, force_rebuild)
         self.seeker.build_metrics()
         self.seeker.build_similarity_table()
         self.listener = Listener(self.params.listener, self.record_dir, self.recording_ready_event, self.kill_event)
-        self.player = Player(self.params.player, self.record_dir, self.give_next_event, self.player_queue, self.kill_event)
+        self.player = Player(self.params.player, self.record_dir, self.give_next_event, self.playlist_queue, self.progress_queue, self.kill_event)
 
         
     def start(self):
@@ -69,7 +71,7 @@ class Overseer:
                     next_file_path = self.change_tempo(next_file_path)
 
                     # start up player
-                    self.player_queue.put((next_file_path, float(first_link[1])))
+                    self.playlist_queue.put((next_file_path, float(first_link[1])))
                     playback_thread = Thread(target=self.player.playback_loop, args=(recording_path, recorded_ph), name="player")
                     playback_thread.start()
 
@@ -82,7 +84,7 @@ class Overseer:
                     # console.log(f"{self.p} player is playing '{self.player.playing_file}'\t(next up is '{next_file_path}')")
                     # mark file as played so it won't be played again
                     if self.player.playing_file.split('_')[0] != 'recording':
-                        console.log(f"{self.p} marking {self.player.playing_file} as played")
+                        console.log(f"{self.p} marking '{self.player.playing_file}' as played")
                         self.seeker.metrics[self.player.playing_file]['played'] = 1
                     
                     # get and prep next file
@@ -91,17 +93,20 @@ class Overseer:
                     next_file_path = self.change_tempo(next_file_path)
 
                     # send next file to player
-                    self.player_queue.put((next_file_path, similarity))
+                    self.playlist_queue.put((next_file_path, similarity))
                     console.log(f"{self.p} added next file '{next_file}' to queue with similarity {similarity:.03f}")
                     
                     self.give_next_event.clear()
+
         except KeyboardInterrupt: # CTRL+C caught
             # end threads
-            console.log(f"{self.p} CTRL + C detected")
+            console.log(f"{self.p} [red]CTRL + C detected, shutting down")
             self.kill_event.set()
 
             playback_thread.join()
+            console.log(f"{self.p} player killed successfully")
             listen_thread.join()
+            console.log(f"{self.p} listener killed successfully")
 
 
     def _init_midi(self):
