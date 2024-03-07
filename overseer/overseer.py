@@ -163,11 +163,11 @@ class Overseer:
                 if msg.type == 'set_tempo':
                     # track.remove(msg)
                     track.remove(msg)
-                    console.log(f"{self.p} removed set tempo message", msg)
+                    console.log(f"{self.p} [red]removed set tempo message", msg)
             
             # add new set_tempo message to the first track
             if not tempo_added:
-                console.log(f"{self.p} adding message (tempo={self.tempo}) {new_message}")
+                # console.log(f"{self.p} adding message (tempo={self.tempo}) {new_message}")
                 track.insert(0, new_message)
                 tempo_added = True
         
@@ -183,7 +183,7 @@ class Overseer:
         
         # save the modified MIDI file
         new_file_path = os.path.join("data", "playlist", f"{os.path.basename(midi_file_path)}")
-        console.log(f"{self.p} saving modified MIDI file with new tempo {self.tempo} BPM to '{new_file_path}'")
+        # console.log(f"{self.p} saving modified MIDI file with new tempo {self.tempo} BPM to '{new_file_path}'")
         midi.save(new_file_path)
 
         return new_file_path

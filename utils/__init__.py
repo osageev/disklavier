@@ -7,7 +7,7 @@ from rich.console import Console
 console = Console(record=True, log_time_format='%m-%d %H:%M:%S')
 
 
-def tick(bpm: int, stop_event: Event, p: str = '[cyan]metro[/cyan] : '):
+def tick(bpm: int, stop_event: Event, p: str = '[cyan]metro[/cyan] : ', do_print=True):
     """
     Plays a metronome tick at the specified BPM for a given duration in minutes.
     
@@ -17,7 +17,8 @@ def tick(bpm: int, stop_event: Event, p: str = '[cyan]metro[/cyan] : '):
     tick = sa.WaveObject.from_wave_file("data/tick.wav")  # Load the tick sound
     seconds_per_beat = 60.0 / bpm  # Calculate the interval between beats
     
-    while not stop_event.is_set():        
-        console.log(f"{p} [grey50]tick!")
+    while not stop_event.is_set():  
+        if do_print:      
+            console.log(f"{p} [grey50]tick!")
         tick.play()  # Play the tick sound
         time.sleep(seconds_per_beat)  # Wait for the next tick

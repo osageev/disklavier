@@ -1,10 +1,10 @@
 import os
 import mido
 from mido import MidiFile
-from threading import Event
+from threading import Thread, Event
 from queue import Queue
 
-from utils import console
+from utils import console, tick
 
 from typing import List
 
@@ -56,25 +56,14 @@ class Player():
             for msg in track:
                 if msg.type == 'set_tempo':
                     found_tempo = msg.tempo
-                    console.log(f"{self.p} found tempo msg {found_tempo}", msg)
-        console.log(f"{self.p} default tempo is {file_tempo}")
-        console.log(f"{self.p} playback tempo is {int(mido.tempo2bpm(found_tempo)):01d}")
+        console.log(f"{self.p} default tempo is {file_tempo}, playback tempo is {int(mido.tempo2bpm(found_tempo)):01d}")
 
-        # tick_interval = 60./playback_bpm
-        # next_tick = tick_interval
-        # start_time = time.time()
+        stop_tick = Event()
+        tick_thread = Thread(target=tick, args=(int(mido.tempo2bpm(found_tempo)), stop_tick, self.p, False))
         for msg in midi.play():
+            if not tick_thread.is_alive():
+                tick_thread.start()
             self.out_port.send(msg)
-            # current_time = time.time() - start_time
-            # if current_time >= next_tick:
-            #     self._tick()
-            #     next_tick += tick_interval
-
-        # # Ensure the function runs for the total duration of the MIDI file
-        # while time.time() - start_time < MidiFile(midi_path).length:
-        #     current_time = time.time() - start_time
-        #     if current_time >= next_second:
-        #         self._tick()
-        #         next_second += tick_interval
-        #     time.sleep(0.01)  # Sleep briefly to avoid a busy wait
-
+            
+        stop_tick.set()
+        tick_thread.join()

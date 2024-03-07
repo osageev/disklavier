@@ -57,18 +57,20 @@ if __name__=="__main__":
         help="where the logging config file is found",
     )
     parser.add_argument(
+        "-f",
         "--force_rebuild",
         action="store_true",
         help="whether to rebuild similarity metrics",
     )
     parser.add_argument(
+        "-k",
         "--kickstart",
         action="store_true",
         help="dont wait for user input, just start playing",
     )
     parser.add_argument(
         "--tempo",
-        default=None,
+        type=int,
         help="tempo to record and play at, in bpm",
     )
     args = parser.parse_args()
@@ -93,14 +95,17 @@ if __name__=="__main__":
     if not os.path.exists(record_dir):
         console.log(f"{p} creating new recordings folder: '{record_dir}'")
         os.mkdir(record_dir)
-    if not os.path.exists("data/playlist"):
+    if os.path.exists("data/playlist"):
+        for file in os.listdir("data/playlist"):
+            os.remove(os.path.join(args.output_dir, file))
+    else:
         console.log(f"{p} creating new playlist folder: 'data/playlist'")
         os.mkdir("data/playlist")
     console.log(f"{p} filesystem is set up")
 
     if args.tempo:
-        # playback_tempo = check_tempo(int(args.tempo))
-        playback_tempo = int(args.tempo)
+        # playback_tempo = check_tempo(args.tempo)
+        playback_tempo = args.tempo
 
     # run!
     overseer = Overseer(params, args.data_dir, os.path.join(args.output_dir, output_dir), record_dir, playback_tempo, args.force_rebuild, args.kickstart)
