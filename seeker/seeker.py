@@ -11,7 +11,7 @@ from utils.midi import all_metrics
 
 
 class Seeker():
-    p = '[blue]seek[/blue]  : '
+    p = '[yellow]seek[/yellow]  :'
     table: pd.DataFrame | None
     metrics = {}
   
@@ -27,14 +27,14 @@ class Seeker():
         dict_file = os.path.join(self.output_dir, f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}_metrics.json")
 
         if os.path.exists(dict_file) and not self.force_rebuild:
-            console.log(f"{self.p}found existing metrics file '{dict_file}'")
+            console.log(f"{self.p} found existing metrics file '{dict_file}'")
             with open(dict_file, 'r') as f:
                 self.metrics = json.load(f)
-                console.log(f"{self.p}loaded metrics for {len(list(self.metrics.keys()))} files")
+                console.log(f"{self.p} loaded metrics for {len(list(self.metrics.keys()))} files")
         else:
-            console.log(f"{self.p}calculating metrics from '{self.input_dir}'")
-            for file in track(os.listdir(self.input_dir), description=f"{self.p}calculating metrics"):
-                # console.log(f"{self.p}calculating metrics for '{file}'")
+            console.log(f"{self.p} calculating metrics from '{self.input_dir}'")
+            for file in track(os.listdir(self.input_dir), description=f"{self.p} calculating metrics"):
+                # console.log(f"{self.p} calculating metrics for '{file}'")
                 if file.endswith('.mid') or file.endswith('.midi'):
                     file_path = os.path.join(self.input_dir, file)
                     midi = pretty_midi.PrettyMIDI(file_path)
@@ -44,15 +44,15 @@ class Seeker():
                     "metrics": metrics,
                     "played": 0,
                     }
-            console.log(f"{self.p}calculated metrics for {len(list(self.metrics.keys()))} files")
+            console.log(f"{self.p} calculated metrics for {len(list(self.metrics.keys()))} files")
 
             with open(dict_file, 'w') as f:
                 json.dump(self.metrics, f)
 
             if os.path.isfile(dict_file):
-                console.log(f"{self.p}succesfully saved metrics file '{dict_file}'")
+                console.log(f"{self.p} succesfully saved metrics file '{dict_file}'")
             else:
-                console.log(f"{self.p}error saving metrics file '{dict_file}'")
+                console.log(f"{self.p} error saving metrics file '{dict_file}'")
                 raise FileNotFoundError
             
         self.reset_plays()
@@ -64,7 +64,7 @@ class Seeker():
         self.table = self.load_similarities(parquet)
 
         if self.table is not None:
-            console.log(f"{self.p}loaded existing similarity file from '{parquet}'")
+            console.log(f"{self.p} loaded existing similarity file from '{parquet}'")
         else:
             vectors = [
                 {'name': filename, 'metric': details['metrics']['pitch_histogram']}
@@ -74,13 +74,13 @@ class Seeker():
             names = [v['name'] for v in vectors]
             vecs = [v['metric'] for v in vectors]
 
-            console.log(f"{self.p}building similarity table for {len(vecs)} vectors")
+            console.log(f"{self.p} building similarity table for {len(vecs)} vectors")
 
             self.table = pd.DataFrame(index=names, columns=names, dtype="float64")
 
             # compute cosine similarity for each pair of vectors
             with Progress() as progress:
-                sims_task = progress.add_task(f"{self.p}calculating sims", total=len(vecs) ** 2)
+                sims_task = progress.add_task(f"{self.p} calculating sims", total=len(vecs) ** 2)
                 for i in range(len(vecs)):
                     for j in range(len(vecs)):
                         if i != j:
@@ -90,14 +90,14 @@ class Seeker():
                         progress.update(sims_task, advance=1)
 
             
-            console.log(f"{self.p}Generated a similarity table of shape {self.table.shape}")
+            console.log(f"{self.p} Generated a similarity table of shape {self.table.shape}")
 
             self.table.to_parquet(parquet, index=False)
 
             if os.path.isfile(parquet):
-                console.log(f"{self.p}succesfully saved similarities file '{parquet}'")
+                console.log(f"{self.p} succesfully saved similarities file '{parquet}'")
             else:
-                console.log(f"{self.p}error saving similarities file '{parquet}'")
+                console.log(f"{self.p} error saving similarities file '{parquet}'")
                 raise FileNotFoundError
 
 
@@ -105,7 +105,7 @@ class Seeker():
         """finds the filename and similarity of the next most similar unplayed file in the similarity table
             NOTE: will go into an infinite loop once all files are played!
         """
-        console.log(f"{self.p}finding most similar file to '{filename}'")
+        # console.log(f"{self.p} finding most similar file to\n\t'{filename}'")
         n = 3
         similarity = 1
         next_file_played = 1
@@ -113,20 +113,20 @@ class Seeker():
         self.metrics[filename]["played"] = 1
 
         while next_file_played:
-            nl = self.table[filename].nlargest(n)
-            next_filename = self.table.columns[nl.index[-1]]
+            nl = self.table[filename].nlargest(n) # type: ignore
+            next_filename = self.table.columns[nl.index[-1]] # type: ignore
             similarity = nl.iloc[-1]
             next_file_played = self.metrics[next_filename]["played"]
             n += 1
 
-        console.log(f"{self.p}found '{next_filename}' with similarity {similarity:03f}")
+        console.log(f"{self.p} found '{next_filename}' with similarity {similarity:03f}")
 
         return next_filename, similarity
         
 
     def midi_to_ph(self, midi_file: str):
         """"""
-        console.log(f"{self.p}calculating pitch histogram for '{midi_file}'")
+        console.log(f"{self.p} calculating pitch histogram for '{midi_file}'")
 
         midi = pretty_midi.PrettyMIDI(midi_file)
 
@@ -135,7 +135,7 @@ class Seeker():
     
     def find_most_similar_vector(self, target_vector):
         """"""
-        console.log(f"{self.p}finding most similar vector to {target_vector}")
+        console.log(f"{self.p} finding most similar vector to {target_vector}")
         most_similar_vector = None
         highest_similarity = -1  # since cosine similarity ranges from -1 to 1
         vector_array = [
@@ -150,7 +150,7 @@ class Seeker():
                 highest_similarity = similarity
                 most_similar_vector = name
 
-        console.log(f"{self.p}found '{most_similar_vector}' with similarity {similarity:03f}")
+        console.log(f"{self.p} found '{most_similar_vector}' with similarity {similarity:03f}")
 
         return most_similar_vector, highest_similarity
     
