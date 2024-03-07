@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from mido import MidiFile
 
+from utils import console
+
 from typing import Dict
 
 DARK = True
@@ -113,11 +115,11 @@ def average_note_length(midi: pretty_midi.PrettyMIDI) -> float:
     Calculate the average length of notes in a MIDI file.
 
     Parameters:
-    midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
+        midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
 
     Returns:
-    float: The average length of notes in the MIDI file in seconds. If the file
-    has no notes, it returns 0.
+        float: The average length of notes in the MIDI file in seconds. If the file
+        has no notes, it returns 0.
     """
     note_lengths = []
 
@@ -138,10 +140,10 @@ def total_number_of_notes(midi: pretty_midi.PrettyMIDI) -> int:
     Calculate the total number of notes in a MIDI file.
 
     Parameters:
-    midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
+        midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
 
     Returns:
-    int: The total number of notes in the MIDI file.
+        int: The total number of notes in the MIDI file.
     """
 
     return sum(len(instrument.notes) for instrument in midi.instruments)
@@ -154,11 +156,11 @@ def total_velocity(
     Calculate the total velocity of all notes for each time bin in a MIDI file.
 
     Parameters:
-    midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
-    bin_length (float): The length of time each bin should occupy. (default 1s)
+        midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
+        bin_length (float): The length of time each bin should occupy. (default 1s)
 
     Returns:
-    list: A list whose values are the total velocity and number of notes in that bin.
+        list: A list whose values are the total velocity and number of notes in that bin.
     """
     if bin_length == None:
         bin_length = midi.get_end_time()
@@ -182,11 +184,11 @@ def simultaneous_notes(midi: pretty_midi.PrettyMIDI, bin_length=None) -> list[in
     Calculate the number of simultaneous notes being played each second in a MIDI file.
 
     Parameters:
-    midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
-    bin_length (float): The length of time each bin should occupy. (default 1s)
+        midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
+        bin_length (float): The length of time each bin should occupy. (default 1s)
 
     Returns:
-    list: A list whose values are the number of simultaneous notes being played in that second.
+        list: A list whose values are the number of simultaneous notes being played in that second.
     """
     if bin_length == None:
         bin_length = midi.get_end_time()
@@ -214,11 +216,11 @@ def energy(
     Calculate the number of simultaneous notes being played each second in a MIDI file.
 
     Parameters:
-    midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
-    bin_length (float): The length of time each bin should occupy. (default is clip length)
+        midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
+        bin_length (float): The length of time each bin should occupy. (default is clip length)
 
     Returns:
-    list: A list whose values are the number of simultaneous notes being played in that second.
+        list: A list whose values are the number of simultaneous notes being played in that second.
     """
     if bin_length == None:
         bin_length = midi.get_end_time()
@@ -249,12 +251,12 @@ def quantize_midi(filename, sections_per_beat):
     """
     Quantizes a MIDI file into sections_per_beat sections per beat.
 
-    Args:
-    midi_file_path (str): Path to the MIDI file.
-    sections_per_beat (int): Number of quantization sections per beat.
+    Parameters:
+        midi_file_path (str): Path to the MIDI file.
+        sections_per_beat (int): Number of quantization sections per beat.
 
     Returns:
-    pretty_midi.PrettyMIDI: A quantized PrettyMIDI object.
+        pretty_midi.PrettyMIDI: A quantized PrettyMIDI object.
     """
     midi_data = pretty_midi.PrettyMIDI(filename)
     bpm = int(filename.split('-')[1])
@@ -273,15 +275,15 @@ def trim_piano_roll(piano_roll, min=None, max=None):
     Trims the piano roll by removing rows above the highest note and below the
     lowest note.
 
-    Args:
-    piano_roll (np.array): A 2D NumPy array representing the piano roll.
-    min (int): The note to remove everything below. If none is provided, the 
-    lowest note in the roll will be used
-    max (int): The note to remove everything above. If none is provided, the 
-    highest note in the roll will be used
+    Parameters:
+        piano_roll (np.array): A 2D NumPy array representing the piano roll.
+        min (int): The note to remove everything below. If none is provided, the 
+        lowest note in the roll will be used
+        max (int): The note to remove everything above. If none is provided, the 
+        highest note in the roll will be used
 
     Returns:
-    np.array: The trimmed piano roll.
+        np.array: The trimmed piano roll.
     """
     non_zero_rows = np.where(np.any(piano_roll > 0, axis=1))[0]
 
@@ -308,9 +310,9 @@ def lstrip_midi(mid: pretty_midi.PrettyMIDI):
   return mid
 
 
-def stretch_midi_file(midi: MidiFile, new_duration_seconds) -> MidiFile:
+def stretch_midi_file(midi: MidiFile, new_duration_seconds: float, caller: str = "[cyan]utils[/cyan] : ") -> MidiFile:
     """"""
-    print(f"rescaling file from {midi.length:.02f}s to {new_duration_seconds:.02f}s ({new_duration_seconds / midi.length:.03f})")
+    console.log(f"{caller} rescaling file from {midi.length:.02f} s to {new_duration_seconds:.02f} s ({new_duration_seconds / midi.length:.03f})")
     # Calculate stretch factor based on the original duration
     stretch_factor = new_duration_seconds / midi.length
     
