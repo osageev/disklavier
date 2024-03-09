@@ -14,6 +14,7 @@ from typing import Dict, Tuple
 
 DARK = True
 
+
 #################################  plotting  ##################################
 def draw_midi(midi_file: str, labels: bool = False):
     if DARK:
@@ -41,24 +42,28 @@ def draw_midi(midi_file: str, labels: bool = False):
     return plt.gcf()
 
 
-def draw_histogram(histogram, title='Pitch Histogram'):
+def draw_histogram(histogram, title="Pitch Histogram"):
     if DARK:
         plt.style.use("dark_background")
     plt.bar(range(12), histogram)
-    plt.ylabel('Frequency')
+    plt.ylabel("Frequency")
     plt.title(title)
-    plt.xticks(range(12), ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'])
+    plt.xticks(
+        range(12), ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    )
     plt.show()
 
 
-def draw_piano_roll(piano_roll, fs=100, title='Piano Roll'):
+def draw_piano_roll(piano_roll, fs=100, title="Piano Roll"):
     if DARK:
         plt.style.use("dark_background")
     plt.figure(figsize=(12, 8))
-    plt.imshow(piano_roll, aspect='auto', origin='lower', cmap='magma', interpolation='nearest')
+    plt.imshow(
+        piano_roll, aspect="auto", origin="lower", cmap="magma", interpolation="nearest"
+    )
     plt.title(title)
-    plt.xlabel('Time (seconds)')
-    plt.ylabel('MIDI Note Number')
+    plt.xlabel("Time (seconds)")
+    plt.ylabel("MIDI Note Number")
     plt.colorbar()
 
     tick_spacing = 1
@@ -72,21 +77,25 @@ def plot_piano_roll_and_pitch_histogram(path: str):
     midi_data = PrettyMIDI(path)
     piano_roll = midi_data.get_piano_roll(fs=100)
     pitches = midi_data.get_pitch_class_histogram()
-    
+
     plt.figure(figsize=(12, 6))
-    
+
     plt.subplot(1, 2, 1)
-    plt.imshow(piano_roll, aspect='auto', origin='lower', cmap='gray_r')
-    plt.title('Piano Roll')
-    plt.xlabel('Time')
-    plt.ylabel('MIDI Note Number')
-    
+    plt.imshow(piano_roll, aspect="auto", origin="lower", cmap="gray_r")
+    plt.title("Piano Roll")
+    plt.xlabel("Time")
+    plt.ylabel("MIDI Note Number")
+
     plt.subplot(1, 2, 2)
-    plt.bar(np.arange(12), pitches, tick_label=['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'])
-    plt.title('Pitch Histogram')
-    plt.xlabel('Pitch Class')
-    plt.ylabel('Magnitude')
-    
+    plt.bar(
+        np.arange(12),
+        pitches,
+        tick_label=["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
+    )
+    plt.title("Pitch Histogram")
+    plt.xlabel("Pitch Class")
+    plt.ylabel("Magnitude")
+
     plt.tight_layout()
     plt.show()
 
@@ -95,10 +104,15 @@ def plot_piano_roll_and_pitch_histogram(path: str):
 ################################  all in one  #################################
 # TODO add manually-calculated "valid tempo range"
 
+
 def all_metrics(midi: PrettyMIDI, config) -> Dict:
     num_bins = int(math.ceil(midi.get_end_time() / config.bin_length))
     metrics = {
-        "pitch_histogram": list(midi.get_pitch_class_histogram(use_duration=config.ph_weight_dur, use_velocity=config.ph_weight_vel)),
+        "pitch_histogram": list(
+            midi.get_pitch_class_histogram(
+                use_duration=config.ph_weight_dur, use_velocity=config.ph_weight_vel
+            )
+        ),
         # "tempo": midi.estimate_tempo(),
         "file_len": midi.get_end_time(),
         "note_count": sum(len(instrument.notes) for instrument in midi.instruments),
@@ -175,9 +189,7 @@ def total_number_of_notes(midi: PrettyMIDI) -> int:
     return sum(len(instrument.notes) for instrument in midi.instruments)
 
 
-def total_velocity(
-    midi: PrettyMIDI, bin_length=None
-) -> list[dict[str, int]]:
+def total_velocity(midi: PrettyMIDI, bin_length=None) -> list[dict[str, int]]:
     """
     Calculate the total velocity of all notes for each time bin in a MIDI file.
 
@@ -285,7 +297,7 @@ def quantize_midi(filename, sections_per_beat) -> PrettyMIDI:
         pretty_midi.PrettyMIDI: A quantized PrettyMIDI object.
     """
     midi_data = PrettyMIDI(filename)
-    bpm = int(filename.split('-')[1])
+    bpm = int(filename.split("-")[1])
     section_duration = 60.0 / bpm / sections_per_beat
 
     for instrument in midi_data.instruments:
@@ -303,9 +315,9 @@ def trim_piano_roll(piano_roll, min=None, max=None):
 
     Parameters:
         piano_roll (np.array): A 2D NumPy array representing the piano roll.
-        min (int): The note to remove everything below. If none is provided, the 
+        min (int): The note to remove everything below. If none is provided, the
         lowest note in the roll will be used
-        max (int): The note to remove everything above. If none is provided, the 
+        max (int): The note to remove everything above. If none is provided, the
         highest note in the roll will be used
 
     Returns:
@@ -319,34 +331,38 @@ def trim_piano_roll(piano_roll, min=None, max=None):
     lowest_note = non_zero_rows.min() if min is None else min
     highest_note = non_zero_rows.max() if max is None else max
 
-    trimmed_piano_roll = piano_roll[lowest_note:highest_note+1, :]
+    trimmed_piano_roll = piano_roll[lowest_note : highest_note + 1, :]
 
     return trimmed_piano_roll
 
 
 def lstrip_midi(mid: PrettyMIDI):
-  """Modify MIDI object so that the first note is at 0.0s."""
-  for instrument in mid.instruments:
-    if not instrument.notes:
-      continue
-    first_note_start = instrument.notes[0].start
-    for note in instrument.notes:
-      note.start -= first_note_start
-      note.end -= first_note_start
-  return mid
+    """Modify MIDI object so that the first note is at 0.0s."""
+    for instrument in mid.instruments:
+        if not instrument.notes:
+            continue
+        first_note_start = instrument.notes[0].start
+        for note in instrument.notes:
+            note.start -= first_note_start
+            note.end -= first_note_start
+    return mid
 
 
-def stretch_midi_file(midi: MidiFile, new_duration_seconds: float, caller: str = "[cyan]utils[/cyan] : ") -> MidiFile:
+def stretch_midi_file(
+    midi: MidiFile, new_duration_seconds: float, caller: str = "[cyan]utils[/cyan] : "
+) -> MidiFile:
     """"""
-    console.log(f"{caller} rescaling file from {midi.length:.02f} s to {new_duration_seconds:.02f} s ({new_duration_seconds / midi.length:.03f})")
+    console.log(
+        f"{caller} rescaling file from {midi.length:.02f} s to {new_duration_seconds:.02f} s ({new_duration_seconds / midi.length:.03f})"
+    )
     # Calculate stretch factor based on the original duration
     stretch_factor = new_duration_seconds / midi.length
-    
+
     # Scale the time attribute of each message by the stretch factor
     for track in midi.tracks:
         for msg in track:
             msg.time = int(msg.time * stretch_factor)
-    
+
     return midi
 
 
@@ -377,7 +393,7 @@ def get_tempo(midi_file_path) -> float:
 
 
 def get_note_min_max(input_file_path) -> Tuple[int, int]:
-    """"""
+    """returns the values of the highest and lowest notes in a midi file"""
     mid = MidiFile(input_file_path)
 
     lowest_note = 127
@@ -385,24 +401,25 @@ def get_note_min_max(input_file_path) -> Tuple[int, int]:
 
     for track in mid.tracks:
         for msg in track:
-            if not msg.is_meta and msg.type in ['note_on', 'note_off']:
+            if not msg.is_meta and msg.type in ["note_on", "note_off"]:
                 # Update lowest and highest note if this is a note_on message
                 if msg.velocity > 0:  # Considering note_on messages only
                     lowest_note = min(lowest_note, msg.note)
                     highest_note = max(highest_note, msg.note)
-    
+
     return (lowest_note, highest_note)
 
 
 def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) -> None:
     """
     Transposes all the notes in a MIDI file by a specified number of semitones.
-    
+
     Args:
     - input_file_path: Path to the input MIDI file.
     - output_file_path: Path where the transposed MIDI file will be saved.
     - semitones: Number of semitones to transpose the notes. Positive for up, negative for down.
     """
+
     midi = PrettyMIDI(input_file_path)
     print(f"shifting notes by {semitones} semitones")
     for instrument in midi.instruments:
@@ -418,7 +435,7 @@ def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1):
     chatgpt
     """
     lowest_note, highest_note = get_note_min_max(midi_path)
-    max_up = 108 - highest_note # TODO double-check this IRL
+    max_up = 108 - highest_note  # TODO double-check this IRL
     max_down = lowest_note
 
     # zipper up & down
@@ -427,16 +444,20 @@ def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1):
     for i in range(num_iterations):
         up_filename = f"{Path(midi_path).stem}_u{up:02d}.mid"
         down_filename = f"{Path(midi_path).stem}_d{abs(down):02d}.mid"
-        
+
         if i % 2 == 0:
-            if up > max_up:  # If exceeding max_up, adjust by switching to down immediately
+            if (
+                up > max_up
+            ):  # If exceeding max_up, adjust by switching to down immediately
                 transpose_midi(midi_path, os.path.join(output_dir, down_filename), down)
                 down -= 1
             else:
                 transpose_midi(midi_path, os.path.join(output_dir, up_filename), up)
                 up += 1
         else:
-            if abs(down) > max_down:  # If exceeding max_down, adjust by switching to up immediately
+            if (
+                abs(down) > max_down
+            ):  # If exceeding max_down, adjust by switching to up immediately
                 transpose_midi(midi_path, os.path.join(output_dir, up_filename), up)
                 up += 1
             else:

@@ -1,5 +1,6 @@
 import os
 import time
+
 # import logging
 # import logging.config
 from datetime import datetime
@@ -12,7 +13,8 @@ from overseer.overseer import Overseer
 from utils import console, tick
 
 
-p = '[white]main[/white]  :'
+p = "[white]main[/white]  :"
+
 
 def check_tempo(tempo) -> int:
     console.log(f"{p} running at {tempo}bpm")
@@ -31,18 +33,19 @@ def check_tempo(tempo) -> int:
         return int(tempo)
     else:
         while True:
-            new_tempo = IntPrompt.ask(f"{p} enter a new tempo between [b]20[/b] and [b]200[/b] [60]", default=60)
+            new_tempo = IntPrompt.ask(
+                f"{p} enter a new tempo between [b]20[/b] and [b]200[/b] [60]",
+                default=60,
+            )
             if new_tempo >= 20 and new_tempo <= 200:
                 check_tempo(new_tempo)
             console.log(f"{p} [prompt.invalid]tempo must be between 20 and 200")
-        
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     # load args and params
     parser = ArgumentParser(description="Argparser description")
-    parser.add_argument(
-        "--data_dir", default=None, help="location of MIDI files"
-    )
+    parser.add_argument("--data_dir", default=None, help="location of MIDI files")
     parser.add_argument(
         "--param_file", default=None, help="path to parameter file, in .yaml"
     )
@@ -80,18 +83,18 @@ if __name__=="__main__":
     # logger = logging.getLogger('main')
 
     # filesystem setup
-    output_dir = "general" # one output dir only
+    output_dir = "general"  # one output dir only
     # output_dir = f"{datetime.now().strftime('%y-%m-%d')}"   # daily output dirs
     # output_dir = f"{datetime.now().strftime('%y-%m-%d_%H%M%S')}"  # unique output dirs
     log_dir = os.path.join(args.output_dir, output_dir, "logs")
     record_dir = os.path.join(args.output_dir, output_dir, "records")
-    
+
     if not os.path.exists(args.output_dir):
         console.log(f"{p} creating new outputs folder: '{args.output_dir}'")
-        os.mkdir(args.output_dir)   
+        os.mkdir(args.output_dir)
     if not os.path.exists(os.path.join(args.output_dir, output_dir)):
         console.log(f"{p} creating new outputs folder: '{output_dir}'")
-        os.mkdir(os.path.join(args.output_dir, output_dir))   
+        os.mkdir(os.path.join(args.output_dir, output_dir))
     if not os.path.exists(log_dir):
         console.log(f"{p} creating new logging folder: '{log_dir}'")
         os.mkdir(log_dir)
@@ -111,8 +114,18 @@ if __name__=="__main__":
         playback_tempo = args.tempo
 
     # run!
-    overseer = Overseer(params, args.data_dir, os.path.join(args.output_dir, output_dir), record_dir, playback_tempo, args.force_rebuild, args.kickstart)
+    overseer = Overseer(
+        params,
+        args.data_dir,
+        os.path.join(args.output_dir, output_dir),
+        record_dir,
+        playback_tempo,
+        args.force_rebuild,
+        args.kickstart,
+    )
     overseer.start()
 
     console.log(f"{p} [green bold]session complete, saving log")
-    console.save_text(os.path.join(log_dir, f"{datetime.now().strftime('%y-%m-%d_%H%M%S')}.log"))
+    console.save_text(
+        os.path.join(log_dir, f"{datetime.now().strftime('%y-%m-%d_%H%M%S')}.log")
+    )

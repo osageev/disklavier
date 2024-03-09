@@ -3,7 +3,6 @@ import random
 from pathlib import Path
 from datetime import datetime
 from argparse import ArgumentParser
-
 import mido
 from mido import MidiFile, MidiTrack, Message, MetaMessage
 import pretty_midi
@@ -18,20 +17,19 @@ from rich.pretty import pprint
 
 
 def segment_midi(input_file_path: str, params) -> int:
-    """do the segmentation
-    """
+    """do the segmentation"""
     target_tempo = int(os.path.basename(input_file_path).split("-")[1])
     set_tempo(input_file_path, target_tempo)
 
     # remove "-t" from filename
     filename = Path(input_file_path).stem
-    filename_components = filename.split('-')
+    filename_components = filename.split("-")
     filename = f"{filename_components[0]}-{int(np.round(float(filename_components[1]))):03d}-{filename_components[2]}"
 
     # figure out timings
     midi_pm = pretty_midi.PrettyMIDI(input_file_path)
     total_length = midi_pm.get_end_time()
-    segment_length = 60 * params.n__num_beats / target_tempo # in seconds
+    segment_length = 60 * params.n__num_beats / target_tempo  # in seconds
     num_segments_float = total_length / segment_length
     num_segments = int(np.round(num_segments_float))
     init_bpm = get_tempo(input_file_path)
@@ -47,7 +45,10 @@ def segment_midi(input_file_path: str, params) -> int:
         end = start + segment_length
         # print(f"\tsplitting from {start:07.03f} s to {end:07.03f} s")
         segment_midi = pretty_midi.PrettyMIDI(initial_tempo=target_tempo)
-        instrument = pretty_midi.Instrument(program=midi_pm.instruments[0].program, name=f"{filename}_{int(start):04d}-{int(end):04d}")
+        instrument = pretty_midi.Instrument(
+            program=midi_pm.instruments[0].program,
+            name=f"{filename}_{int(start):04d}-{int(end):04d}",
+        )
 
         # add notes from the original MIDI that fall within the current segment
         for note in midi_pm.instruments[0].notes:
@@ -56,20 +57,22 @@ def segment_midi(input_file_path: str, params) -> int:
                     velocity=note.velocity,
                     pitch=note.pitch,
                     start=note.start - start,
-                    end=min(note.end, end) - start
+                    end=min(note.end, end) - start,
                 )
                 instrument.notes.append(new_note)
 
         # write out
         segment_midi.instruments.append(instrument)
-        segment_filename = os.path.join(params.output_dir, f"{filename}_{int(start):04d}-{int(end):04d}.mid")
+        segment_filename = os.path.join(
+            params.output_dir, f"{filename}_{int(start):04d}-{int(end):04d}.mid"
+        )
         segment_midi.write(segment_filename)
 
         if params.strip_tempo:
             midi_md = MidiFile(segment_filename)
             for track in midi_md.tracks:
                 for message in track:
-                    if message.type == 'set_tempo':
+                    if message.type == "set_tempo":
                         track.remove(message)
             midi_md.save(segment_filename)
         else:
@@ -81,12 +84,10 @@ def segment_midi(input_file_path: str, params) -> int:
     return num_segments
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     # load args
     parser = ArgumentParser(description="Argparser description")
-    parser.add_argument(
-        "--data_dir", default=None, help="location of MIDI files"
-    )
+    parser.add_argument("--data_dir", default=None, help="location of MIDI files")
     parser.add_argument(
         "--output_dir", default=None, help="location to write segments to"
     )
@@ -97,11 +98,10 @@ if __name__=="__main__":
         help="file to write segment metrics to (must be JSON)",
     )
     parser.add_argument(
-        "-n"
-        "--num_beats", 
+        "-n" "--num_beats",
         type=int,
         default=8,
-        help="number of beats each segment should have"
+        help="number of beats each segment should have",
     )
     parser.add_argument(
         "-t",
@@ -142,11 +142,11 @@ if __name__=="__main__":
     if args.limit is None:
         dataset = os.listdir(args.data_dir)
     else:
-        dataset = os.listdir(args.data_dir)[:args.limit]
+        dataset = os.listdir(args.data_dir)[: args.limit]
 
     # segment files
     total_segs = 0
     for filename in track(dataset, description="generating segments"):
-        if filename.endswith('.mid') or filename.endswith('.midi'):
+        if filename.endswith(".mid") or filename.endswith(".midi"):
             total_segs += segment_midi(os.path.join(args.data_dir, filename), args)
     print(f"[green]segmentation complete, {total_segs} files generated")
