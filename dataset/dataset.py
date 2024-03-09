@@ -8,6 +8,8 @@ import mido
 from mido import MidiFile, MidiTrack, Message, MetaMessage
 import pretty_midi
 
+from utils.midi import set_tempo, get_tempo, semitone_shift
+
 import numpy as np
 
 from rich.progress import track
@@ -15,94 +17,31 @@ from rich import print
 from rich.pretty import pprint
 
 
-def set_tempo(input_file_path, target_tempo):
-    mid = MidiFile(input_file_path)
-    tempo = mido.bpm2tempo(target_tempo)
-    mid.tracks[0].insert(0, MetaMessage("set_tempo", tempo=tempo, time=0))
-    mid.save(input_file_path)
-
-
-def get_tempo_from_midi(midi_file_path):
-    """"""
-    midi_file = MidiFile(midi_file_path)
-
-    # Default MIDI tempo is 120 BPM, which equals 500000 microseconds per beat
-    tempo = 500000  # Default tempo
-
-    for track in midi_file.tracks:
-        for msg in track:
-            if msg.type == "set_tempo":
-                tempo = msg.tempo
-                break
-        if tempo != 500000:
-            break
-
-    return mido.tempo2bpm(tempo)
-
-
-def vertical_shift(array, name: str, num_iterations: int = 1):
-    """vertically shift an image
-    NOTE: in some sense, up and down is flipped.
-    """
-    shifted_images = []
-
-    def find_non_zero_bounds(arr):
-        """Find the first and last row index with a non-zero element"""
-        rows_with_non_zero = np.where(arr.any(axis=1))[0]
-        return rows_with_non_zero[0], rows_with_non_zero[-1]
-
-    def shift_array(arr, up=0, down=0):
-        """Shift array vertically within bounds"""
-        if up > 0:
-            arr = np.roll(arr, -up, axis=0)
-            arr[-up:] = 0
-        elif down > 0:
-            arr = np.roll(arr, down, axis=0)
-            arr[:down] = 0
-        return arr
-
-    highest, lowest = find_non_zero_bounds(array)
-    maximum_up = highest
-    maximum_down = array.shape[0] - lowest - 1
-
-    for _ in range(num_iterations):
-        # Shift up and then down, decreasing the shift amount in each iteration
-        for i in range(maximum_up, 0, -1):
-            new_key = f"{Path(name).stem}_u{i:02d}"
-            shifted_images.append((new_key, np.copy(shift_array(array, up=i))))
-        for i in range(maximum_down, 0, -1):
-            new_key = f"{Path(name).stem}_d{i:02d}"
-            shifted_images.append((new_key, np.copy(shift_array(array, down=i))))
-
-    random.shuffle(shifted_images)
-
-    return shifted_images[:num_iterations]
-
-
 def segment_midi(input_file_path: str, params) -> int:
-    """"""
+    """do the segmentation
+    """
     target_tempo = int(os.path.basename(input_file_path).split("-")[1])
-    if not params.strip_tempo:
-        set_tempo(input_file_path, target_tempo)
+    set_tempo(input_file_path, target_tempo)
 
     # remove "-t" from filename
     filename = Path(input_file_path).stem
     filename_components = filename.split('-')
     filename = f"{filename_components[0]}-{int(np.round(float(filename_components[1]))):03d}-{filename_components[2]}"
 
+    # figure out timings
     midi_pm = pretty_midi.PrettyMIDI(input_file_path)
     total_length = midi_pm.get_end_time()
-    segment_length = 60 * params.n__num_beats / target_tempo
+    segment_length = 60 * params.n__num_beats / target_tempo # in seconds
     num_segments_float = total_length / segment_length
     num_segments = int(np.round(num_segments_float))
+    init_bpm = get_tempo(input_file_path)
 
-    init_bpm = get_tempo_from_midi(input_file_path)
+    pprint([total_length, segment_length, num_segments_float, num_segments, init_bpm])
+
     print(
-        f"breaking '{filename}' ({total_length:08.03f} s) into {num_segments:03d} segments of {segment_length:.03f} s at {int(np.round(init_bpm)):03d} BPM"
+        f"breaking '{filename}' ({total_length:.03f} s at {target_tempo} bpm) into {num_segments:03d} segments of {segment_length:.03f} s"
     )
 
-    # for start in np.arange(0, int(total_length), segment_length)[:params.limit]:
-    #     end = start + segment_length
     for n in range(num_segments):
         start = n * segment_length
         end = start + segment_length
@@ -135,6 +74,9 @@ def segment_midi(input_file_path: str, params) -> int:
             midi_md.save(segment_filename)
         else:
             set_tempo(segment_filename, target_tempo)
+
+        if params.do_shift:
+            semitone_shift(segment_filename, params.output_dir, 12)
 
     return num_segments
 

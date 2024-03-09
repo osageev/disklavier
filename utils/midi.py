@@ -1,15 +1,16 @@
 import os
 import math
-import pretty_midi
+from pretty_midi import PrettyMIDI
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from mido import MidiFile
+import mido
+from mido import MidiFile, MidiTrack, Message, MetaMessage
 
 from utils import console
 
-from typing import Dict
+from typing import Dict, Tuple
 
 DARK = True
 
@@ -18,7 +19,7 @@ def draw_midi(midi_file: str, labels: bool = False):
     if DARK:
         plt.style.use("dark_background")
 
-    midi = pretty_midi.PrettyMIDI(midi_file)
+    midi = PrettyMIDI(midi_file)
 
     _, ax = plt.subplots(figsize=(12, 4))
 
@@ -39,6 +40,7 @@ def draw_midi(midi_file: str, labels: bool = False):
     plt.xlim(0, np.ceil(midi.instruments[0].notes[-1].end))
     return plt.gcf()
 
+
 def draw_histogram(histogram, title='Pitch Histogram'):
     if DARK:
         plt.style.use("dark_background")
@@ -47,6 +49,7 @@ def draw_histogram(histogram, title='Pitch Histogram'):
     plt.title(title)
     plt.xticks(range(12), ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'])
     plt.show()
+
 
 def draw_piano_roll(piano_roll, fs=100, title='Piano Roll'):
     if DARK:
@@ -64,11 +67,35 @@ def draw_piano_roll(piano_roll, fs=100, title='Piano Roll'):
 
     plt.show()
 
+
+def plot_piano_roll_and_pitch_histogram(path: str):
+    midi_data = PrettyMIDI(path)
+    piano_roll = midi_data.get_piano_roll(fs=100)
+    pitches = midi_data.get_pitch_class_histogram()
+    
+    plt.figure(figsize=(12, 6))
+    
+    plt.subplot(1, 2, 1)
+    plt.imshow(piano_roll, aspect='auto', origin='lower', cmap='gray_r')
+    plt.title('Piano Roll')
+    plt.xlabel('Time')
+    plt.ylabel('MIDI Note Number')
+    
+    plt.subplot(1, 2, 2)
+    plt.bar(np.arange(12), pitches, tick_label=['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'])
+    plt.title('Pitch Histogram')
+    plt.xlabel('Pitch Class')
+    plt.ylabel('Magnitude')
+    
+    plt.tight_layout()
+    plt.show()
+
+
 #################################  metrics  ###################################
 ################################  all in one  #################################
 # TODO add manually-calculated "valid tempo range"
 
-def all_metrics(midi: pretty_midi.PrettyMIDI, config) -> Dict:
+def all_metrics(midi: PrettyMIDI, config) -> Dict:
     num_bins = int(math.ceil(midi.get_end_time() / config.bin_length))
     metrics = {
         "pitch_histogram": list(midi.get_pitch_class_histogram(use_duration=config.ph_weight_dur, use_velocity=config.ph_weight_vel)),
@@ -84,7 +111,6 @@ def all_metrics(midi: pretty_midi.PrettyMIDI, config) -> Dict:
     # metrics that are calculated from notes
     for instrument in midi.instruments:
         for note in instrument.notes:
-            note_name = pretty_midi.note_number_to_name(note.pitch)[:-1]
             start_bin = int(note.start // config["bin_length"])
             end_bin = int(note.end // config["bin_length"])
             metrics["lengths"].append(note.end - note.start)
@@ -110,7 +136,7 @@ def all_metrics(midi: pretty_midi.PrettyMIDI, config) -> Dict:
 #############################  individual metrics  ############################
 
 
-def average_note_length(midi: pretty_midi.PrettyMIDI) -> float:
+def average_note_length(midi: PrettyMIDI) -> float:
     """
     Calculate the average length of notes in a MIDI file.
 
@@ -135,7 +161,7 @@ def average_note_length(midi: pretty_midi.PrettyMIDI) -> float:
     return average_length
 
 
-def total_number_of_notes(midi: pretty_midi.PrettyMIDI) -> int:
+def total_number_of_notes(midi: PrettyMIDI) -> int:
     """
     Calculate the total number of notes in a MIDI file.
 
@@ -150,7 +176,7 @@ def total_number_of_notes(midi: pretty_midi.PrettyMIDI) -> int:
 
 
 def total_velocity(
-    midi: pretty_midi.PrettyMIDI, bin_length=None
+    midi: PrettyMIDI, bin_length=None
 ) -> list[dict[str, int]]:
     """
     Calculate the total velocity of all notes for each time bin in a MIDI file.
@@ -179,7 +205,7 @@ def total_velocity(
     return bin_velocities
 
 
-def simultaneous_notes(midi: pretty_midi.PrettyMIDI, bin_length=None) -> list[int]:
+def simultaneous_notes(midi: PrettyMIDI, bin_length=None) -> list[int]:
     """
     Calculate the number of simultaneous notes being played each second in a MIDI file.
 
@@ -207,7 +233,7 @@ def simultaneous_notes(midi: pretty_midi.PrettyMIDI, bin_length=None) -> list[in
 
 
 def energy(
-    midi: pretty_midi.PrettyMIDI,
+    midi: PrettyMIDI,
     w1: float = 0.5,
     w2: float = 0.5,
     bin_length=None,
@@ -247,7 +273,7 @@ def norm(data):
 
 
 #################################  random  ###################################
-def quantize_midi(filename, sections_per_beat):
+def quantize_midi(filename, sections_per_beat) -> PrettyMIDI:
     """
     Quantizes a MIDI file into sections_per_beat sections per beat.
 
@@ -258,7 +284,7 @@ def quantize_midi(filename, sections_per_beat):
     Returns:
         pretty_midi.PrettyMIDI: A quantized PrettyMIDI object.
     """
-    midi_data = pretty_midi.PrettyMIDI(filename)
+    midi_data = PrettyMIDI(filename)
     bpm = int(filename.split('-')[1])
     section_duration = 60.0 / bpm / sections_per_beat
 
@@ -298,7 +324,7 @@ def trim_piano_roll(piano_roll, min=None, max=None):
     return trimmed_piano_roll
 
 
-def lstrip_midi(mid: pretty_midi.PrettyMIDI):
+def lstrip_midi(mid: PrettyMIDI):
   """Modify MIDI object so that the first note is at 0.0s."""
   for instrument in mid.instruments:
     if not instrument.notes:
@@ -322,3 +348,97 @@ def stretch_midi_file(midi: MidiFile, new_duration_seconds: float, caller: str =
             msg.time = int(msg.time * stretch_factor)
     
     return midi
+
+
+def set_tempo(input_file_path, target_tempo) -> None:
+    """"""
+    mid = MidiFile(input_file_path)
+    tempo = mido.bpm2tempo(target_tempo)
+    mid.tracks[0].insert(0, MetaMessage("set_tempo", tempo=tempo, time=0))
+    mid.save(input_file_path)
+
+
+def get_tempo(midi_file_path) -> float:
+    """"""
+    midi_file = MidiFile(midi_file_path)
+
+    # Default MIDI tempo is 120 BPM, which equals 500000 microseconds per beat
+    tempo = 500000  # Default tempo
+
+    for track in midi_file.tracks:
+        for msg in track:
+            if msg.type == "set_tempo":
+                tempo = msg.tempo
+                break
+        if tempo != 500000:
+            break
+
+    return mido.tempo2bpm(tempo)
+
+
+def get_note_min_max(input_file_path) -> Tuple[int, int]:
+    """"""
+    mid = MidiFile(input_file_path)
+
+    lowest_note = 127
+    highest_note = 0
+
+    for track in mid.tracks:
+        for msg in track:
+            if not msg.is_meta and msg.type in ['note_on', 'note_off']:
+                # Update lowest and highest note if this is a note_on message
+                if msg.velocity > 0:  # Considering note_on messages only
+                    lowest_note = min(lowest_note, msg.note)
+                    highest_note = max(highest_note, msg.note)
+    
+    return (lowest_note, highest_note)
+
+
+def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) -> None:
+    """
+    Transposes all the notes in a MIDI file by a specified number of semitones.
+    
+    Args:
+    - input_file_path: Path to the input MIDI file.
+    - output_file_path: Path where the transposed MIDI file will be saved.
+    - semitones: Number of semitones to transpose the notes. Positive for up, negative for down.
+    """
+    midi = PrettyMIDI(input_file_path)
+    print(f"shifting notes by {semitones} semitones")
+    for instrument in midi.instruments:
+        # Don't want to shift drum notes
+        if not instrument.is_drum:
+            for note in instrument.notes:
+                note.pitch += semitones
+    midi.write(output_file_path)
+
+
+def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1):
+    """vertically shift a matrix
+    chatgpt
+    """
+    lowest_note, highest_note = get_note_min_max(midi_path)
+    max_up = 108 - highest_note # TODO double-check this IRL
+    max_down = lowest_note
+
+    # zipper up & down
+    up = 1
+    down = -1
+    for i in range(num_iterations):
+        up_filename = f"{Path(midi_path).stem}_u{up:02d}.mid"
+        down_filename = f"{Path(midi_path).stem}_d{abs(down):02d}.mid"
+        
+        if i % 2 == 0:
+            if up > max_up:  # If exceeding max_up, adjust by switching to down immediately
+                transpose_midi(midi_path, os.path.join(output_dir, down_filename), down)
+                down -= 1
+            else:
+                transpose_midi(midi_path, os.path.join(output_dir, up_filename), up)
+                up += 1
+        else:
+            if abs(down) > max_down:  # If exceeding max_down, adjust by switching to up immediately
+                transpose_midi(midi_path, os.path.join(output_dir, up_filename), up)
+                up += 1
+            else:
+                transpose_midi(midi_path, os.path.join(output_dir, down_filename), down)
+                down -= 1

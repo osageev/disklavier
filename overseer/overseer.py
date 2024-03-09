@@ -81,12 +81,7 @@ class Overseer:
 
                 # check for next file requests from player
                 if self.give_next_event.is_set():
-                    # console.log(f"{self.p} player is playing '{self.player.playing_file}'\t(next up is '{next_file_path}')")
-                    # mark file as played so it won't be played again
-                    if self.player.playing_file.split('_')[0] != 'recording':
-                        console.log(f"{self.p} marking '{self.player.playing_file}' as played")
-                        self.seeker.metrics[self.player.playing_file]['played'] = 1
-                    
+                    # console.log(f"{self.p} player is playing '{self.player.playing_file}'\t(next up is '{next_file_path}')")                    
                     # get and prep next file
                     next_file, similarity = self.seeker.get_most_similar_file(os.path.basename(next_file_path))
                     next_file_path = os.path.join(self.data_dir, str(next_file))

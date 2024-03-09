@@ -36,7 +36,7 @@ class Player():
                 next_file = os.path.basename(next_file_path)
             self.get_next.set()
 
-            console.log(f"{self.p} playing '{self.playing_file}'\t(next up is '{next_file})'\tsim={similarity:.3f}")
+            console.log(f"{self.p} playing '{self.playing_file}'\t(next up is '{next_file}')\tsim={similarity:.3f}")
 
             self.play_midi_file(self.playing_file_path)
             self.playing_file_path = next_file_path

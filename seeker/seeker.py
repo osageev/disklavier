@@ -4,6 +4,7 @@ import pandas as pd
 from scipy.spatial.distance import cosine
 import pretty_midi
 from rich.progress import track, Progress
+from rich.pretty import pprint
 from queue import Queue
 
 from utils import console
@@ -12,7 +13,7 @@ from utils.midi import all_metrics
 
 class Seeker():
     p = '[yellow]seek[/yellow]  :'
-    table: pd.DataFrame | None
+    table: pd.DataFrame
     metrics = {}
   
     def __init__(self, params, input_dir: str, output_dir: str, force_rebuild: bool = False) -> None:
@@ -105,16 +106,17 @@ class Seeker():
         """finds the filename and similarity of the next most similar unplayed file in the similarity table
             NOTE: will go into an infinite loop once all files are played!
         """
-        # console.log(f"{self.p} finding most similar file to\n\t'{filename}'")
-        n = 3
+        # console.log(f"{self.p} finding most similar file to\n\t'{filename}'\n", self.table.columns)
+        n = 1
         similarity = 1
         next_file_played = 1
         next_filename = None
-        self.metrics[filename]["played"] = 1
+        self.metrics[filename]["played"] = 1 # mark current file as played
 
         while next_file_played:
-            nl = self.table[filename].nlargest(n) # type: ignore
-            next_filename = self.table.columns[nl.index[-1]] # type: ignore
+            nl = self.table[filename].nlargest(n)
+            pos = self.table.columns.get_loc(nl.index[-1])
+            next_filename = self.table.columns[pos]
             similarity = nl.iloc[-1]
             next_file_played = self.metrics[next_filename]["played"]
             n += 1

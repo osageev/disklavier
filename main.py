@@ -86,6 +86,9 @@ if __name__=="__main__":
     log_dir = os.path.join(args.output_dir, output_dir, "logs")
     record_dir = os.path.join(args.output_dir, output_dir, "records")
     
+    if not os.path.exists(args.output_dir):
+        console.log(f"{p} creating new outputs folder: '{args.output_dir}'")
+        os.mkdir(args.output_dir)   
     if not os.path.exists(os.path.join(args.output_dir, output_dir)):
         console.log(f"{p} creating new outputs folder: '{output_dir}'")
         os.mkdir(os.path.join(args.output_dir, output_dir))   
