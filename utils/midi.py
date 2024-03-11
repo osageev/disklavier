@@ -42,7 +42,7 @@ def draw_midi(midi_file: str, labels: bool = False):
     return plt.gcf()
 
 
-def draw_histogram(histogram, title="Pitch Histogram"):
+def draw_histogram(histogram, title="Pitch Histogram") -> None:
     if DARK:
         plt.style.use("dark_background")
     plt.bar(range(12), histogram)
@@ -54,7 +54,7 @@ def draw_histogram(histogram, title="Pitch Histogram"):
     plt.show()
 
 
-def draw_piano_roll(piano_roll, fs=100, title="Piano Roll"):
+def draw_piano_roll(piano_roll, fs=100, title="Piano Roll") -> None:
     if DARK:
         plt.style.use("dark_background")
     plt.figure(figsize=(12, 8))
@@ -73,7 +73,19 @@ def draw_piano_roll(piano_roll, fs=100, title="Piano Roll"):
     plt.show()
 
 
-def plot_piano_roll_and_pitch_histogram(input_path: str, output_dir: str):
+def plot_piano_roll_and_pitch_histogram(input_path: str, output_dir: str) -> None:
+    """plot the piano roll and pitch histogram of a midi file side by side
+    
+        Parameters:
+            input_path (str): the file to read
+            output_dir (str): the folder to write the image out to
+
+        Returns:
+            None
+    """
+    if DARK:
+        plt.style.use("dark_background")
+
     midi_data = PrettyMIDI(input_path)
     piano_roll = midi_data.get_piano_roll(fs=100)
     pitches = midi_data.get_pitch_class_histogram()
@@ -100,20 +112,31 @@ def plot_piano_roll_and_pitch_histogram(input_path: str, output_dir: str):
     plt.savefig(os.path.join(output_dir, f"{Path(input_path).stem}_ph.png"))
 
 
-#################################  metrics  ###################################
+################################  properties  #################################
 ################################  all in one  #################################
 # TODO add manually-calculated "valid tempo range"
 
 
-def all_metrics(midi: PrettyMIDI, config) -> Dict:
+def all_properties(midi: PrettyMIDI, filename: str, config) -> Dict:
+    """"""
+    # properties from filename
+    fn_segments_us = filename.split("_")
+    tempo = fn_segments_us[0].split("-")[1]
+    segment_start, segment_end = fn_segments_us[1].split("-")
+    pitch_shift = fn_segments_us[-1] if len(fn_segments_us) > 2 else "none"
+
+    # build dict
     num_bins = int(math.ceil(midi.get_end_time() / config.bin_length))
-    metrics = {
+    properties = {
         "pitch_histogram": list(
             midi.get_pitch_class_histogram(
                 use_duration=config.ph_weight_dur, use_velocity=config.ph_weight_vel
             )
         ),
-        # "tempo": midi.estimate_tempo(),
+        "tempo": tempo,
+        "segment_start_s": segment_start,
+        "segment_end_s": segment_end,
+        "pitch_shift": pitch_shift,
         "file_len": midi.get_end_time(),
         "note_count": sum(len(instrument.notes) for instrument in midi.instruments),
         "velocities": [{"total_velocity": 0, "count": 0} for _ in range(num_bins)],
@@ -122,32 +145,32 @@ def all_metrics(midi: PrettyMIDI, config) -> Dict:
         "simultaneous_counts": [0] * num_bins,
     }
 
-    # metrics that are calculated from notes
+    # properties that are calculated from notes
     for instrument in midi.instruments:
         for note in instrument.notes:
-            start_bin = int(note.start // config["bin_length"])
-            end_bin = int(note.end // config["bin_length"])
-            metrics["lengths"].append(note.end - note.start)
+            start_bin = int(note.start // config.bin_length)
+            end_bin = int(note.end // config.bin_length)
+            properties["lengths"].append(note.end - note.start)
 
             for bin in range(start_bin, min(end_bin + 1, num_bins)):
-                metrics["velocities"][bin]["total_velocity"] += note.velocity
-                metrics["velocities"][bin]["count"] += 1
-                metrics["simultaneous_counts"][bin] += 1
+                properties["velocities"][bin]["total_velocity"] += note.velocity
+                properties["velocities"][bin]["count"] += 1
+                properties["simultaneous_counts"][bin] += 1
 
-    metrics["lengths"] = sum(metrics["lengths"]) / len(metrics["lengths"])
+    properties["lengths"] = sum(properties["lengths"]) / len(properties["lengths"])
 
-    # metrics that are calculated from other metrics
-    metrics["energies"] = [
+    # properties that are calculated from other properties
+    properties["energies"] = [
         config["w1"] * (vel["total_velocity"] / vel["count"])
-        + config["w2"] * metrics["lengths"]
-        for vel in metrics["velocities"]
+        + config["w2"] * properties["lengths"]
+        for vel in properties["velocities"]
         if vel["count"] > 0
     ]
 
-    return metrics
+    return properties
 
 
-#############################  individual metrics  ############################
+############################  individual properties  ##########################
 
 
 def average_note_length(midi: PrettyMIDI) -> float:

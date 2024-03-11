@@ -6,13 +6,13 @@ from scipy.spatial.distance import cosine
 from rich.progress import track, Progress
 
 from utils import console
-from utils.midi import all_metrics
+from utils.midi import all_properties
 
 
 class Seeker:
     p = "[yellow]seek[/yellow]  :"
     table: pd.DataFrame
-    metrics = {}
+    properties = {}
 
     def __init__(
         self, params, input_dir: str, output_dir: str, force_rebuild: bool = False
@@ -23,44 +23,44 @@ class Seeker:
         self.output_dir = output_dir
         self.force_rebuild = force_rebuild
 
-    def build_metrics(self) -> None:
+    def build_properties(self) -> None:
         dict_file = os.path.join(
             self.output_dir,
-            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}_metrics.json",
+            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}_properties.json",
         )
 
         if os.path.exists(dict_file) and not self.force_rebuild:
-            console.log(f"{self.p} found existing metrics file '{dict_file}'")
+            console.log(f"{self.p} found existing properties file '{dict_file}'")
             with open(dict_file, "r") as f:
-                self.metrics = json.load(f)
+                self.properties = json.load(f)
                 console.log(
-                    f"{self.p} loaded metrics for {len(list(self.metrics.keys()))} files"
+                    f"{self.p} loaded properties for {len(list(self.properties.keys()))} files"
                 )
         else:
-            console.log(f"{self.p} calculating metrics from '{self.input_dir}'")
+            console.log(f"{self.p} calculating properties from '{self.input_dir}'")
             for file in track(
-                os.listdir(self.input_dir), description=f"{self.p} calculating metrics"
+                os.listdir(self.input_dir), description=f"{self.p} calculating properties"
             ):
                 if file.endswith(".mid") or file.endswith(".midi"):
                     file_path = os.path.join(self.input_dir, file)
                     midi = pretty_midi.PrettyMIDI(file_path)
-                    metrics = all_metrics(midi, self.params)
-                    self.metrics[file] = {
-                        "notes": [],
-                        "metrics": metrics,
+                    properties = all_properties(midi, file, self.params)
+                    self.properties[file] = {
+                        "filename": file,
+                        "properties": properties,
                         "played": 0,
                     }
             console.log(
-                f"{self.p} calculated metrics for {len(list(self.metrics.keys()))} files"
+                f"{self.p} calculated properties for {len(list(self.properties.keys()))} files"
             )
 
             with open(dict_file, "w") as f:
-                json.dump(self.metrics, f)
+                json.dump(self.properties, f)
 
             if os.path.isfile(dict_file):
-                console.log(f"{self.p} succesfully saved metrics file '{dict_file}'")
+                console.log(f"{self.p} succesfully saved properties file '{dict_file}'")
             else:
-                console.log(f"{self.p} error saving metrics file '{dict_file}'")
+                console.log(f"{self.p} error saving properties file '{dict_file}'")
                 raise FileNotFoundError
 
         self.reset_plays()
@@ -77,8 +77,8 @@ class Seeker:
             console.log(f"{self.p} loaded existing similarity file from '{parquet}'")
         else:
             vectors = [
-                {"name": filename, "metric": details["metrics"]["pitch_histogram"]}
-                for filename, details in self.metrics.items()
+                {"name": filename, "metric": details["properties"][self.params.metric]}
+                for filename, details in self.properties.items()
             ]
 
             names = [v["name"] for v in vectors]
@@ -122,14 +122,14 @@ class Seeker:
         similarity = -1
         next_file_played = 1
         next_filename = None
-        self.metrics[filename]["played"] = 1  # mark current file as played
+        self.properties[filename]["played"] = 1  # mark current file as played
 
         while next_file_played:
             nl = self.table[filename].nlargest(n)  # get most similar columns
             next_filename = nl.index[-1]
             similarity = nl.iloc[-1]
 
-            next_file_played = self.metrics[next_filename]["played"]
+            next_file_played = self.properties[next_filename]["played"]
             n += 1
 
         console.log(
@@ -152,8 +152,8 @@ class Seeker:
         most_similar_vector = None
         highest_similarity = -1  # since cosine similarity ranges from -1 to 1
         vector_array = [
-            {"name": filename, "metric": details["metrics"]["pitch_histogram"]}
-            for filename, details in self.metrics.items()
+            {"name": filename, "metric": details["properties"][self.params.property]}
+            for filename, details in self.properties.items()
         ]
 
         for vector_data in vector_array:
@@ -170,8 +170,8 @@ class Seeker:
         return most_similar_vector, highest_similarity
 
     def reset_plays(self) -> None:
-        for k in self.metrics.keys():
-            self.metrics[k]["played"] = 0
+        for k in self.properties.keys():
+            self.properties[k]["played"] = 0
 
     def load_similarities(self, parquet_path) -> None:
         if os.path.isfile(parquet_path) and not self.force_rebuild:

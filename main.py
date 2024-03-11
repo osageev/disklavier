@@ -52,7 +52,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir",
         default=None,
-        help="directory in which to store outputs (metrics files, logs, recordings)",
+        help="directory in which to store outputs (logs, recordings, etc...)",
     )
     parser.add_argument(
         "--log_config",

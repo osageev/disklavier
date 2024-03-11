@@ -42,10 +42,10 @@ class Overseer:
                 f"{self.p} [red]less than 10 files in input folder. are you sure you didnt screw something up?"
             )
 
-        # set up events & queues
-        self.recording_ready_event = Event()
-        self.give_next_event = Event()
+        # set up events & queues for threading
         self.kill_event = Event()
+        self.give_next_event = Event()
+        self.recording_ready_event = Event()
         self.playlist_queue = Queue()
         self.progress_queue = Queue()
 
@@ -53,7 +53,7 @@ class Overseer:
         self.seeker = Seeker(
             self.params.seeker, self.data_dir, self.output_dir, args.force_rebuild
         )
-        self.seeker.build_metrics()
+        self.seeker.build_properties()
         self.seeker.build_similarity_table()
         self.listener = Listener(
             self.params.listener,
@@ -71,8 +71,8 @@ class Overseer:
             self.progress_queue,
         )
 
-    def start(self):
-        """start the system"""
+    def start(self) -> None:
+        """run the system"""
         if not self.input_port or not self.output_port:
             return
 
@@ -163,7 +163,10 @@ class Overseer:
             listen_thread.join()
             console.log(f"{self.p} listener killed successfully")
 
-    def _init_midi(self):
+    def _init_midi(self) -> None:
+        """initialize the MIDI system based on the connections specified in
+        the provided parameters (from the param file loaded by main.py)
+        """
         console.log(f"{self.p} connecting to MIDI")
         available_inputs = mido.get_input_names()  # type: ignore
         available_outputs = mido.get_output_names()  # type: ignore
@@ -173,8 +176,9 @@ class Overseer:
 
         if len(available_inputs) == 0 or len(available_outputs) == 0:
             console.log(f"{self.p} no MIDI device detected")
-            raise ValueError  # wrong error type i know
+            raise ConnectionAbortedError  # wrong error type, i know
 
+        # set up input connection
         if self.params.in_port in available_inputs:
             self.input_port = mido.open_input(self.params.in_port)  # type: ignore
             self.params.player.in_port = self.params.in_port
@@ -189,6 +193,7 @@ class Overseer:
         else:
             console.log(f"{self.p} no MIDI input devices available")
 
+        # set up output connection
         if self.params.out_port in available_inputs:
             self.output_port = mido.open_output(self.params.out_port)  # type: ignore
             self.params.player.out_port = self.params.out_port
@@ -209,6 +214,7 @@ class Overseer:
 
         Parameters:
             midi_file_path (str): the path to the midi file
+            do_stretch (bool): also change the note timings to conform to the new tempo
 
         Returns:
             str: the path to the new midi file
