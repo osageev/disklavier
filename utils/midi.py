@@ -421,7 +421,6 @@ def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) 
     """
 
     midi = PrettyMIDI(input_file_path)
-    print(f"shifting notes by {semitones} semitones")
     for instrument in midi.instruments:
         # Don't want to shift drum notes
         if not instrument.is_drum:
@@ -430,7 +429,7 @@ def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) 
     midi.write(output_file_path)
 
 
-def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1):
+def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1) -> int:
     """vertically shift a matrix
     chatgpt
     """
@@ -441,6 +440,7 @@ def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1):
     # zipper up & down
     up = 1
     down = -1
+    num_steps = 0
     for i in range(num_iterations):
         up_filename = f"{Path(midi_path).stem}_u{up:02d}.mid"
         down_filename = f"{Path(midi_path).stem}_d{abs(down):02d}.mid"
@@ -450,16 +450,22 @@ def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1):
                 up > max_up
             ):  # If exceeding max_up, adjust by switching to down immediately
                 transpose_midi(midi_path, os.path.join(output_dir, down_filename), down)
+                num_steps += 1
                 down -= 1
             else:
                 transpose_midi(midi_path, os.path.join(output_dir, up_filename), up)
+                num_steps += 1
                 up += 1
         else:
             if (
                 abs(down) > max_down
             ):  # If exceeding max_down, adjust by switching to up immediately
                 transpose_midi(midi_path, os.path.join(output_dir, up_filename), up)
+                num_steps += 1
                 up += 1
             else:
                 transpose_midi(midi_path, os.path.join(output_dir, down_filename), down)
+                num_steps += 1
                 down -= 1
+
+    return num_steps

@@ -1,22 +1,16 @@
 import os
-import random
 from pathlib import Path
-from datetime import datetime
-from argparse import ArgumentParser
-import mido
-from mido import MidiFile, MidiTrack, Message, MetaMessage
+from mido import MidiFile
 import pretty_midi
+import numpy as np
 
 from utils.midi import set_tempo, get_tempo, semitone_shift
 
-import numpy as np
-
-from rich.progress import track
 from rich import print
 from rich.pretty import pprint
 
 
-def segment_midi(input_file_path: str, params) -> int:
+def segment_midi(input_file_path: str, params):
     """do the segmentation"""
     target_tempo = int(os.path.basename(input_file_path).split("-")[1])
     set_tempo(input_file_path, target_tempo)
@@ -32,14 +26,14 @@ def segment_midi(input_file_path: str, params) -> int:
     segment_length = 60 * params.n__num_beats / target_tempo  # in seconds
     num_segments_float = total_length / segment_length
     num_segments = int(np.round(num_segments_float))
-    init_bpm = get_tempo(input_file_path)
 
-    pprint([total_length, segment_length, num_segments_float, num_segments, init_bpm])
+    # pprint([total_length, segment_length, num_segments_float, num_segments, init_bpm])
 
     print(
         f"breaking '{filename}' ({total_length:.03f} s at {target_tempo} bpm) into {num_segments:03d} segments of {segment_length:.03f} s"
     )
 
+    new_files = 0
     for n in range(num_segments):
         start = n * segment_length
         end = start + segment_length
@@ -79,74 +73,9 @@ def segment_midi(input_file_path: str, params) -> int:
             set_tempo(segment_filename, target_tempo)
 
         if params.do_shift:
-            semitone_shift(segment_filename, params.output_dir, 12)
+            num_shifts = semitone_shift(segment_filename, params.output_dir, 12)
+            new_files += num_shifts
+        else:
+            new_files += 1
 
-    return num_segments
-
-
-if __name__ == "__main__":
-    # load args
-    parser = ArgumentParser(description="Argparser description")
-    parser.add_argument("--data_dir", default=None, help="location of MIDI files")
-    parser.add_argument(
-        "--output_dir", default=None, help="location to write segments to"
-    )
-    parser.add_argument(
-        "-m",
-        "--store_metrics",
-        default=f"metrics-{datetime.now().strftime('%y%m%d-%H%M%S')}.json",
-        help="file to write segment metrics to (must be JSON)",
-    )
-    parser.add_argument(
-        "-n" "--num_beats",
-        type=int,
-        default=8,
-        help="number of beats each segment should have",
-    )
-    parser.add_argument(
-        "-t",
-        "--strip_tempo",
-        action="store_true",
-        help="strip all tempo messages from files",
-    )
-    parser.add_argument(
-        "-s",
-        "--do_shift",
-        action="store_true",
-        help="generate a segment for each possible semitone shift",
-    )
-    parser.add_argument(
-        "-l",
-        "--limit",
-        type=int,
-        default=None,
-        help="stop after a certain number of files",
-    )
-    args = parser.parse_args()
-    pprint(args)
-
-    # set up filesystem
-    if not os.path.exists(args.data_dir):
-        print(f"no data dir found at {args.data_dir}")
-        exit()
-    if os.path.exists(args.output_dir):
-        i = 0
-        for i, file in enumerate(os.listdir(args.output_dir)):
-            os.remove(os.path.join(args.output_dir, file))
-            i += 1
-        print(f"cleaned {i} files out of output folder: '{args.output_dir}'")
-    else:
-        print(f"creating new output folder: '{args.output_dir}'")
-        os.mkdir(args.output_dir)
-
-    if args.limit is None:
-        dataset = os.listdir(args.data_dir)
-    else:
-        dataset = os.listdir(args.data_dir)[: args.limit]
-
-    # segment files
-    total_segs = 0
-    for filename in track(dataset, description="generating segments"):
-        if filename.endswith(".mid") or filename.endswith(".midi"):
-            total_segs += segment_midi(os.path.join(args.data_dir, filename), args)
-    print(f"[green]segmentation complete, {total_segs} files generated")
+    return new_files

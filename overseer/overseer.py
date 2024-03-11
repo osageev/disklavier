@@ -34,6 +34,7 @@ class Overseer:
         self.output_dir = output_dir
         self.record_dir = record_dir
         self.tempo = tempo
+        self.kickstart = do_kickstart
         self.params.listener.tempo = self.tempo
         self.params.player.tempo = self.tempo
 
@@ -76,18 +77,31 @@ class Overseer:
         if not self.input_port or not self.output_port:
             return
 
+        # kickstart process
+        if self.kickstart:
+            self.recording_ready_event.set()
+            random_file_path = os.listdir(self.data_dir)[0]
+            self.listener.outfile = random_file_path
         # start listening for recording
-        listen_thread = Thread(target=self.listener.listen, args=(), name="listener")
-        listen_thread.start()
+        else:
+            listen_thread = Thread(
+                target=self.listener.listen, args=(), name="listener"
+            )
+            listen_thread.start()
 
         try:
             while True:
                 # check for recordings
                 if self.recording_ready_event.is_set():
                     # get recording
-                    recording_path = os.path.join(
-                        self.record_dir, self.listener.outfile
-                    )
+                    if self.kickstart:
+                        recording_path = os.path.join(
+                            self.data_dir, self.listener.outfile
+                        )
+                    else:
+                        recording_path = os.path.join(
+                            self.record_dir, self.listener.outfile
+                        )
                     console.log(
                         f"{self.p} triggering playback from recording '{recording_path}'"
                     )
