@@ -1,11 +1,9 @@
 import os
 import json
+import pretty_midi
 import pandas as pd
 from scipy.spatial.distance import cosine
-import pretty_midi
 from rich.progress import track, Progress
-from rich.pretty import pprint
-from queue import Queue
 
 from utils import console
 from utils.midi import all_metrics
@@ -43,7 +41,6 @@ class Seeker:
             for file in track(
                 os.listdir(self.input_dir), description=f"{self.p} calculating metrics"
             ):
-                # console.log(f"{self.p} calculating metrics for '{file}'")
                 if file.endswith(".mid") or file.endswith(".midi"):
                     file_path = os.path.join(self.input_dir, file)
                     midi = pretty_midi.PrettyMIDI(file_path)
@@ -70,7 +67,10 @@ class Seeker:
 
     def build_similarity_table(self):
         """"""
-        parquet = os.path.join(self.output_dir, "similarities.parquet")
+
+        sim_file = f"sims-{os.path.basename(self.input_dir).replace(' ', '_')}.parquet"
+        console.log(f"{self.p} looking for similarity file '{sim_file}'")
+        parquet = os.path.join(self.output_dir, sim_file)
         self.load_similarities(parquet)
 
         if self.table is not None:
@@ -117,10 +117,7 @@ class Seeker:
         """finds the filename and similarity of the next most similar unplayed file in the similarity table
         NOTE: will go into an infinite loop once all files are played!
         """
-        console.log(
-            f"{self.p} finding most similar file to\n\t'{filename}'\n",
-            self.table.columns,
-        )
+        console.log(f"{self.p} finding most similar file to '{filename}'")
         n = 1
         similarity = -1
         next_file_played = 1
@@ -128,11 +125,8 @@ class Seeker:
         self.metrics[filename]["played"] = 1  # mark current file as played
 
         while next_file_played:
-            nl = self.table[filename].nlargest(n) # get most similar columns
-            console.log(f"{self.p} found '{nl.name}' with key {nl.index[-1]}")
-            # next_filename = self.table.columns[nl.index[-1]]
+            nl = self.table[filename].nlargest(n)  # get most similar columns
             next_filename = nl.index[-1]
-            console.log(f"{self.p} ({self.metrics[next_filename]["played"]})")
             similarity = nl.iloc[-1]
 
             next_file_played = self.metrics[next_filename]["played"]
@@ -183,4 +177,4 @@ class Seeker:
         if os.path.isfile(parquet_path) and not self.force_rebuild:
             self.table = pd.read_parquet(parquet_path)
         else:
-            self.table = None
+            self.table = None  # type: ignore

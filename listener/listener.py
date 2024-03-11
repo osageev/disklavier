@@ -1,11 +1,9 @@
 import os
 import mido
 from mido import MidiFile, MidiTrack, Message
-from threading import Thread, Event
-from queue import Queue
-from datetime import datetime
 import time
-
+from datetime import datetime
+from threading import Thread, Event
 
 from utils import console, tick
 from utils.midi import stretch_midi_file

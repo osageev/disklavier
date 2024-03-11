@@ -1,12 +1,12 @@
 import os
 import math
 from pretty_midi import PrettyMIDI
+import mido
+from mido import MidiFile, MetaMessage
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import mido
-from mido import MidiFile, MidiTrack, Message, MetaMessage
 
 from utils import console
 
@@ -353,7 +353,7 @@ def stretch_midi_file(
 ) -> MidiFile:
     """"""
     console.log(
-        f"{caller} rescaling file from {midi.length:.02f} s to {new_duration_seconds:.02f} s ({new_duration_seconds / midi.length:.03f})"
+        f"{caller} rescaling file from {midi.length:.02f} s to {new_duration_seconds:.02f} s (x{new_duration_seconds / midi.length:.03f})"
     )
     # Calculate stretch factor based on the original duration
     stretch_factor = new_duration_seconds / midi.length

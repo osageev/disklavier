@@ -1,9 +1,7 @@
 import os
-from pretty_midi import PrettyMIDI
 import mido
 from queue import Queue
 from threading import Thread, Event
-from rich.progress import Progress
 from datetime import datetime
 
 from player.player import Player
@@ -21,21 +19,20 @@ class Overseer:
     def __init__(
         self,
         params,
-        data_dir: str,
-        output_dir: str,
+        args,
         record_dir: str,
+        plot_dir: str,
         tempo: int,
-        force_rebuild: bool = False,
-        do_kickstart: bool = False,
     ):
         console.log(f"{self.p} initializing")
 
         self.params = params
-        self.data_dir = data_dir
-        self.output_dir = output_dir
+        self.data_dir = args.data_dir
+        self.output_dir = args.output_dir
         self.record_dir = record_dir
+        self.plot_dir = plot_dir
         self.tempo = tempo
-        self.kickstart = do_kickstart
+        self.kickstart = args.do_kickstart
         self.params.listener.tempo = self.tempo
         self.params.player.tempo = self.tempo
 
@@ -54,7 +51,7 @@ class Overseer:
 
         # initialize objects to be overseen
         self.seeker = Seeker(
-            self.params.seeker, self.data_dir, self.output_dir, force_rebuild
+            self.params.seeker, self.data_dir, self.output_dir, args.force_rebuild
         )
         self.seeker.build_metrics()
         self.seeker.build_similarity_table()
@@ -67,10 +64,11 @@ class Overseer:
         self.player = Player(
             self.params.player,
             self.record_dir,
+            args.tick,
+            self.kill_event,
             self.give_next_event,
             self.playlist_queue,
             self.progress_queue,
-            self.kill_event,
         )
 
     def start(self):
@@ -111,12 +109,14 @@ class Overseer:
                     recorded_ph = self.seeker.midi_to_ph(recording_path)
                     first_link = self.seeker.find_most_similar_vector(recorded_ph)
                     next_file_path = os.path.join(self.data_dir, str(first_link[0]))
-                    next_file_path = self.change_tempo(next_file_path, do_stretch=False)
+                    next_file_path = self.change_tempo(next_file_path)
 
                     # save plots of both PHs
                     plot_dir = f"{datetime.now().strftime('%y%m%d-%H%M%S')}"
-                    plot_path = os.path.join(self.output_dir, "phs", plot_dir)
+                    plot_path = os.path.join(self.output_dir, "plots", plot_dir)
 
+                    if os.path.exists(plot_path):
+                        plot_path += "_2"
                     os.mkdir(plot_path)
                     plot_piano_roll_and_pitch_histogram(recording_path, plot_path)
                     plot_piano_roll_and_pitch_histogram(next_file_path, plot_path)
@@ -143,9 +143,7 @@ class Overseer:
                     )
                     next_file_path = os.path.join(self.data_dir, str(next_file))
                     next_file_path = self.change_tempo(next_file_path)
-                    console.log(
-                        f"{self.p} player is playing '{self.player.playing_file}'\t(next up is '{next_file_path}')"
-                    )
+                    # console.log(f"{self.p} player is playing '{self.player.playing_file}'\t(next up is '{next_file_path}')")
 
                     # send next file to player
                     self.playlist_queue.put((next_file_path, similarity))
