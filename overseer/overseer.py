@@ -32,7 +32,7 @@ class Overseer:
         self.record_dir = record_dir
         self.plot_dir = plot_dir
         self.tempo = tempo
-        self.kickstart = args.do_kickstart
+        self.kickstart = args.kickstart
         self.params.listener.tempo = self.tempo
         self.params.player.tempo = self.tempo
 

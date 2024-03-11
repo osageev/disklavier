@@ -30,7 +30,7 @@ class Player:
         self.playback_progress = progress_queue
         self.out_port = mido.open_output(self.params.out_port)  # type: ignore
 
-    def playback_loop(self, seed_file_path: str):
+    def playback_loop(self, seed_file_path: str, ph):
         """"""
         self.playing_file_path = seed_file_path
         (next_file_path, similarity) = self.file_queue.get(block=True)

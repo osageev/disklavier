@@ -39,7 +39,8 @@ class Seeker:
         else:
             console.log(f"{self.p} calculating properties from '{self.input_dir}'")
             for file in track(
-                os.listdir(self.input_dir), description=f"{self.p} calculating properties"
+                os.listdir(self.input_dir),
+                description=f"{self.p} calculating properties",
             ):
                 if file.endswith(".mid") or file.endswith(".midi"):
                     file_path = os.path.join(self.input_dir, file)
@@ -77,7 +78,10 @@ class Seeker:
             console.log(f"{self.p} loaded existing similarity file from '{parquet}'")
         else:
             vectors = [
-                {"name": filename, "metric": details["properties"][self.params.metric]}
+                {
+                    "name": filename,
+                    "metric": details["properties"][self.params.property],
+                }
                 for filename, details in self.properties.items()
             ]
 
