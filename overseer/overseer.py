@@ -4,13 +4,14 @@ import mido
 from queue import Queue
 from threading import Thread, Event
 from rich.progress import Progress
+from datetime import datetime
 
 from player.player import Player
 from listener.listener import Listener
 from seeker.seeker import Seeker
 
 from utils import console
-from utils.midi import stretch_midi_file
+from utils.midi import stretch_midi_file, plot_piano_roll_and_pitch_histogram
 
 
 class Overseer:
@@ -110,7 +111,15 @@ class Overseer:
                     recorded_ph = self.seeker.midi_to_ph(recording_path)
                     first_link = self.seeker.find_most_similar_vector(recorded_ph)
                     next_file_path = os.path.join(self.data_dir, str(first_link[0]))
-                    next_file_path = self.change_tempo(next_file_path)
+                    next_file_path = self.change_tempo(next_file_path, do_stretch=False)
+
+                    # save plots of both PHs
+                    plot_dir = f"{datetime.now().strftime('%y%m%d-%H%M%S')}"
+                    plot_path = os.path.join(self.output_dir, "phs", plot_dir)
+
+                    os.mkdir(plot_path)
+                    plot_piano_roll_and_pitch_histogram(recording_path, plot_path)
+                    plot_piano_roll_and_pitch_histogram(next_file_path, plot_path)
 
                     # start up player
                     self.playlist_queue.put((next_file_path, float(first_link[1])))
@@ -124,16 +133,19 @@ class Overseer:
                     # clear recording
                     self.listener.outfile = ""
                     self.recording_ready_event.clear()
+                    console.log(f"{self.p} finished triggering playback from recording")
 
                 # check for next file requests from player
                 if self.give_next_event.is_set():
-                    # console.log(f"{self.p} player is playing '{self.player.playing_file}'\t(next up is '{next_file_path}')")
                     # get and prep next file
                     next_file, similarity = self.seeker.get_most_similar_file(
                         os.path.basename(next_file_path)
                     )
                     next_file_path = os.path.join(self.data_dir, str(next_file))
                     next_file_path = self.change_tempo(next_file_path)
+                    console.log(
+                        f"{self.p} player is playing '{self.player.playing_file}'\t(next up is '{next_file_path}')"
+                    )
 
                     # send next file to player
                     self.playlist_queue.put((next_file_path, similarity))
@@ -193,7 +205,7 @@ class Overseer:
         else:
             console.log(f"{self.p} no MIDI output devices available")
 
-    def change_tempo(self, midi_file_path: str) -> str:
+    def change_tempo(self, midi_file_path: str, do_stretch: bool = True) -> str:
         """
         update midi file tempo and note timings so that it is played back at the set tempo.
 
@@ -233,7 +245,8 @@ class Overseer:
 
         # also stretch note timings
         new_len = midi.length * file_bpm / self.tempo
-        midi = stretch_midi_file(midi, new_len, self.p)
+        if do_stretch:
+            midi = stretch_midi_file(midi, new_len, self.p)
 
         # save the modified MIDI file
         new_file_path = os.path.join(

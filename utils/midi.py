@@ -73,8 +73,8 @@ def draw_piano_roll(piano_roll, fs=100, title="Piano Roll"):
     plt.show()
 
 
-def plot_piano_roll_and_pitch_histogram(path: str):
-    midi_data = PrettyMIDI(path)
+def plot_piano_roll_and_pitch_histogram(input_path: str, output_dir: str):
+    midi_data = PrettyMIDI(input_path)
     piano_roll = midi_data.get_piano_roll(fs=100)
     pitches = midi_data.get_pitch_class_histogram()
 
@@ -97,7 +97,7 @@ def plot_piano_roll_and_pitch_histogram(path: str):
     plt.ylabel("Magnitude")
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig(os.path.join(output_dir, f"{Path(input_path).stem}_ph.png"))
 
 
 #################################  metrics  ###################################

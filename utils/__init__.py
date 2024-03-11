@@ -23,7 +23,7 @@ def tick(bpm: int, stop_event: Event, p: str = "[cyan]metro[/cyan] : ", do_print
     while not stop_event.is_set():
         if do_print:
             console.log(f"{p} [grey50]tick!")
-        tick.play()  # Play the tick sound
+        # tick.play()  # Play the tick sound
         time.sleep(seconds_per_beat)  # Wait for the next tick
 
 

@@ -117,18 +117,24 @@ class Seeker:
         """finds the filename and similarity of the next most similar unplayed file in the similarity table
         NOTE: will go into an infinite loop once all files are played!
         """
-        # console.log(f"{self.p} finding most similar file to\n\t'{filename}'\n", self.table.columns)
+        console.log(
+            f"{self.p} finding most similar file to\n\t'{filename}'\n",
+            self.table.columns,
+        )
         n = 1
-        similarity = 1
+        similarity = -1
         next_file_played = 1
         next_filename = None
         self.metrics[filename]["played"] = 1  # mark current file as played
 
         while next_file_played:
-            nl = self.table[filename].nlargest(n)
-            pos = self.table.columns.get_loc(nl.index[-1])
-            next_filename = self.table.columns[pos]
+            nl = self.table[filename].nlargest(n) # get most similar columns
+            console.log(f"{self.p} found '{nl.name}' with key {nl.index[-1]}")
+            # next_filename = self.table.columns[nl.index[-1]]
+            next_filename = nl.index[-1]
+            console.log(f"{self.p} ({self.metrics[next_filename]["played"]})")
             similarity = nl.iloc[-1]
+
             next_file_played = self.metrics[next_filename]["played"]
             n += 1
 
@@ -176,3 +182,5 @@ class Seeker:
     def load_similarities(self, parquet_path) -> None:
         if os.path.isfile(parquet_path) and not self.force_rebuild:
             self.table = pd.read_parquet(parquet_path)
+        else:
+            self.table = None
