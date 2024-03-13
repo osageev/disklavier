@@ -54,7 +54,8 @@ class Overseer:
             self.params.seeker, self.data_dir, self.output_dir, args.force_rebuild
         )
         self.seeker.build_properties()
-        self.seeker.build_similarity_table()
+        self.seeker.build_top_n_table()
+        # self.seeker.build_similarity_table()
         self.listener = Listener(
             self.params.listener,
             self.record_dir,
@@ -138,7 +139,8 @@ class Overseer:
                 # check for next file requests from player
                 if self.give_next_event.is_set():
                     # get and prep next file
-                    next_file, similarity = self.seeker.get_most_similar_file(
+                    # next_file, similarity = self.seeker.get_most_similar_file(
+                    next_file, similarity = self.seeker.get_msf_new(
                         os.path.basename(next_file_path)
                     )
                     next_file_path = os.path.join(self.data_dir, str(next_file))

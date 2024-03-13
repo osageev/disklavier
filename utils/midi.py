@@ -456,6 +456,8 @@ def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1) -> 
     """vertically shift a matrix
     chatgpt
     """
+    new_filename = Path(midi_path).stem.split('_')
+    new_filename = f"{new_filename[0]}_{new_filename[1]}"
     lowest_note, highest_note = get_note_min_max(midi_path)
     max_up = 108 - highest_note  # TODO double-check this IRL
     max_down = lowest_note
@@ -465,8 +467,8 @@ def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1) -> 
     down = -1
     num_steps = 0
     for i in range(num_iterations):
-        up_filename = f"{Path(midi_path).stem}_u{up:02d}.mid"
-        down_filename = f"{Path(midi_path).stem}_d{abs(down):02d}.mid"
+        up_filename = f"{new_filename}_u{up:02d}.mid"
+        down_filename = f"{new_filename}_d{abs(down):02d}.mid"
 
         if i % 2 == 0:
             if (

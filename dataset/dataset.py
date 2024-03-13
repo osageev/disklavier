@@ -7,7 +7,6 @@ import numpy as np
 from utils.midi import set_tempo, get_tempo, semitone_shift
 
 from rich import print
-from rich.pretty import pprint
 
 
 def segment_midi(input_file_path: str, params):
@@ -20,20 +19,21 @@ def segment_midi(input_file_path: str, params):
     filename_components = filename.split("-")
     filename = f"{filename_components[0]}-{int(np.round(float(filename_components[1]))):03d}-{filename_components[2]}"
 
-    # figure out timings
+    # calculate timings
     midi_pm = pretty_midi.PrettyMIDI(input_file_path)
     total_length = midi_pm.get_end_time()
     segment_length = 60 * params.n__num_beats / target_tempo  # in seconds
     num_segments_float = total_length / segment_length
     num_segments = int(np.round(num_segments_float))
 
-    # pprint([total_length, segment_length, num_segments_float, num_segments, init_bpm])
+    # print([total_length, segment_length, num_segments_float, num_segments, init_bpm])
 
     print(
         f"breaking '{filename}' ({total_length:.03f} s at {target_tempo} bpm) into {num_segments:03d} segments of {segment_length:.03f} s"
     )
 
     new_files = 0
+    # for n in track(range(num_segments), description="segmenting"):
     for n in range(num_segments):
         start = n * segment_length
         end = start + segment_length
@@ -58,7 +58,7 @@ def segment_midi(input_file_path: str, params):
         # write out
         segment_midi.instruments.append(instrument)
         segment_filename = os.path.join(
-            params.output_dir, f"{filename}_{int(start):04d}-{int(end):04d}.mid"
+            params.output_dir, f"{filename}_{int(start):04d}-{int(end):04d}_n00.mid"
         )
         segment_midi.write(segment_filename)
 

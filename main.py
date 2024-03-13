@@ -111,7 +111,8 @@ if __name__ == "__main__":
     console.log(f"{p}[green bold] filesystem is set up")
 
     if args.tempo:
-        playback_tempo = check_tempo(args.tempo)
+        # playback_tempo = check_tempo(args.tempo)
+        playback_tempo = args.tempo
 
     # run!
     overseer = Overseer(
