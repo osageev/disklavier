@@ -506,3 +506,48 @@ def semitone_transpose(
                 down -= 1
 
     return new_files
+
+
+def get_velocities(midi_data: PrettyMIDI) -> List:
+    """
+    Analyzes MIDI file velocities.
+
+    Args:
+        midi_data (pretty_midi.PrettyMIDI): The MIDI file data.
+
+    Returns:
+        (list, list): A 2-element list containing the lowest and highest note velocities,
+                    and a list of counts of note velocities broken into 10 bins.
+    """
+    velocities = []
+
+    for instrument in midi_data.instruments:
+        for note in instrument.notes:
+            velocities.append(note.velocity)
+
+    if velocities:
+        lowest_velocity = min(velocities)
+        highest_velocity = max(velocities)
+    else:
+        lowest_velocity, highest_velocity = 0, 0
+
+    bin_counts, _ = np.histogram(velocities, bins=10, range=(1, 127))
+
+    return [[lowest_velocity, highest_velocity], bin_counts.tolist()]
+
+
+def scale_vels(midi_data: PrettyMIDI, scale_factor: float = 1.0) -> PrettyMIDI:
+    """
+    Scales the velocities of all notes in a MIDI file by a set amount, with the results capped at 127.
+
+    Args:
+        midi_data (pretty_midi.PrettyMIDI): The MIDI file data to be modified.
+        scale_factor (float): The factor by which to scale the velocities. A value of 1.0 leaves velocities unchanged,
+                            0.5 halves them, etc.
+    """
+    for instrument in midi_data.instruments:
+        for note in instrument.notes:
+            new_velocity = int(note.velocity * scale_factor)
+            note.velocity = min(new_velocity, 127)
+
+    return midi_data

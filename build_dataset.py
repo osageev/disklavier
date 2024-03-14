@@ -36,8 +36,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-s",
         "--do_shift",
-        action="store_true",
-        help="generate a segment for each possible semitone shift",
+        type=int,
+        default=12,
+        help="generate a segment for a number of semitone shifts",
     )
     parser.add_argument(
         "-l",

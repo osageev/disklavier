@@ -12,11 +12,7 @@ from listener.listener import Listener
 from seeker.seeker import Seeker
 
 from utils import console
-from utils.midi import (
-    stretch_midi_file,
-    plot_piano_roll_and_pitch_histogram,
-    plot_images,
-)
+import utils.midi as um
 
 
 class Overseer:
@@ -40,6 +36,7 @@ class Overseer:
         self.plot_dir = plot_dir
         self.tempo = tempo
         self.kickstart = args.kickstart
+        self.v_scale = args.velocity
         self.params.listener.tempo = self.tempo
         self.params.player.tempo = self.tempo
         self.iter = 0
@@ -133,8 +130,8 @@ class Overseer:
                     if os.path.exists(plot_path):
                         plot_path += "_2"
                     os.mkdir(plot_path)
-                    plot_piano_roll_and_pitch_histogram(recording_path, plot_path)
-                    plot_piano_roll_and_pitch_histogram(next_file_path, plot_path)
+                    um.plot_piano_roll_and_pitch_histogram(recording_path, plot_path)
+                    um.plot_piano_roll_and_pitch_histogram(next_file_path, plot_path)
 
                     # start up player
                     self.playlist_queue.put((next_file_path, float(first_link[1])))
@@ -273,7 +270,7 @@ class Overseer:
         # also stretch note timings
         # if do_stretch:
         #     new_len = midi.length * file_bpm / self.tempo
-        #     new_midi = stretch_midi_file(midi, new_len, self.p)
+        #     new_midi = um.stretch_midi_file(midi, new_len, self.p)
 
         # save the modified MIDI file
 
@@ -291,12 +288,23 @@ class Overseer:
         #                 track.remove(msg)
         # console.log(f"{self.p} expected len {segment_length:.04f} but found {midi.length:.04f} and calcd {mido.tick2second(total_time_t, 220, mido.bpm2tempo(file_bpm))}")
 
+        # scale velocities
+        new_pm = PrettyMIDI(new_file_path)
+        os.remove(new_file_path)
+        [[v_min_o, v_max_o], v_hist_o] = um.get_velocities(new_pm)
+        scaled_midi = um.scale_vels(new_pm, self.v_scale)
+        [[v_min_i, v_max_i], v_hist_i] = um.get_velocities(scaled_midi)
+        scaled_midi.write(new_file_path)
+        console.log(
+            f"{self.p} scaled by factor {self.v_scale} ({v_min_o}, {v_max_o}) -> ({v_min_i}, {v_max_i})\n{v_hist_o} -> {v_hist_i}"
+        )
+
         old_path = os.path.join(self.plot_dir, os.path.basename(midi_file_path))
         old_pr = PrettyMIDI(midi_file_path).get_piano_roll()
         new_pr = PrettyMIDI(new_file_path).get_piano_roll()
         plot_path = os.path.join(self.plot_dir, f"loop {self.iter}.png")
 
-        plot_images(
+        um.plot_images(
             [old_pr, new_pr],
             [
                 f"{os.path.basename(midi_file_path)} ({midi.length:.02f}s)",

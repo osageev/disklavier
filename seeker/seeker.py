@@ -209,19 +209,15 @@ class Seeker:
         ]
         column_labels = [label for sublist in column_labels for label in sublist]
 
-        # console.log(
-        #     f"{self.p} building table to be ({len(names)}, {len(column_labels)})"
-        # )
-
         self.table = pd.DataFrame(
             [["", -1.0] * n] * len(names),
             index=names,
             columns=column_labels,
         )
 
-        # console.log(
-        #     f"{self.p} initialized table with rows:\n{names[:5]}\nand columns:\n{column_labels[:5]}"
-        # )
+        console.log(
+            f"{self.p} initialized table ({len(names)}, {len(column_labels)}) with rows:\n{names[:5]}\nand columns:\n{column_labels[:5]}"
+        )
 
         # index ranges for first and second sections of dataframe
         same_track_range = range(1, n, 2)
@@ -323,9 +319,13 @@ class Seeker:
         self.properties[filename]["played"] += 1  # mark current file as played
 
         # columns = self.table.columns[::2].insert(0, 0)
-        columns = self.table.columns[::2].values
+        columns = list(self.table.columns[::2].values)
         roll = self.rng.choice(columns, p=self.probs)
-        console.log(f"{self.p} rolled {roll}")
+        if columns.index(roll) > 5:
+            console.log(f"{self.p}[blue1] TRACK TRANSITION") 
+            console.log(f"{self.p} rolled {roll}")
+
+        # console.log(f"{self.p} rolled {roll}")
         # console.log(f"{self.p} columns\n{columns}")
         # console.log(f"{self.p} table columns\n{self.table.columns}")
 

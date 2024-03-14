@@ -62,8 +62,8 @@ def segment_midi(input_file_path: str, params):
         segment_midi.write(segment_filename)
 
         # semitone shift
-        if params.do_shift:
-            tpose_files = semitone_transpose(segment_filename, params.output_dir, 12)
+        if params.do_shift > 1:
+            tpose_files = semitone_transpose(segment_filename, params.output_dir, params.do_shift)
             new_files += len(tpose_files)
         else:
             new_files += 1
