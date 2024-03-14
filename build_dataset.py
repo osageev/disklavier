@@ -63,6 +63,17 @@ if __name__ == "__main__":
         print(f"creating new output folder: '{args.output_dir}'")
         os.mkdir(args.output_dir)
 
+    graveyard = os.path.join("outputs", "graveyard")
+    if os.path.exists(graveyard):
+        i = 0
+        for i, file in enumerate(os.listdir(graveyard)):
+            os.remove(os.path.join(graveyard, file))
+            i += 1
+        print(f"cleaned {i} files out of graveyard: '{graveyard}'")
+    else:
+        print(f"creating new graveyard: '{graveyard}'")
+        os.mkdir(graveyard)
+
     if args.limit is None:
         dataset = os.listdir(args.data_dir)
     else:

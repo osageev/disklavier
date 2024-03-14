@@ -1,15 +1,22 @@
 import os
 import mido
+import numpy as np
 from queue import Queue
 from threading import Thread, Event
 from datetime import datetime
+from pathlib import Path
+from pretty_midi import PrettyMIDI
 
 from player.player import Player
 from listener.listener import Listener
 from seeker.seeker import Seeker
 
 from utils import console
-from utils.midi import stretch_midi_file, plot_piano_roll_and_pitch_histogram
+from utils.midi import (
+    stretch_midi_file,
+    plot_piano_roll_and_pitch_histogram,
+    plot_images,
+)
 
 
 class Overseer:
@@ -35,6 +42,13 @@ class Overseer:
         self.kickstart = args.kickstart
         self.params.listener.tempo = self.tempo
         self.params.player.tempo = self.tempo
+        self.iter = 0
+
+        plot_dir = f"{datetime.now().strftime('%y%m%d-%H%M')}"
+
+        if not os.path.exists(os.path.join(self.plot_dir, plot_dir)):
+            os.mkdir(os.path.join(self.plot_dir, plot_dir))
+        self.plot_dir = os.path.join(self.plot_dir, plot_dir)
 
         self._init_midi()  # make sure MIDI port is available first
         if len(os.listdir(self.data_dir)) < 10:
@@ -113,7 +127,7 @@ class Overseer:
                     next_file_path = self.change_tempo(next_file_path)
 
                     # save plots of both PHs
-                    plot_dir = f"{datetime.now().strftime('%y%m%d-%H%M%S')}"
+                    plot_dir = f"pr_ph_{datetime.now().strftime('%y%m%d-%H%M%S')}"
                     plot_path = os.path.join(self.output_dir, "plots", plot_dir)
 
                     if os.path.exists(plot_path):
@@ -154,6 +168,8 @@ class Overseer:
                     )
 
                     self.give_next_event.clear()
+
+                    self.iter += 1
 
         except KeyboardInterrupt:  # CTRL+C caught
             # end threads
@@ -233,7 +249,7 @@ class Overseer:
                 if msg.type == "set_tempo":
                     # track.remove(msg)
                     track.remove(msg)
-                    console.log(f"{self.p} [red]removed set tempo message", msg)
+                    # console.log(f"{self.p} [red]removed set tempo message", msg)
 
             # add new set_tempo message to the first track
             if not tempo_added:
@@ -249,16 +265,47 @@ class Overseer:
             )
             new_track.append(new_message)
 
+        new_file_path = os.path.join(
+            "data", "playlist", f"{Path(midi_file_path).stem}.mid"
+        )
+        midi.save(new_file_path)
+
         # also stretch note timings
-        new_len = midi.length * file_bpm / self.tempo
-        if do_stretch:
-            midi = stretch_midi_file(midi, new_len, self.p)
+        # if do_stretch:
+        #     new_len = midi.length * file_bpm / self.tempo
+        #     new_midi = stretch_midi_file(midi, new_len, self.p)
 
         # save the modified MIDI file
-        new_file_path = os.path.join(
-            "data", "playlist", f"{os.path.basename(midi_file_path)}"
-        )
+
         # console.log(f"{self.p} saving modified MIDI file with new tempo {self.tempo} BPM to '{new_file_path}'")
-        midi.save(new_file_path)
+        # new_midi.save(new_file_path)
+        new_midi = mido.MidiFile(new_file_path)
+        # segment_length = 60 * 16 / file_bpm  # in seconds
+        # if np.round(segment_length, 3) != np.round(midi.length, 3):
+        #     total_time_t = -1
+        #     for track in midi.tracks:
+        #         # Remove existing 'end_of_track' messages and calculate last note time
+        #         for msg in track:
+        #             total_time_t += msg.time
+        #             if msg.type == "end_of_track":
+        #                 track.remove(msg)
+        # console.log(f"{self.p} expected len {segment_length:.04f} but found {midi.length:.04f} and calcd {mido.tick2second(total_time_t, 220, mido.bpm2tempo(file_bpm))}")
+
+        old_path = os.path.join(self.plot_dir, os.path.basename(midi_file_path))
+        old_pr = PrettyMIDI(midi_file_path).get_piano_roll()
+        new_pr = PrettyMIDI(new_file_path).get_piano_roll()
+        plot_path = os.path.join(self.plot_dir, f"loop {self.iter}.png")
+
+        plot_images(
+            [old_pr, new_pr],
+            [
+                f"{os.path.basename(midi_file_path)} ({midi.length:.02f}s)",
+                f"{os.path.basename(new_file_path)} ({new_midi.length:.02f}s)",
+            ],
+            plot_path,
+            (2, 1),
+            main_title=f"loop {self.iter}",
+            set_axis="on",
+        )
 
         return new_file_path

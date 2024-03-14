@@ -30,20 +30,32 @@ class Seeker:
         self.output_dir = output_dir
         self.force_rebuild = force_rebuild
 
+        # self.probs = [
+        #     1 / 5,  # same
+        #     1 / 6,  # next 1
+        #     1 / 6,  # prev 1
+        #     1 / 10,  # next 2
+        #     1 / 10,  # prev 2
+        #     0.0533,  # diff 1
+        #     0.0533,  # diff 2
+        #     0.0533,  # diff 3
+        #     0.0533,  # diff 4
+        # ]
+        # self.probs.append(1 - sum(self.probs))  # add diff 5
         self.probs = [
-            1 / 5,  # same
-            1 / 6,  # next 1
-            1 / 6,  # prev 1
-            1 / 10,  # next 2
-            1 / 10,  # prev 2
-            0.0533,  # diff 1
-            0.0533,  # diff 2
-            0.0533,  # diff 3
-            0.0533,  # diff 4
+            1 / 20,  # same
+            1 / 20,  # next 1
+            1 / 20,  # prev 1
+            1 / 20,  # next 2
+            1 / 20,  # prev 2
+            0.15,  # diff 1
+            0.15,  # diff 2
+            0.15,  # diff 3
+            0.15,  # diff 4
+            0.15,  # diff 5
         ]
-        self.probs.append(1 - sum(self.probs))  # add diff 5
         self.cumprobs = np.cumsum(self.probs)
-        self.rng = np.random.default_rng(2)
+        self.rng = np.random.default_rng(1)
 
         self.rng.choice(np.arange(len(self.probs)), p=self.probs, size=1)
 
@@ -155,11 +167,20 @@ class Seeker:
         self.load_similarities(parquet)
 
         if self.table is not None:
+            console.log(f"{self.p} swapping probs")
+
+            column_labels = [
+                [f"{prob}-{i+1}", f"sim-{i+1}"] for i, prob in enumerate(self.probs)
+            ]
+            column_labels = [label for sublist in column_labels for label in sublist]
+            self.table.columns = column_labels
+
             console.log(
                 f"{self.p} loaded existing similarity file from '{parquet}' ({self.table.shape})\n",
                 self.table.columns,
                 self.table.index[:4],
             )
+
             return
 
         if n % 2:
@@ -183,20 +204,8 @@ class Seeker:
             f"{self.p} building top-{n} similarity table for {len(vecs)} vectors from '{self.input_dir}'"
         )
 
-        probs = [
-            1 / 5,  # same
-            1 / 6,  # next 1
-            1 / 6,  # prev 1
-            1 / 10,  # next 2
-            1 / 10,  # prev 2
-            0.0533,  # diff 1
-            0.0533,  # diff 2
-            0.0533,  # diff 3
-            0.0533,  # diff 4
-        ]
-        probs.append(1 - sum(probs))  # add diff 5
         column_labels = [
-            [f"{prob}-{i+1}", f"sim-{i+1}"] for i, prob in enumerate(probs)
+            [f"{prob}-{i+1}", f"sim-{i+1}"] for i, prob in enumerate(self.probs)
         ]
         column_labels = [label for sublist in column_labels for label in sublist]
 
@@ -338,7 +347,7 @@ class Seeker:
         #         break
 
         next_filename = self.table.at[filename, f"{roll}"]
-        next_col = self.table.columns.get_loc(roll) + 1 # type: ignore
+        next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
         # console.log(
         #     f"{self.p} looking for similarity at ['{filename}', '{self.table.columns[next_col]}']\n\t",
         #     self.table.at[filename, self.table.columns[next_col]],
@@ -391,13 +400,10 @@ class Seeker:
 
         # console.log(f"{self.p} checking row:\n{self.table.iloc[row_index]}")
 
-        # Iterate through the specified range of columns in the row
         for col in col_range:
-            # Extract the current tuple's float value
-            current_value = self.table.iloc[row_index, col]
+            current_value = self.table.iloc[row_index, col]  # type: ignore
             # console.log(f"{self.p} got value at [{row_index}, {col}]: {current_value}")
 
-            # Check if this value is smaller than `sim` and the smallest found so far
             if current_value < sim and current_value < smallest_value:
                 smallest_value = current_value
                 smallest_index = col

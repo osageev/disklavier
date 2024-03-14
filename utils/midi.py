@@ -10,36 +10,44 @@ import matplotlib.patches as patches
 
 from utils import console
 
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 
 DARK = True
 
 
 #################################  plotting  ##################################
-def draw_midi(midi_file: str, labels: bool = False):
-    if DARK:
-        plt.style.use("dark_background")
+def plot_images(
+    images,
+    titles,
+    save_path,
+    shape=None,
+    main_title=None,
+    set_axis: str = "off",
+) -> None:
+    """Plot images vertically"""
+    num_images = len(images)
 
-    midi = PrettyMIDI(midi_file)
+    if shape is None:
+        shape = [num_images, 1]
 
-    _, ax = plt.subplots(figsize=(12, 4))
+    plt.style.use("dark_background")
+    plt.figure(figsize=(12, 12))
 
-    for note in midi.instruments[0].notes:
-        rect = patches.Rectangle(
-            (note.start, note.pitch), note.end - note.start, 1, color="green"
+    if main_title:
+        plt.suptitle(main_title)
+    for num_plot in range(num_images):
+        plt.subplot(shape[0], shape[1], num_plot + 1)
+        plt.imshow(
+            np.squeeze(images[num_plot]),
+            aspect="auto",
+            origin="lower",
+            cmap="magma",
+            interpolation="nearest",
         )
-        ax.add_patch(rect)
+        plt.title(titles[num_plot])
+        plt.axis(set_axis)
 
-    if labels:
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel("MIDI Note")
-    ax.set_yticks([])
-    ax.set_title(f"{Path(midi_file).stem}")
-
-    plt.box(False)
-    plt.ylim(20, 108)  # MIDI note range for a piano
-    plt.xlim(0, np.ceil(midi.instruments[0].notes[-1].end))
-    return plt.gcf()
+    plt.savefig(save_path)
 
 
 def draw_histogram(histogram, title="Pitch Histogram") -> None:
@@ -75,13 +83,13 @@ def draw_piano_roll(piano_roll, fs=100, title="Piano Roll") -> None:
 
 def plot_piano_roll_and_pitch_histogram(input_path: str, output_dir: str) -> None:
     """plot the piano roll and pitch histogram of a midi file side by side
-    
-        Parameters:
-            input_path (str): the file to read
-            output_dir (str): the folder to write the image out to
 
-        Returns:
-            None
+    Parameters:
+        input_path (str): the file to read
+        output_dir (str): the folder to write the image out to
+
+    Returns:
+        None
     """
     if DARK:
         plt.style.use("dark_background")
@@ -93,7 +101,7 @@ def plot_piano_roll_and_pitch_histogram(input_path: str, output_dir: str) -> Non
     plt.figure(figsize=(12, 6))
 
     plt.subplot(1, 2, 1)
-    plt.imshow(piano_roll, aspect="auto", origin="lower", cmap="gray_r")
+    plt.imshow(piano_roll, aspect="auto", origin="lower", cmap="magma")
     plt.title("Piano Roll")
     plt.xlabel("Time")
     plt.ylabel("MIDI Note Number")
@@ -452,11 +460,13 @@ def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) 
     midi.write(output_file_path)
 
 
-def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1) -> int:
+def semitone_transpose(
+    midi_path: str, output_dir: str, num_iterations: int = 1
+) -> List[str]:
     """vertically shift a matrix
     chatgpt
     """
-    new_filename = Path(midi_path).stem.split('_')
+    new_filename = Path(midi_path).stem.split("_")
     new_filename = f"{new_filename[0]}_{new_filename[1]}"
     lowest_note, highest_note = get_note_min_max(midi_path)
     max_up = 108 - highest_note  # TODO double-check this IRL
@@ -465,32 +475,34 @@ def semitone_shift(midi_path: str, output_dir: str, num_iterations: int = 1) -> 
     # zipper up & down
     up = 1
     down = -1
-    num_steps = 0
+    new_files = []
     for i in range(num_iterations):
         up_filename = f"{new_filename}_u{up:02d}.mid"
+        up_filepath = os.path.join(output_dir, up_filename)
         down_filename = f"{new_filename}_d{abs(down):02d}.mid"
+        down_filepath = os.path.join(output_dir, down_filename)
 
         if i % 2 == 0:
             if (
                 up > max_up
             ):  # If exceeding max_up, adjust by switching to down immediately
-                transpose_midi(midi_path, os.path.join(output_dir, down_filename), down)
-                num_steps += 1
+                transpose_midi(midi_path, down_filepath, down)
+                new_files.append(down_filepath)
                 down -= 1
             else:
-                transpose_midi(midi_path, os.path.join(output_dir, up_filename), up)
-                num_steps += 1
+                transpose_midi(midi_path, up_filepath, up)
+                new_files.append(up_filepath)
                 up += 1
         else:
             if (
                 abs(down) > max_down
             ):  # If exceeding max_down, adjust by switching to up immediately
-                transpose_midi(midi_path, os.path.join(output_dir, up_filename), up)
-                num_steps += 1
+                transpose_midi(midi_path, up_filepath, up)
+                new_files.append(up_filepath)
                 up += 1
             else:
-                transpose_midi(midi_path, os.path.join(output_dir, down_filename), down)
-                num_steps += 1
+                transpose_midi(midi_path, down_filepath, down)
+                new_files.append(down_filepath)
                 down -= 1
 
-    return num_steps
+    return new_files
