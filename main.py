@@ -142,5 +142,5 @@ if __name__ == "__main__":
         os.path.join(log_dir, f"{datetime.now().strftime('%y-%m-%d_%H%M%S')}.log")
     )
     console.log(f"{p}[green bold] session complete, exiting")
-    
+
     exit()

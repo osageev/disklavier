@@ -120,7 +120,7 @@ def plot_piano_roll_and_pitch_histogram(input_path: str, output_dir: str) -> Non
     plt.savefig(os.path.join(output_dir, f"{Path(input_path).stem}_ph.png"))
 
 
-################################  properties  #################################
+################################  heuristics  #################################
 ################################  all in one  #################################
 # TODO add manually-calculated "valid tempo range"
 
@@ -282,14 +282,7 @@ def energy(
     bin_length=None,
 ) -> list[float]:
     """
-    Calculate the number of simultaneous notes being played each second in a MIDI file.
-
-    Parameters:
-        midi (PrettyMIDI): The prettyMIDI container object for the MIDI file.
-        bin_length (float): The length of time each bin should occupy. (default is clip length)
-
-    Returns:
-        list: A list whose values are the number of simultaneous notes being played in that second.
+    Calculate a weighted average of note lengths and average velocities
     """
     if bin_length == None:
         bin_length = midi.get_end_time()
@@ -315,7 +308,7 @@ def norm(data):
     return (data - np.min(data)) / (np.max(data) - np.min(data))
 
 
-#################################  random  ###################################
+#################################  other  ###################################
 def quantize_midi(filename, sections_per_beat) -> PrettyMIDI:
     """
     Quantizes a MIDI file into sections_per_beat sections per beat.

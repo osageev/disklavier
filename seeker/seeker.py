@@ -158,6 +158,7 @@ class Seeker:
             - ensure that row names are properly set
             - calculate next & previous files properly
             - set column names to use cumsum of probs
+            - force different tracks for different file columns
         """
         parquet = os.path.join(
             self.output_dir,
@@ -167,12 +168,12 @@ class Seeker:
         self.load_similarities(parquet)
 
         if self.table is not None:
-            console.log(f"{self.p} swapping probs")
 
             column_labels = [
-                [f"{prob}-{i+1}", f"sim-{i+1}"] for i, prob in enumerate(self.probs)
+                [f"{prob}-{i + 1}", f"sim-{i + 1}"] for i, prob in enumerate(self.probs)
             ]
             column_labels = [label for sublist in column_labels for label in sublist]
+            console.log(f"{self.p} swapping probs to:\n", column_labels)
             self.table.columns = column_labels
 
             console.log(
@@ -234,7 +235,7 @@ class Seeker:
         with progress:
             # for each row (file)
             for i in range(len(vecs)):
-                # console.log(f"\n{self.p} checking row '{names[i]}'")
+                console.log(f"\n{self.p} adding row '{names[i]}'")
 
                 i_name, i_seg_num, i_shift = names[i].split("_")
                 i_seg_start, i_seg_end = i_seg_num.split("-")
@@ -322,8 +323,9 @@ class Seeker:
         columns = list(self.table.columns[::2].values)
         roll = self.rng.choice(columns, p=self.probs)
         if columns.index(roll) > 5:
-            console.log(f"{self.p}[blue1] TRACK TRANSITION") 
-            console.log(f"{self.p} rolled {roll}")
+            console.log(f"{self.p}[blue1] TRACK TRANSITION[/blue1] (rolled {roll})") 
+
+            console.log(f"{self.p} options: ", self.table.loc[filename])
 
         # console.log(f"{self.p} rolled {roll}")
         # console.log(f"{self.p} columns\n{columns}")
