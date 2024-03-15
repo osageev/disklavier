@@ -1,6 +1,5 @@
 import os
 import mido
-import numpy as np
 from queue import Queue
 from threading import Thread, Event
 from datetime import datetime
@@ -13,6 +12,7 @@ from seeker.seeker import Seeker
 
 from utils import console
 import utils.midi as um
+from utils.plot import plot_images, plot_piano_roll_and_pitch_histogram
 
 
 class Overseer:
@@ -130,8 +130,8 @@ class Overseer:
                     if os.path.exists(plot_path):
                         plot_path += "_2"
                     os.mkdir(plot_path)
-                    um.plot_piano_roll_and_pitch_histogram(recording_path, plot_path)
-                    um.plot_piano_roll_and_pitch_histogram(next_file_path, plot_path)
+                    plot_piano_roll_and_pitch_histogram(recording_path, plot_path)
+                    plot_piano_roll_and_pitch_histogram(next_file_path, plot_path)
 
                     # start up player
                     self.playlist_queue.put((next_file_path, float(first_link[1])))
@@ -305,7 +305,7 @@ class Overseer:
         new_pr = PrettyMIDI(new_file_path).get_piano_roll()
         plot_path = os.path.join(self.plot_dir, f"loop {self.iter}.png")
 
-        um.plot_images(
+        plot_images(
             [old_pr, new_pr],
             [
                 f"{os.path.basename(midi_file_path)} ({midi.length:.02f}s)",
