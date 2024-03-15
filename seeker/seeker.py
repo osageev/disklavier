@@ -42,22 +42,9 @@ class Seeker:
         #     0.0533,  # diff 4
         # ]
         # self.probs.append(1 - sum(self.probs))  # add diff 5
-        self.probs = [
-            1 / 20,  # same
-            1 / 20,  # next 1
-            1 / 20,  # prev 1
-            1 / 20,  # next 2
-            1 / 20,  # prev 2
-            0.15,  # diff 1
-            0.15,  # diff 2
-            0.15,  # diff 3
-            0.15,  # diff 4
-            0.15,  # diff 5
-        ]
+        self.probs = self.params.probabilities
         self.cumprobs = np.cumsum(self.probs)
         self.rng = np.random.default_rng(1)
-
-        self.rng.choice(np.arange(len(self.probs)), p=self.probs, size=1)
 
     def build_properties(self) -> None:
         dict_file = os.path.join(
@@ -152,14 +139,8 @@ class Seeker:
                 console.log(f"{self.p} error saving similarities file '{parquet}'")
                 raise FileNotFoundError
 
-    def build_top_n_table(self, n: int = 10, vision: int = 1) -> None:
-        """
-        TODO before rerun:
-            - ensure that row names are properly set
-            - calculate next & previous files properly
-            - set column names to use cumsum of probs
-            - force different tracks for different file columns
-        """
+    def build_top_n_table(self, n: int = 10, vision: int = 2) -> None:
+        """ """
         parquet = os.path.join(
             self.output_dir,
             f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}.parquet",
@@ -168,13 +149,12 @@ class Seeker:
         self.load_similarities(parquet)
 
         if self.table is not None:
-
-            column_labels = [
-                [f"{prob}-{i + 1}", f"sim-{i + 1}"] for i, prob in enumerate(self.probs)
-            ]
-            column_labels = [label for sublist in column_labels for label in sublist]
-            console.log(f"{self.p} swapping probs to:\n", column_labels)
-            self.table.columns = column_labels
+            # column_labels = [
+            #     [f"{prob}-{i + 1}", f"sim-{i + 1}"] for i, prob in enumerate(self.probs)
+            # ]
+            # column_labels = [label for sublist in column_labels for label in sublist]
+            # console.log(f"{self.p} swapping probs to:\n", column_labels)
+            # self.table.columns = column_labels
 
             console.log(
                 f"{self.p} loaded existing similarity file from '{parquet}' ({self.table.shape})\n",
@@ -205,9 +185,24 @@ class Seeker:
             f"{self.p} building top-{n} similarity table for {len(vecs)} vectors from '{self.input_dir}'"
         )
 
-        column_labels = [
-            [f"{prob}-{i+1}", f"sim-{i+1}"] for i, prob in enumerate(self.probs)
+        labels = [
+            "loop  ",
+            "prev 1",
+            "next 1",
+            "prev 2",
+            "next 2",
+            "diff 1",
+            "diff 2",
+            "diff 3",
+            "diff 4",
+            "diff 5",
         ]
+        column_labels = [
+            [label, f"sim-{i + 1}"] for i, label in enumerate(labels)
+        ]
+        # column_labels = [
+        #     [f"{prob:.03f}-{i}", f"sim-{i + 1}"] for i, prob in enumerate(self.probs)
+        # ]
         column_labels = [label for sublist in column_labels for label in sublist]
 
         self.table = pd.DataFrame(
@@ -217,12 +212,9 @@ class Seeker:
         )
 
         console.log(
-            f"{self.p} initialized table ({len(names)}, {len(column_labels)}) with rows:\n{names[:5]}\nand columns:\n{column_labels[:5]}"
+            f"{self.p} initialized table ({len(names)}, {len(column_labels)}) with rows:\n{names[:5]}\nand columns:\n{column_labels}"
         )
-
-        # index ranges for first and second sections of dataframe
-        same_track_range = range(1, n, 2)
-        diff_track_range = range(n + 1, n * 2, 2)
+        console.log(self.table[:5])
 
         progress = Progress(
             SpinnerColumn(),
@@ -233,39 +225,90 @@ class Seeker:
         )
         sims_task = progress.add_task("calculating sims", total=len(vecs) ** 2)
         with progress:
-            # for each row (file)
-            for i in range(len(vecs)):
-                console.log(f"\n{self.p} adding row '{names[i]}'")
+            # for each row (segment)
+            # for i in range(len(vecs)):
+            #     console.log(f"\n{self.p} adding row '{names[i]}'")
 
-                i_name, i_seg_num, i_shift = names[i].split("_")
+            #     i_name, i_seg_num, i_shift = names[i].split("_")
+            #     i_seg_start, i_seg_end = i_seg_num.split("-")
+            #     i_track_name = f"{i_name}_{i_seg_num}"
+            #     # console.print(i_name, i_seg_num, i_shift, i_seg_start, i_seg_end)
+
+            #     # for each other segment
+            #     for j in range(len(vecs)):
+            #         # console.log(f"{self.p} checking col '{names[j]}'")
+            #         j_name, j_seg_num, j_shift = names[j].split("_")
+            #         j_seg_start, j_seg_end = j_seg_num.split("-")
+            #         j_track_name = f"{j_name}_{j_seg_num}"
+            #         # console.print(j_name, j_seg_num, j_shift, j_seg_start, j_seg_end)
+
+            #         sim = float(1 - cosine(vecs[i], vecs[j])) if i != j else 1.0
+
+            #         # index ranges for first and second sections of dataframe
+            #         same_track_range = range(1, n, 2)
+            #         diff_track_range = range(n + 1, n * 2, 2)
+            #         if i_name == j_name and (       # clip is within 2 on the same track
+            #             i_seg_start == j_seg_start
+            #             or i_seg_start == j_seg_end
+            #             or i_seg_end == j_seg_start
+            #         ):
+            #             console.log(f"{self.p} comparing neighboring clip")
+            #             self.replace_smallest_sim(
+            #                 names[i],
+            #                 names[j],
+            #                 sim,
+            #                 same_track_range,
+            #             )
+            #         elif i_track_name != j_track_name:  # clip is from a different track
+            #             self.replace_smallest_sim(
+            #                 names[i],
+            #                 names[j],
+            #                 sim,
+            #                 diff_track_range,
+            #             )
+            for name in self.table.index:
+                # console.log(f"\n{self.p} populating row '{name}'")
+
+                i = int(self.table.index.get_loc(name))  # type: ignore
+                i_name, i_seg_num, i_shift = name.split("_")
                 i_seg_start, i_seg_end = i_seg_num.split("-")
+                i_track_name = f"{i_name}_{i_seg_num}"
                 # console.print(i_name, i_seg_num, i_shift, i_seg_start, i_seg_end)
-                # for each other file
-                for j in range(len(vecs)):
+
+                # populate first five columns
+                same_track_range = range(2, n, 2)
+                # get prev file(s)
+                prev_file = self.get_prev(name)
+                if prev_file:
+                    if int(i_seg_start) != 0:
+                        prv2_file = self.get_prev(prev_file)
+
+                # get next file(s)
+                next_file = self.get_next(name)
+                if next_file:
+                    nxt2_file = self.get_next(next_file)
+
+                names = [prev_file, next_file, prv2_file, nxt2_file]
+
+                for j, k in zip(same_track_range, names):
+                    self.table.iat[i, j] = k
+
+                # update second five columns
+                for other_name in self.table.index:
                     # console.log(f"{self.p} checking col '{names[j]}'")
-                    j_name, j_seg_num, j_shift = names[j].split("_")
+                    j = int(self.table.index.get_loc(other_name)) # type: ignore
+                    j_name, j_seg_num, j_shift = other_name.split("_")
                     j_seg_start, j_seg_end = j_seg_num.split("-")
+                    j_track_name = f"{j_name}_{j_seg_num}"
                     # console.print(j_name, j_seg_num, j_shift, j_seg_start, j_seg_end)
 
                     sim = float(1 - cosine(vecs[i], vecs[j])) if i != j else 1.0
 
-                    # neighboring clips
-                    if i_name == j_name and (
-                        i_seg_start == j_seg_start
-                        or i_seg_start == j_seg_end
-                        or i_seg_end == j_seg_start
-                    ):
-                        # console.log(f"{self.p} comparing neighboring clip")
+                    diff_track_range = range(n + 1, n * 2, 2)
+                    if i_track_name != j_track_name:  # clip is from a different track
                         self.replace_smallest_sim(
-                            names[i],
-                            names[j],
-                            sim,
-                            same_track_range,
-                        )
-                    else:  # clip is not neighboring
-                        self.replace_smallest_sim(
-                            names[i],
-                            names[j],
+                            name,
+                            other_name,
                             sim,
                             diff_track_range,
                         )
@@ -276,7 +319,7 @@ class Seeker:
             f"{self.p} Generated a similarity table of shape {self.table.shape}"
         )
 
-        self.table.to_parquet(parquet, index=False)
+        self.table.to_parquet(parquet, index=True)
 
         if os.path.isfile(parquet):
             console.log(f"{self.p} succesfully saved similarities file '{parquet}'")
@@ -323,9 +366,9 @@ class Seeker:
         columns = list(self.table.columns[::2].values)
         roll = self.rng.choice(columns, p=self.probs)
         if columns.index(roll) > 5:
-            console.log(f"{self.p}[blue1] TRACK TRANSITION[/blue1] (rolled {roll})") 
+            console.log(f"{self.p}[blue1] TRACK TRANSITION[/blue1] (rolled '{roll}')")
 
-            console.log(f"{self.p} options: ", self.table.loc[filename])
+            # console.log(f"{self.p} options: ", self.table.loc[filename])
 
         # console.log(f"{self.p} rolled {roll}")
         # console.log(f"{self.p} columns\n{columns}")
@@ -424,3 +467,47 @@ class Seeker:
             self.table = pd.read_parquet(parquet_path)
         else:
             self.table = None  # type: ignore
+
+    def get_prev(self, filename):
+        i_name, i_seg_num, i_shift = filename.split("_")
+        i_seg_start, i_seg_end = i_seg_num.split("-")
+        delta = int(i_seg_end) - int(i_seg_start)
+
+        if int(i_seg_start) == 0:
+            return None
+
+        prev_file = f"{i_name}_{int(i_seg_start) - delta:04d}-{i_seg_start}_{i_shift}"
+
+        for key in self.properties.keys():
+            k_name, k_seg_num, k_shift = key.split("_")
+            k_seg_start, k_seg_end = k_seg_num.split("-")
+
+            if (
+                k_name == i_name
+                and k_shift == i_shift
+                and abs(int(k_seg_end) - int(i_seg_start)) <= 2
+            ):
+                prev_file = key
+
+        return prev_file
+
+    def get_next(self, filename):
+        i_name, i_seg_num, i_shift = filename.split("_")
+        i_seg_start, i_seg_end = i_seg_num.split("-")
+        delta = int(i_seg_end) - int(i_seg_start)
+
+        next_file = f"{i_name}_{i_seg_end}-{int(i_seg_end) + delta:04d}_{i_shift}"
+        if next_file not in self.properties.keys():
+            next_file = None
+            for key in self.properties.keys():
+                k_name, k_seg_num, k_shift = key.split("_")
+                k_seg_start, k_seg_end = k_seg_num.split("-")
+
+                if (
+                    k_name == i_name
+                    and k_shift == i_shift
+                    and abs(int(k_seg_start) - int(i_seg_end)) <= 2
+                ):
+                    next_file = key
+
+        return next_file
