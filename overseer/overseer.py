@@ -1,5 +1,6 @@
 import os
 import mido
+from pynput import keyboard
 from queue import Queue
 from threading import Thread, Event
 from datetime import datetime
@@ -9,9 +10,9 @@ from pretty_midi import PrettyMIDI
 from player.player import Player
 from listener.listener import Listener
 from seeker.seeker import Seeker
+from controls import KeyboardController
 
 from utils import console
-import utils.midi as um
 from utils.metrics import scale_vels
 from utils.plot import plot_images, plot_piano_roll_and_pitch_histogram
 
@@ -60,6 +61,7 @@ class Overseer:
         self.recording_ready_event = Event()
         self.playlist_queue = Queue()
         self.progress_queue = Queue()
+        self.keypress_queue = Queue()
 
         # initialize objects to be overseen
         self.seeker = Seeker(
@@ -83,6 +85,7 @@ class Overseer:
             self.playlist_queue,
             self.progress_queue,
         )
+        self.controller = KeyboardController(self.keypress_queue, self.kill_event)
 
     def start(self) -> None:
         """run the system"""
@@ -100,6 +103,9 @@ class Overseer:
                 target=self.listener.listen, args=(), name="listener"
             )
             listen_thread.start()
+
+        controller_thread = Thread(target=self.controller.listen, args=(), name="controller")
+        controller_thread.start()
 
         try:
             while True:
@@ -174,7 +180,9 @@ class Overseer:
             console.log(f"{self.p} [red]CTRL + C detected, shutting down")
             self.kill_event.set()
 
-            playback_thread.join()
+            controller_thread.join()
+            console.log(f"{self.p} controller killed successfully")
+            controller_thread.join()
             console.log(f"{self.p} player killed successfully")
             listen_thread.join()
             console.log(f"{self.p} listener killed successfully")

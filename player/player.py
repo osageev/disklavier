@@ -82,7 +82,7 @@ class Player:
             self.out_port.send(msg)
             self.playback_progress.put(msg.time)  # type: ignore
 
-            if self.kill_event.isSet() and not printed_msg:
+            if self.kill_event.is_set() and not printed_msg:
                 console.log(f"{self.p} [yellow]finishing playback of the current file")
                 printed_msg = True
 
