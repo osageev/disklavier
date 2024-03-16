@@ -13,7 +13,9 @@ from rich.progress import (
 )
 
 from utils import console
-from utils.metrics import all_properties
+import utils.metrics as metrics
+
+from typing import Tuple
 
 
 class Seeker:
@@ -57,7 +59,7 @@ class Seeker:
                 if file.endswith(".mid") or file.endswith(".midi"):
                     file_path = os.path.join(self.input_dir, file)
                     midi = pretty_midi.PrettyMIDI(file_path)
-                    properties = all_properties(file_path, file, self.params)
+                    properties = metrics.all_properties(file_path, file, self.params)
                     self.properties[file] = {
                         "filename": file,
                         "properties": properties,
@@ -350,19 +352,25 @@ class Seeker:
 
         return next_filename, similarity
 
-    def midi_to_ph(self, midi_file: str):
-        """"""
-        console.log(f"{self.p} calculating pitch histogram for '{midi_file}'")
+    def get_ms_to_recording(self, recording_path: str) -> Tuple[str | None, float]:
+        console.log(
+            f"{self.p} finding most similar vector to '{recording_path}' with metric {self.params.property}"
+        )
 
-        midi = pretty_midi.PrettyMIDI(midi_file)
+        midi = pretty_midi.PrettyMIDI(recording_path)
 
-        return midi.get_pitch_class_histogram()
+        match self.params.property:
+            case "energy":
+                cmp_metric = metrics.energy(recording_path)
+            case "pr_blur":
+                cmp_metric = metrics.blur_pr(midi, False)
+            case "pr_blur_c":
+                cmp_metric = metrics.blur_pr(midi)
+            case _:
+                cmp_metric = midi.get_pitch_class_histogram()
 
-    def find_most_similar_vector(self, target_vector):
-        """"""
-        console.log(f"{self.p} finding most similar vector to {target_vector}")
         most_similar_vector = None
-        highest_similarity = -1  # since cosine similarity ranges from -1 to 1
+        highest_similarity = -1.0  # since cosine similarity ranges from -1 to 1
         vector_array = [
             {"name": filename, "metric": details["properties"][self.params.property]}
             for filename, details in self.properties.items()
@@ -370,13 +378,13 @@ class Seeker:
 
         for vector_data in vector_array:
             name, vector = vector_data.values()
-            similarity = 1 - cosine(target_vector, vector)  # type: ignore
+            similarity = float(1 - cosine(cmp_metric, vector))  # type: ignore
             if similarity > highest_similarity:
                 highest_similarity = similarity
                 most_similar_vector = name
 
         console.log(
-            f"{self.p} found '{most_similar_vector}' with similarity {similarity:03f}"
+            f"{self.p} found '{most_similar_vector}' with similarity {highest_similarity:03f}"
         )
 
         return most_similar_vector, highest_similarity
@@ -456,3 +464,6 @@ class Seeker:
                     next_file = key
 
         return next_file
+
+    def pitch_transpose(self, filename):
+        pass

@@ -1,5 +1,6 @@
 in_port: 'Disklavier'
 out_port: 'Disklavier'
+augment_recording: True
 listener:
   ctrl: 67
 player:

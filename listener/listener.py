@@ -81,7 +81,7 @@ class Listener:
 
     def save_midi(self, dt):
         """Saves the recorded notes to a MIDI file."""
-        self.outfile = f"recording_{datetime.now().strftime('%y-%m-%d_%H%M%S')}.mid"
+        self.outfile = f"recording-{self.params.tempo:03d}-{datetime.now().strftime('%y%m%d_%H%M%S')}.mid"
         console.log(f"{self.p} saving recording '{self.outfile}'")
 
         mid = MidiFile()
