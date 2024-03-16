@@ -105,6 +105,9 @@ if __name__ == "__main__":
     log_dir = os.path.join(args.output_dir, "logs")
     record_dir = os.path.join(args.output_dir, "records")
     plot_dir = os.path.join(args.output_dir, "plots")
+    playlist_dir = os.path.join(
+        "data", "playlist", datetime.now().strftime("%y%m%d-%H%M")
+    )
 
     if not os.path.exists(args.output_dir):
         os.mkdir(args.output_dir)
@@ -117,6 +120,9 @@ if __name__ == "__main__":
     if not os.path.exists(plot_dir):
         console.log(f"{p} creating new plots folder: '{plot_dir}'")
         os.mkdir(plot_dir)
+    if not os.path.exists(playlist_dir):
+        console.log(f"{p} creating new playlist folder: '{playlist_dir}'")
+        os.mkdir(playlist_dir)
     console.log(f"{p}[green bold] filesystem is set up")
 
     if args.tempo:
@@ -130,6 +136,7 @@ if __name__ == "__main__":
     overseer = Overseer(
         params,
         args,
+        playlist_dir,
         record_dir,
         plot_dir,
         playback_tempo,

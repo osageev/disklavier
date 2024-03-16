@@ -13,7 +13,9 @@ from rich.progress import (
 )
 
 from utils import console
-from utils.metrics import all_properties
+import utils.metrics as metrics
+
+from typing import Tuple
 
 
 class Seeker:
@@ -57,7 +59,7 @@ class Seeker:
                 if file.endswith(".mid") or file.endswith(".midi"):
                     file_path = os.path.join(self.input_dir, file)
                     midi = pretty_midi.PrettyMIDI(file_path)
-                    properties = all_properties(file_path, file, self.params)
+                    properties = metrics.all_properties(file_path, file, self.params)
                     self.properties[file] = {
                         "filename": file,
                         "properties": properties,
@@ -306,6 +308,9 @@ class Seeker:
         # if columns.index(roll) > 5:
         #     console.log(f"{self.p}[blue1] TRACK TRANSITION[/blue1] (rolled '{roll}')")
 
+        if self.params.calc_trans and not filename.endswith('n00.mid'):
+            filename = filename[:-7] + 'n00.mid'
+
         next_filename = self.table.at[filename, f"{roll}"]
         next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
         # console.log(
@@ -344,25 +349,39 @@ class Seeker:
 
         #         break
 
+        # check transposition if using centered blur
+        if self.params.calc_trans:
+            next_filename, similarity = self.pitch_transpose(
+                os.path.join(self.input_dir, filename),
+                os.path.join(self.input_dir, next_filename),
+                similarity,
+            )
+
         console.log(
             f"{self.p} found '{next_filename}' with similarity {similarity:03f}"
         )
 
         return next_filename, similarity
 
-    def midi_to_ph(self, midi_file: str):
-        """"""
-        console.log(f"{self.p} calculating pitch histogram for '{midi_file}'")
+    def get_ms_to_recording(self, recording_path: str) -> Tuple[str | None, float]:
+        console.log(
+            f"{self.p} finding most similar vector to '{recording_path}' with metric {self.params.property}"
+        )
 
-        midi = pretty_midi.PrettyMIDI(midi_file)
+        midi = pretty_midi.PrettyMIDI(recording_path)
 
-        return midi.get_pitch_class_histogram()
+        match self.params.property:
+            case "energy":
+                cmp_metric = metrics.energy(recording_path)
+            case "pr_blur":
+                cmp_metric = metrics.blur_pr(midi, False)
+            case "pr_blur_c":
+                cmp_metric = metrics.blur_pr(midi)
+            case _:
+                cmp_metric = midi.get_pitch_class_histogram()
 
-    def find_most_similar_vector(self, target_vector):
-        """"""
-        console.log(f"{self.p} finding most similar vector to {target_vector}")
         most_similar_vector = None
-        highest_similarity = -1  # since cosine similarity ranges from -1 to 1
+        highest_similarity = -1.0  # since cosine similarity ranges from -1 to 1
         vector_array = [
             {"name": filename, "metric": details["properties"][self.params.property]}
             for filename, details in self.properties.items()
@@ -370,14 +389,21 @@ class Seeker:
 
         for vector_data in vector_array:
             name, vector = vector_data.values()
-            similarity = 1 - cosine(target_vector, vector)  # type: ignore
+            similarity = float(1 - cosine(cmp_metric, vector))  # type: ignore
             if similarity > highest_similarity:
                 highest_similarity = similarity
                 most_similar_vector = name
 
         console.log(
-            f"{self.p} found '{most_similar_vector}' with similarity {similarity:03f}"
+            f"{self.p} found '{most_similar_vector}' with similarity {highest_similarity:03f}"
         )
+
+        if self.params.calc_trans:
+            most_similar_vector, highest_similarity = self.pitch_transpose(
+                recording_path,
+                os.path.join(self.input_dir, str(most_similar_vector)),
+                highest_similarity,
+            )
 
         return most_similar_vector, highest_similarity
 
@@ -456,3 +482,41 @@ class Seeker:
                     next_file = key
 
         return next_file
+
+    def pitch_transpose(self, seed: str, match: str, similarity: float) -> Tuple[str, float]:
+        trans_options = [
+            "u01.mid",
+            "d01.mid",
+            "u02.mid",
+            "d02.mid",
+            "u03.mid",
+            "d03.mid",
+            "u04.mid",
+            "d04.mid",
+            "u05.mid",
+            "d05.mid",
+            "u06.mid",
+            "d06.mid",
+        ]
+
+        seed_ph = pretty_midi.PrettyMIDI(seed).get_pitch_class_histogram()
+        match_ph = pretty_midi.PrettyMIDI(match).get_pitch_class_histogram()
+        match_ph_sim = float(1 - cosine(seed_ph, match_ph))
+
+        # console.log(f"{self.p} unshifted match has similarity {match_ph_sim:.03f}")
+
+        best_match = os.path.basename(match)
+        best_sim = match_ph_sim
+
+        for transposition in trans_options:
+            t_file = match[:-7] + transposition
+            t_ph = pretty_midi.PrettyMIDI(t_file).get_pitch_class_histogram()
+            t_sim = float(1 - cosine(seed_ph, t_ph))
+
+            if t_sim > best_sim:
+                best_match = os.path.basename(t_file)
+                best_sim = t_sim
+
+                console.log(f"{self.p} \tbetter trans {transposition[:3]} -> '{os.path.basename(t_file)}' @ {t_sim:.03f}")
+
+        return best_match, best_sim
