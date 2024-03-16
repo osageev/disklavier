@@ -308,6 +308,9 @@ class Seeker:
         # if columns.index(roll) > 5:
         #     console.log(f"{self.p}[blue1] TRACK TRANSITION[/blue1] (rolled '{roll}')")
 
+        if self.params.calc_trans and not filename.endswith('n00.mid'):
+            filename = filename[:-7] + 'n00.mid'
+
         next_filename = self.table.at[filename, f"{roll}"]
         next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
         # console.log(
@@ -345,6 +348,14 @@ class Seeker:
         #         similarity = float(self.table.at[filename, next_col])
 
         #         break
+
+        # check transposition if using centered blur
+        if self.params.calc_trans:
+            next_filename, similarity = self.pitch_transpose(
+                os.path.join(self.input_dir, filename),
+                os.path.join(self.input_dir, next_filename),
+                similarity,
+            )
 
         console.log(
             f"{self.p} found '{next_filename}' with similarity {similarity:03f}"
@@ -386,6 +397,13 @@ class Seeker:
         console.log(
             f"{self.p} found '{most_similar_vector}' with similarity {highest_similarity:03f}"
         )
+
+        if self.params.calc_trans:
+            most_similar_vector, highest_similarity = self.pitch_transpose(
+                recording_path,
+                os.path.join(self.input_dir, str(most_similar_vector)),
+                highest_similarity,
+            )
 
         return most_similar_vector, highest_similarity
 
@@ -465,5 +483,40 @@ class Seeker:
 
         return next_file
 
-    def pitch_transpose(self, filename):
-        pass
+    def pitch_transpose(self, seed: str, match: str, similarity: float) -> Tuple[str, float]:
+        trans_options = [
+            "u01.mid",
+            "d01.mid",
+            "u02.mid",
+            "d02.mid",
+            "u03.mid",
+            "d03.mid",
+            "u04.mid",
+            "d04.mid",
+            "u05.mid",
+            "d05.mid",
+            "u06.mid",
+            "d06.mid",
+        ]
+
+        seed_ph = pretty_midi.PrettyMIDI(seed).get_pitch_class_histogram()
+        match_ph = pretty_midi.PrettyMIDI(match).get_pitch_class_histogram()
+        match_ph_sim = float(1 - cosine(seed_ph, match_ph))
+
+        # console.log(f"{self.p} unshifted match has similarity {match_ph_sim:.03f}")
+
+        best_match = os.path.basename(match)
+        best_sim = match_ph_sim
+
+        for transposition in trans_options:
+            t_file = match[:-7] + transposition
+            t_ph = pretty_midi.PrettyMIDI(t_file).get_pitch_class_histogram()
+            t_sim = float(1 - cosine(seed_ph, t_ph))
+
+            if t_sim > best_sim:
+                best_match = os.path.basename(t_file)
+                best_sim = t_sim
+
+                console.log(f"{self.p} \tbetter trans {transposition[:3]} -> '{os.path.basename(t_file)}' @ {t_sim:.03f}")
+
+        return best_match, best_sim

@@ -45,7 +45,7 @@ class Player:
             self.get_next.set()
 
             console.log(
-                f"{self.p} playing '{self.playing_file}'\t(next up is '{next_file}')\tsim={similarity:.3f}"
+                f"{self.p} playing '{self.playing_file}' -- {similarity:.3f} --> '{next_file}'"
             )
 
             self.play_midi_file(self.playing_file_path)
