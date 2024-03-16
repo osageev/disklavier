@@ -1,11 +1,9 @@
 in_port: 'from Max 1'
 out_port: 'to Max 1'
 listener:
-  ctrl: 67
-  in_port: 'from Max 1'
+  record: 67
+  reset: 66
 player:
-  in_port: 'from Max 1'
-  out_port: 'to Max 1'
   loop_chance: 0.0
   play_time: 6000
   time_elapsed: 0

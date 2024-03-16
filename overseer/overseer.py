@@ -10,7 +10,7 @@ from pretty_midi import PrettyMIDI
 from player.player import Player
 from listener.listener import Listener
 from seeker.seeker import Seeker
-from controls import KeyboardController
+import key_controls
 
 from utils import console
 from utils.midi import augment_recording
@@ -59,7 +59,10 @@ class Overseer:
             )
 
         # set up events & queues for threading
-        self.kill_event = Event()
+        self.kill_controller_event = Event()
+        self.kill_listener_event = Event()
+        self.kill_player_event = Event()
+        self.reset_event = Event()
         self.give_next_event = Event()
         self.recording_ready_event = Event()
         self.playlist_queue = Queue()
@@ -77,18 +80,21 @@ class Overseer:
             self.params.listener,
             self.record_dir,
             self.recording_ready_event,
-            self.kill_event,
+            self.kill_listener_event,
+            self.reset_event,
         )
         self.player = Player(
             self.params.player,
             self.record_dir,
             args.tick,
-            self.kill_event,
+            self.kill_player_event,
             self.give_next_event,
             self.playlist_queue,
             self.progress_queue,
         )
-        self.controller = KeyboardController(self.keypress_queue, self.kill_event)
+        self.controller = key_controls.Controller(
+            self.kill_controller_event, self.keypress_queue
+        )
 
     def start(self) -> None:
         """run the system"""
@@ -107,7 +113,11 @@ class Overseer:
             )
             listen_thread.start()
 
-        controller_thread = Thread(target=self.controller.listen, args=(), name="controller")
+        # controller = keyboard.Listener(on_press=key_controls.on_press)
+        # controller.start()
+        controller_thread = Thread(
+            target=self.controller.run, args=(), name="controller"
+        )
         controller_thread.start()
 
         try:
@@ -126,6 +136,15 @@ class Overseer:
                     console.log(
                         f"{self.p} triggering playback from recording '{recording_path}'"
                     )
+
+                    # start up player
+                    self.playlist_queue.put((recording_path, -1.0)) # this will hopefully get overwritten before it gets played
+                    playback_thread = Thread(
+                        target=self.player.playback_loop,
+                        args=(recording_path, "a"),
+                        name="player",
+                    )
+                    playback_thread.start()
 
                     # get most similar file to recording
                     first_file, first_similarity = self.seeker.get_ms_to_recording(
@@ -159,6 +178,9 @@ class Overseer:
 
                     next_file_path = os.path.join(self.data_dir, str(first_file))
                     next_file_path = self.change_tempo(next_file_path)
+                    while not self.playlist_queue.empty:
+                        _ = self.playlist_queue.get() # take out recording replay
+                    self.playlist_queue.put((next_file_path, first_similarity))
 
                     # save plots of both PHs
                     # plot_dir = f"pr_ph_{datetime.now().strftime('%y%m%d-%H%M%S')}"
@@ -168,15 +190,6 @@ class Overseer:
                     # os.mkdir(plot_path)
                     # plot_piano_roll_and_pitch_histogram(recording_path, plot_path)
                     # plot_piano_roll_and_pitch_histogram(next_file_path, plot_path)
-
-                    # start up player
-                    self.playlist_queue.put((next_file_path, first_similarity))
-                    playback_thread = Thread(
-                        target=self.player.playback_loop,
-                        args=(recording_path, change),
-                        name="player",
-                    )
-                    playback_thread.start()
 
                     # clear recording
                     self.listener.outfile = ""
@@ -204,17 +217,45 @@ class Overseer:
 
                     self.iter += 1
 
-        except KeyboardInterrupt:  # CTRL+C caught
-            # end threads
-            console.log(f"{self.p} [red]CTRL + C detected, shutting down")
-            self.kill_event.set()
+                if self.reset_event.is_set():
+                    console.log(f"{self.p} [bold deep_pink3]RESETTING")
 
-            controller_thread.join()
-            console.log(f"{self.p} controller killed successfully")
-            controller_thread.join()
+                    # reset player
+                    while not self.playlist_queue.empty:
+                        _ = self.playlist_queue.get()
+                    self.kill_player_event.set()
+                    console.log(f"{self.p} waiting for player to die")
+                    playback_thread.join()
+                    self.kill_player_event.clear()
+
+                    # clear recording
+                    self.listener.outfile = ""
+                    self.listener.recorded_notes = []
+                    self.recording_ready_event.clear()
+
+                    self.reset_event.clear()
+                    console.log(f"{self.p} reset complete")
+
+                # check for keypresses
+                # if self.keypress_queue.not_empty:
+                #     command = self.keypress_queue.get()
+                #     console.log(f"{self.p} got key command '{command}'")
+
+        except KeyboardInterrupt: # ctrl + c
+            # end threads
+            console.log(f"{self.p} [red bold]CTRL + C detected, shutting down")
+
+            self.kill_player_event.set()
+            playback_thread.join()
             console.log(f"{self.p} player killed successfully")
+
+            self.kill_listener_event.set()
             listen_thread.join()
             console.log(f"{self.p} listener killed successfully")
+
+            self.kill_controller_event.set()
+            controller_thread.join()
+            console.log(f"{self.p} controller killed successfully")
 
     def _init_midi(self) -> None:
         """initialize the MIDI system based on the connections specified in

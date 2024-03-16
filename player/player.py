@@ -9,7 +9,6 @@ from utils import console, tick
 
 class Player:
     p = "[blue]play[/blue]  :"
-    is_playing = False
 
     def __init__(
         self,
@@ -39,6 +38,7 @@ class Player:
 
         while next_file_path is not None and not self.kill_event.is_set():
             self.playing_file = os.path.basename(self.playing_file_path)
+
             if not first_loop:  # bad code!
                 next_file_path, similarity = self.file_queue.get()
                 next_file = os.path.basename(next_file_path)
@@ -80,7 +80,7 @@ class Player:
             if self.do_tick and not tick_thread.is_alive():
                 tick_thread.start()
             self.out_port.send(msg)
-            self.playback_progress.put(msg.time)  # type: ignore
+            # self.playback_progress.put(msg.time)  # type: ignore
 
             if self.kill_event.is_set() and not printed_msg:
                 console.log(f"{self.p} [yellow]finishing playback of the current file")
