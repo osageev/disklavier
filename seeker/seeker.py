@@ -143,7 +143,7 @@ class Seeker:
         """ """
         parquet = os.path.join(
             self.output_dir,
-            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}.parquet",
+            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}_{self.params.property}.parquet",
         )
 
         self.load_similarities(parquet)
