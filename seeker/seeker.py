@@ -13,7 +13,7 @@ from rich.progress import (
 )
 
 from utils import console
-from utils.midi import all_properties
+from utils.metrics import all_properties
 
 
 class Seeker:
@@ -29,27 +29,16 @@ class Seeker:
         self.input_dir = input_dir
         self.output_dir = output_dir
         self.force_rebuild = force_rebuild
-
-        # self.probs = [
-        #     1 / 5,  # same
-        #     1 / 6,  # next 1
-        #     1 / 6,  # prev 1
-        #     1 / 10,  # next 2
-        #     1 / 10,  # prev 2
-        #     0.0533,  # diff 1
-        #     0.0533,  # diff 2
-        #     0.0533,  # diff 3
-        #     0.0533,  # diff 4
-        # ]
-        # self.probs.append(1 - sum(self.probs))  # add diff 5
         self.probs = self.params.probabilities
         self.cumprobs = np.cumsum(self.probs)
         self.rng = np.random.default_rng(1)
 
+        console.log(f"{self.p} initialized to use metric '{self.params.property}'")
+
     def build_properties(self) -> None:
         dict_file = os.path.join(
             self.output_dir,
-            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}_properties.json",
+            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}.json",
         )
 
         if os.path.exists(dict_file) and not self.force_rebuild:
@@ -68,7 +57,7 @@ class Seeker:
                 if file.endswith(".mid") or file.endswith(".midi"):
                     file_path = os.path.join(self.input_dir, file)
                     midi = pretty_midi.PrettyMIDI(file_path)
-                    properties = all_properties(midi, file, self.params)
+                    properties = all_properties(file_path, file, self.params)
                     self.properties[file] = {
                         "filename": file,
                         "properties": properties,
@@ -143,19 +132,12 @@ class Seeker:
         """ """
         parquet = os.path.join(
             self.output_dir,
-            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}.parquet",
+            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}_{self.params.property}.parquet",
         )
 
         self.load_similarities(parquet)
 
         if self.table is not None:
-            # column_labels = [
-            #     [f"{prob}-{i + 1}", f"sim-{i + 1}"] for i, prob in enumerate(self.probs)
-            # ]
-            # column_labels = [label for sublist in column_labels for label in sublist]
-            # console.log(f"{self.p} swapping probs to:\n", column_labels)
-            # self.table.columns = column_labels
-
             console.log(
                 f"{self.p} loaded existing similarity file from '{parquet}' ({self.table.shape})\n",
                 self.table.columns,
@@ -166,7 +148,7 @@ class Seeker:
 
         if n % 2:
             console.log(
-                f"{self.p} [yellow]uneven value passed in for n ([/yellow]{n}[yellow]), rounding down"
+                f"{self.p} [yellow]odd value passed in for n ([/yellow]{n}[yellow]), rounding down"
             )
             n -= 1
 
@@ -182,7 +164,7 @@ class Seeker:
         vecs = [v["metric"] for v in vectors]
 
         console.log(
-            f"{self.p} building top-{n} similarity table for {len(vecs)} vectors from '{self.input_dir}'"
+            f"{self.p} building top-{n} similarity table for {len(vecs)} vectors from '{self.input_dir}' using metric '{self.params.property}'"
         )
 
         labels = [
@@ -197,9 +179,7 @@ class Seeker:
             "diff 4",
             "diff 5",
         ]
-        column_labels = [
-            [label, f"sim-{i + 1}"] for i, label in enumerate(labels)
-        ]
+        column_labels = [[label, f"sim-{i + 1}"] for i, label in enumerate(labels)]
         # column_labels = [
         #     [f"{prob:.03f}-{i}", f"sim-{i + 1}"] for i, prob in enumerate(self.probs)
         # ]
@@ -214,7 +194,6 @@ class Seeker:
         console.log(
             f"{self.p} initialized table ({len(names)}, {len(column_labels)}) with rows:\n{names[:5]}\nand columns:\n{column_labels}"
         )
-        console.log(self.table[:5])
 
         progress = Progress(
             SpinnerColumn(),
@@ -225,47 +204,6 @@ class Seeker:
         )
         sims_task = progress.add_task("calculating sims", total=len(vecs) ** 2)
         with progress:
-            # for each row (segment)
-            # for i in range(len(vecs)):
-            #     console.log(f"\n{self.p} adding row '{names[i]}'")
-
-            #     i_name, i_seg_num, i_shift = names[i].split("_")
-            #     i_seg_start, i_seg_end = i_seg_num.split("-")
-            #     i_track_name = f"{i_name}_{i_seg_num}"
-            #     # console.print(i_name, i_seg_num, i_shift, i_seg_start, i_seg_end)
-
-            #     # for each other segment
-            #     for j in range(len(vecs)):
-            #         # console.log(f"{self.p} checking col '{names[j]}'")
-            #         j_name, j_seg_num, j_shift = names[j].split("_")
-            #         j_seg_start, j_seg_end = j_seg_num.split("-")
-            #         j_track_name = f"{j_name}_{j_seg_num}"
-            #         # console.print(j_name, j_seg_num, j_shift, j_seg_start, j_seg_end)
-
-            #         sim = float(1 - cosine(vecs[i], vecs[j])) if i != j else 1.0
-
-            #         # index ranges for first and second sections of dataframe
-            #         same_track_range = range(1, n, 2)
-            #         diff_track_range = range(n + 1, n * 2, 2)
-            #         if i_name == j_name and (       # clip is within 2 on the same track
-            #             i_seg_start == j_seg_start
-            #             or i_seg_start == j_seg_end
-            #             or i_seg_end == j_seg_start
-            #         ):
-            #             console.log(f"{self.p} comparing neighboring clip")
-            #             self.replace_smallest_sim(
-            #                 names[i],
-            #                 names[j],
-            #                 sim,
-            #                 same_track_range,
-            #             )
-            #         elif i_track_name != j_track_name:  # clip is from a different track
-            #             self.replace_smallest_sim(
-            #                 names[i],
-            #                 names[j],
-            #                 sim,
-            #                 diff_track_range,
-            #             )
             for name in self.table.index:
                 # console.log(f"\n{self.p} populating row '{name}'")
 
@@ -276,33 +214,34 @@ class Seeker:
                 # console.print(i_name, i_seg_num, i_shift, i_seg_start, i_seg_end)
 
                 # populate first five columns
-                same_track_range = range(2, n, 2)
                 # get prev file(s)
+                prv2_file = None
                 prev_file = self.get_prev(name)
                 if prev_file:
                     if int(i_seg_start) != 0:
                         prv2_file = self.get_prev(prev_file)
 
                 # get next file(s)
+                nxt2_file = None
                 next_file = self.get_next(name)
                 if next_file:
                     nxt2_file = self.get_next(next_file)
 
-                names = [prev_file, next_file, prv2_file, nxt2_file]
+                names = [name, prev_file, next_file, prv2_file, nxt2_file]
 
-                for j, k in zip(same_track_range, names):
+                for j, k in zip(range(0, n, 2), names):
                     self.table.iat[i, j] = k
 
                 # update second five columns
                 for other_name in self.table.index:
                     # console.log(f"{self.p} checking col '{names[j]}'")
-                    j = int(self.table.index.get_loc(other_name)) # type: ignore
+                    j = int(self.table.index.get_loc(other_name))  # type: ignore
                     j_name, j_seg_num, j_shift = other_name.split("_")
                     j_seg_start, j_seg_end = j_seg_num.split("-")
                     j_track_name = f"{j_name}_{j_seg_num}"
                     # console.print(j_name, j_seg_num, j_shift, j_seg_start, j_seg_end)
 
-                    sim = float(1 - cosine(vecs[i], vecs[j])) if i != j else 1.0
+                    sim = float(1 - cosine(vecs[i], vecs[j]))
 
                     diff_track_range = range(n + 1, n * 2, 2)
                     if i_track_name != j_track_name:  # clip is from a different track
@@ -362,13 +301,27 @@ class Seeker:
 
         self.properties[filename]["played"] += 1  # mark current file as played
 
-        # columns = self.table.columns[::2].insert(0, 0)
         columns = list(self.table.columns[::2].values)
         roll = self.rng.choice(columns, p=self.probs)
-        if columns.index(roll) > 5:
-            console.log(f"{self.p}[blue1] TRACK TRANSITION[/blue1] (rolled '{roll}')")
+        # if columns.index(roll) > 5:
+        #     console.log(f"{self.p}[blue1] TRACK TRANSITION[/blue1] (rolled '{roll}')")
 
-            # console.log(f"{self.p} options: ", self.table.loc[filename])
+        next_filename = self.table.at[filename, f"{roll}"]
+        next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
+        # console.log(
+        #     f"{self.p} looking for similarity at ['{filename}', '{self.table.columns[next_col]}']\n\t",
+        #     self.table.at[filename, self.table.columns[next_col]],
+        # )
+        similarity = float(self.table.at[filename, self.table.columns[next_col]])
+
+        # when the source file is at the start or end of a track the prev/next
+        # columns respectively can be None
+        while next_filename == None:
+            console.log(f"{self.p}[blue1] REROLL[/blue1] (rolled '{roll}')")
+            roll = self.rng.choice(columns, p=self.probs)
+            next_filename = self.table.at[filename, f"{roll}"]
+            next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
+            similarity = float(self.table.at[filename, self.table.columns[next_col]])
 
         # console.log(f"{self.p} rolled {roll}")
         # console.log(f"{self.p} columns\n{columns}")
@@ -390,14 +343,6 @@ class Seeker:
         #         similarity = float(self.table.at[filename, next_col])
 
         #         break
-
-        next_filename = self.table.at[filename, f"{roll}"]
-        next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
-        # console.log(
-        #     f"{self.p} looking for similarity at ['{filename}', '{self.table.columns[next_col]}']\n\t",
-        #     self.table.at[filename, self.table.columns[next_col]],
-        # )
-        similarity = float(self.table.at[filename, self.table.columns[next_col]])
 
         console.log(
             f"{self.p} found '{next_filename}' with similarity {similarity:03f}"
