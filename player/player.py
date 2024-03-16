@@ -83,8 +83,9 @@ class Player:
             # self.playback_progress.put(msg.time)  # type: ignore
 
             if self.kill_event.is_set() and not printed_msg:
-                console.log(f"{self.p} [yellow]finishing playback of the current file")
-                printed_msg = True
+                return
+                # console.log(f"{self.p} [yellow]finishing playback of the current file")
+                # printed_msg = True
 
         if self.do_tick:
             stop_tick.set()
