@@ -30,7 +30,7 @@ class Listener:
         last_note_time = start_time
 
         with mido.open_input(self.params.in_port) as inport:  # type: ignore
-            console.log(f"{self.p} listening")
+            console.log(f"{self.p} listening on port '{self.params.in_port}'")
             for msg in inport:
                 # record delta time of input message
                 # mido doesn't do this by default for some reason

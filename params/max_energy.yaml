@@ -15,6 +15,7 @@ seeker:
   ph_weight_dur: False
   ph_weight_vel: False
   property: "energy"
+  calc_trans: False
   note_spread: 55
   probabilities:
     - 0.05 # same file

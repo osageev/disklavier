@@ -45,8 +45,9 @@ class Seeker:
 
         if os.path.exists(dict_file) and not self.force_rebuild:
             console.log(f"{self.p} found existing properties file '{dict_file}'")
-            with open(dict_file, "r") as f:
-                self.properties = json.load(f)
+            with console.status("loading properties file..."):
+                with open(dict_file, "r") as f:
+                    self.properties = json.load(f)
                 console.log(
                     f"{self.p} loaded properties for {len(list(self.properties.keys()))} files"
                 )
@@ -162,6 +163,15 @@ class Seeker:
             for filename, details in self.properties.items()
         ]
 
+        if self.params.property == "pr_blur_c":
+            vectors = [
+                {"name": v["name"],
+                 "metric": np.asarray(v["metric"]).flatten()
+                }
+                for v in vectors
+                if v["name"].endswith("n00.mid")
+            ]
+
         names = [v["name"] for v in vectors]
         vecs = [v["metric"] for v in vectors]
 
@@ -212,7 +222,7 @@ class Seeker:
                 i = int(self.table.index.get_loc(name))  # type: ignore
                 i_name, i_seg_num, i_shift = name.split("_")
                 i_seg_start, i_seg_end = i_seg_num.split("-")
-                i_track_name = f"{i_name}_{i_seg_num}"
+                # i_track_name = f"{i_name}_{i_seg_num}"
                 # console.print(i_name, i_seg_num, i_shift, i_seg_start, i_seg_end)
 
                 # populate first five columns
@@ -239,14 +249,14 @@ class Seeker:
                     # console.log(f"{self.p} checking col '{names[j]}'")
                     j = int(self.table.index.get_loc(other_name))  # type: ignore
                     j_name, j_seg_num, j_shift = other_name.split("_")
-                    j_seg_start, j_seg_end = j_seg_num.split("-")
-                    j_track_name = f"{j_name}_{j_seg_num}"
+                    # j_seg_start, j_seg_end = j_seg_num.split("-")
+                    # j_track_name = f"{j_name}_{j_seg_num}"
                     # console.print(j_name, j_seg_num, j_shift, j_seg_start, j_seg_end)
 
                     sim = float(1 - cosine(vecs[i], vecs[j]))
 
                     diff_track_range = range(n + 1, n * 2, 2)
-                    if i_track_name != j_track_name:  # clip is from a different track
+                    if i_name != j_name:  # clip is from a different track
                         self.replace_smallest_sim(
                             name,
                             other_name,
@@ -305,8 +315,8 @@ class Seeker:
 
         columns = list(self.table.columns[::2].values)
         roll = self.rng.choice(columns, p=self.probs)
-        # if columns.index(roll) > 5:
-        #     console.log(f"{self.p}[blue1] TRACK TRANSITION[/blue1] (rolled '{roll}')")
+        if columns.index(roll) > 5:
+            console.log(f"{self.p}[blue1] TRACK TRANSITION[/blue1] (rolled '{roll}')")
 
         if self.params.calc_trans and not filename.endswith('n00.mid'):
             filename = filename[:-7] + 'n00.mid'
@@ -397,6 +407,7 @@ class Seeker:
         console.log(
             f"{self.p} found '{most_similar_vector}' with similarity {highest_similarity:03f}"
         )
+
 
         if self.params.calc_trans:
             most_similar_vector, highest_similarity = self.pitch_transpose(
