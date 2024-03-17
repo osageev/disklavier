@@ -46,7 +46,6 @@ class Controller:
                             # )
 
     def volume(self, key):
-        console.log(f"{self.p} [green_yellow][VOLUME][/green_yellow] key pressed {key}")
         match key.char:
             case "f":
                 self.queue.put("FADE")
@@ -57,19 +56,17 @@ class Controller:
             case ".":
                 self.queue.put("VOL UP")
             case _:
-                console.log(f"{self.p} whoops, no match")
+                console.log(f"{self.p} [bold orange]whoops, no match")
                 pass
 
     def rewind(
         self,
     ):
-        console.log(f"{self.p} [light_sky_blue1][REWIND][/light_sky_blue1] key pressed")
         self.queue.put("BACK")
 
     def loop(
         self,
     ):
-        console.log(f"{self.p} [pale_green1][LOOPER][/pale_green1]  key pressed")
         self.queue.put("LOOP")
 
     def random(self, key):

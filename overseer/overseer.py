@@ -134,7 +134,6 @@ class Overseer:
                     )
 
                     # start up player
-                    self.playlist_queue.put((recording_path, -1.0))
                     self.playlist.append(recording_path)
                     playback_thread = Thread(
                         target=self.player.playback_loop,
@@ -171,7 +170,7 @@ class Overseer:
 
                         if change is not None:
                             console.log(
-                                f"{self.p} using alt version of recording: [bold deep_pink3]{change}[/bold deep_pink3]: {recording_path}"
+                                f"{self.p} using alt version of recording :: [bold deep_pink3]{change}[/bold deep_pink3] :: {recording_path}"
                             )
                             self.playlist_queue.put((recording_path, -1.0))
                             self.playlist.append(recording_path)
@@ -203,7 +202,7 @@ class Overseer:
                 if self.give_next_event.is_set():
                     # get and prep next file
                     # next_file, similarity = self.seeker.get_most_similar_file(
-                    next_file = self.player.playing_file
+                    next_file, similarity = (self.player.playing_file, 1.0)
                     if not self.do_loop:
                         next_file, similarity = self.seeker.get_msf_new(
                             os.path.basename(next_file_path)
@@ -252,12 +251,33 @@ class Overseer:
                                 self.playback_commmand_queue.put(command)
                             case "LOOP":
                                 self.do_loop = not self.do_loop
+
+                                self.player.next_file_path = self.player.playing_file_path
+
+                                while not self.playlist_queue.qsize() == 0:
+                                    queued_file, sim = self.playlist_queue.get()
+                                    console.log(f"{self.p} removed queued segment: '{queued_file}'")
+                                    self.playlist_queue.task_done()
+
+                                self.give_next_event.set()
+
+                            case "BACK":
+                                console.log(f"rewinding")
+
+                                while not self.playlist_queue.qsize() == 0:
+                                    queued_file, sim = self.playlist_queue.get()
+                                    console.log(f"{self.p} removed queued segment: '{queued_file}'")
+                                    self.playlist_queue.task_done()
+
+                                self.player.next_file_path = self.playlist[-1]
+
+                                self.give_next_event.set()
                             case _:
                                 console.log(f"{self.p} command unsupported '{command}'")
 
                         self.keypress_queue.task_done()
                     except:
-                        console.log(f"{self.p} [bold orange]whoops[/bold orange]")
+                        console.log(f"{self.p} [bold orange]whoops")
 
         except KeyboardInterrupt:  # ctrl + c
             # end threads
@@ -420,7 +440,6 @@ class Overseer:
                 ],
                 plot_path,
                 (2, 1),
-                main_title=f"loop {self.iter}",
                 set_axis="on",
             )
 

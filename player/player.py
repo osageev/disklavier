@@ -9,6 +9,8 @@ from utils import console, tick
 
 class Player:
     p = "[blue]play[/blue]  :"
+    playing_file_path = ''
+    next_file_path = ''
     volume = 1.0  # volume scaling factor
     last_volume = 1.0  # memory
 
@@ -36,24 +38,30 @@ class Player:
     def playback_loop(self, seed_file_path: str, fh):
         """"""
         self.playing_file_path = seed_file_path
-        (next_file_path, similarity) = self.file_queue.get_nowait()
-        next_file = os.path.basename(next_file_path)
+        (self.next_file_path, similarity) = self.file_queue.get()
+        next_file = os.path.basename(self.next_file_path)
         first_loop = True
 
-        while next_file_path is not None and not self.kill_event.is_set():
+        while self.next_file_path is not None and not self.kill_event.is_set():
             self.playing_file = os.path.basename(self.playing_file_path)
+            file_tempo = int(os.path.basename(self.playing_file).split("-")[1])
+            found_tempo = -1
+            for track in MidiFile(self.playing_file_path).tracks:
+                for msg in track:
+                    if msg.type == "set_tempo":
+                        found_tempo = msg.tempo
 
             if not first_loop:  # bad code!
-                next_file_path, similarity = self.file_queue.get()
-                next_file = os.path.basename(next_file_path)
+                self.next_file_path, similarity = self.file_queue.get()
+                next_file = os.path.basename(self.next_file_path)
             self.get_next.set()
 
             console.log(
-                f"{self.p} playing '{self.playing_file}' -- {similarity:.3f} --> '{next_file}'"
+                f"{self.p} playing '{self.playing_file}' ({file_tempo}) -- {similarity:.3f} --> '{next_file}' ({round(mido.tempo2bpm(found_tempo)):01d})"
             )
 
             self.play_midi_file(self.playing_file_path)
-            self.playing_file_path = next_file_path
+            self.playing_file_path = self.next_file_path
 
             first_loop = False
 
@@ -62,7 +70,6 @@ class Player:
     def play_midi_file(self, midi_path: str) -> None:
         """"""
         midi = MidiFile(midi_path)
-        file_tempo = int(os.path.basename(midi_path).split("-")[1])
         found_tempo = -1
         runtime = 0
         printed_msg = False
@@ -72,9 +79,6 @@ class Player:
             for msg in track:
                 if msg.type == "set_tempo":
                     found_tempo = msg.tempo
-        console.log(
-            f"{self.p} default tempo is {file_tempo}, playback tempo is {round(mido.tempo2bpm(found_tempo)):01d}"
-        )
 
         if self.do_tick:
             stop_tick = Event()
