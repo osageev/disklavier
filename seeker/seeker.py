@@ -165,9 +165,7 @@ class Seeker:
 
         if self.params.property == "pr_blur_c":
             vectors = [
-                {"name": v["name"],
-                 "metric": np.asarray(v["metric"]).flatten()
-                }
+                {"name": v["name"], "metric": np.asarray(v["metric"]).flatten()}
                 for v in vectors
                 if v["name"].endswith("n00.mid")
             ]
@@ -316,10 +314,10 @@ class Seeker:
         columns = list(self.table.columns[::2].values)
         roll = self.rng.choice(columns, p=self.probs)
         if columns.index(roll) > 5:
-            console.log(f"{self.p}[blue1] TRACK TRANSITION[/blue1] (rolled '{roll}')")
+            console.log(f"{self.p} \t[blue1]TRACK TRANSITION[/blue1] (rolled '{roll}')")
 
-        if self.params.calc_trans and not filename.endswith('n00.mid'):
-            filename = filename[:-7] + 'n00.mid'
+        if self.params.calc_trans and not filename.endswith("n00.mid"):
+            filename = filename[:-7] + "n00.mid"
 
         next_filename = self.table.at[filename, f"{roll}"]
         next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
@@ -331,8 +329,8 @@ class Seeker:
 
         # when the source file is at the start or end of a track the prev/next
         # columns respectively can be None
-        while next_filename == None:
-            console.log(f"{self.p}[blue1] REROLL[/blue1] (rolled '{roll}')")
+        while next_filename == "" or next_filename == None:
+            console.log(f"{self.p} \t[blue1]REROLL[/blue1] (rolled '{roll}')")
             roll = self.rng.choice(columns, p=self.probs)
             next_filename = self.table.at[filename, f"{roll}"]
             next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
@@ -368,7 +366,7 @@ class Seeker:
             )
 
         console.log(
-            f"{self.p} found '{next_filename}' with similarity {similarity:03f}"
+            f"{self.p} \tfound '{next_filename}' with similarity {similarity:03f}"
         )
 
         return next_filename, similarity
@@ -405,9 +403,8 @@ class Seeker:
                 most_similar_vector = name
 
         console.log(
-            f"{self.p} found '{most_similar_vector}' with similarity {highest_similarity:03f}"
+            f"{self.p} \tfound '{most_similar_vector}' with similarity {highest_similarity:03f}"
         )
-
 
         if self.params.calc_trans:
             most_similar_vector, highest_similarity = self.pitch_transpose(
@@ -494,7 +491,9 @@ class Seeker:
 
         return next_file
 
-    def pitch_transpose(self, seed: str, match: str, similarity: float) -> Tuple[str, float]:
+    def pitch_transpose(
+        self, seed: str, match: str, similarity: float
+    ) -> Tuple[str, float]:
         trans_options = [
             "u01.mid",
             "d01.mid",
@@ -514,7 +513,7 @@ class Seeker:
         match_ph = pretty_midi.PrettyMIDI(match).get_pitch_class_histogram()
         match_ph_sim = float(1 - cosine(seed_ph, match_ph))
 
-        # console.log(f"{self.p} unshifted match has similarity {match_ph_sim:.03f}")
+        console.log(f"{self.p} unshifted match has similarity {match_ph_sim:.03f}")
 
         best_match = os.path.basename(match)
         best_sim = match_ph_sim
@@ -528,6 +527,8 @@ class Seeker:
                 best_match = os.path.basename(t_file)
                 best_sim = t_sim
 
-                console.log(f"{self.p} \tbetter trans {transposition[:3]} -> '{os.path.basename(t_file)}' @ {t_sim:.03f}")
+                console.log(
+                    f"{self.p} \tbetter trans {transposition[:3]} -> '{os.path.basename(t_file)}' @ {t_sim:.03f}"
+                )
 
         return best_match, best_sim
