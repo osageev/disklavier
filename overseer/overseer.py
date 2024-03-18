@@ -133,15 +133,6 @@ class Overseer:
                         f"{self.p} triggering playback from recording '{recording_path}'"
                     )
 
-                    # start up player
-                    self.playlist.append(recording_path)
-                    playback_thread = Thread(
-                        target=self.player.playback_loop,
-                        args=(recording_path, "a"),
-                        name="player",
-                    )
-                    playback_thread.start()
-
                     # get most similar file to recording
                     first_file, first_similarity = self.seeker.get_ms_to_recording(
                         recording_path
@@ -170,15 +161,23 @@ class Overseer:
 
                         if change is not None:
                             console.log(
-                                f"{self.p} using alt version of recording :: [bold deep_pink3]{change}[/bold deep_pink3] :: {recording_path}"
+                                f"{self.p} using alt version of recording :: [bold deep_pink3]{change}[/bold deep_pink3] :: '{recording_path}'"
                             )
-                            self.playlist_queue.put((recording_path, -1.0))
-                            self.playlist.append(recording_path)
 
                     next_file_path = os.path.join(self.data_dir, str(first_file))
                     next_file_path = self.change_tempo(next_file_path)
                     self.playlist_queue.put((next_file_path, first_similarity))
                     self.playlist.append(next_file_path)
+
+                    # start up player
+                    self.playlist.append(recording_path)
+                    playback_thread = Thread(
+                        target=self.player.playback_loop,
+                        args=(recording_path, "a"),
+                        name="player",
+                    )
+                    playback_thread.start()
+                    self.playlist.append(recording_path)
 
                     # while not self.playlist_queue.qsize() == 0:
                     #     queued_file = self.playlist_queue.get()
@@ -226,7 +225,9 @@ class Overseer:
                     # reset player
                     while not self.playlist_queue.qsize() == 0:
                         queued_file = self.playlist_queue.get()
-                        console.log(f"{self.p}\tremoved queued segment: '{queued_file}'")
+                        console.log(
+                            f"{self.p}\tremoved queued segment: '{queued_file}'"
+                        )
                         self.playlist_queue.task_done()
                     self.kill_player_event.set()
                     console.log(f"{self.p}\twaiting for player to die")
@@ -252,11 +253,15 @@ class Overseer:
                             case "LOOP":
                                 self.do_loop = not self.do_loop
 
-                                self.player.next_file_path = self.player.playing_file_path
+                                self.player.next_file_path = (
+                                    self.player.playing_file_path
+                                )
 
                                 while not self.playlist_queue.qsize() == 0:
                                     queued_file, sim = self.playlist_queue.get()
-                                    console.log(f"{self.p}\tremoved queued segment: '{queued_file}'")
+                                    console.log(
+                                        f"{self.p}\tremoved queued segment: '{queued_file}'"
+                                    )
                                     self.playlist_queue.task_done()
 
                                 self.give_next_event.set()
@@ -266,14 +271,18 @@ class Overseer:
 
                                 while not self.playlist_queue.qsize() == 0:
                                     queued_file, sim = self.playlist_queue.get()
-                                    console.log(f"{self.p}\tremoved queued segment: '{queued_file}'")
+                                    console.log(
+                                        f"{self.p}\tremoved queued segment: '{queued_file}'"
+                                    )
                                     self.playlist_queue.task_done()
 
                                 self.player.next_file_path = self.playlist[-1]
 
                                 self.give_next_event.set()
                             case _:
-                                console.log(f"{self.p}\tcommand unsupported '{command}'")
+                                console.log(
+                                    f"{self.p}\tcommand unsupported '{command}'"
+                                )
 
                         self.keypress_queue.task_done()
                     except:

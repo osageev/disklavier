@@ -108,10 +108,10 @@ class Player:
                                 self.volume = 0.0
                         case "VOL DOWN":
                             self.last_volume = self.volume
-                            self.volume -= 0.1
+                            self.volume = max(0, self.volume - 0.1)
                         case "VOL UP":
                             self.last_volume = self.volume
-                            self.volume += 0.1
+                            self.volume = min(2.0, self.volume + 0.1)
                         case _:
                             pass
 
@@ -131,9 +131,9 @@ class Player:
             if hasattr(msg, "velocity"):
                 if do_fade:
                     self.last_volume = self.volume
-                    self.volume = self.fade(self.volume, runtime, midi.length)
+                    # self.volume = self.fade(self.volume, runtime, midi.length)
 
-                scaled_msg.velocity = round(scaled_msg.velocity * self.volume)  # type: ignore
+                scaled_msg.velocity = max(0, min(127, round(scaled_msg.velocity * self.volume)))  # type: ignore
 
             self.out_port.send(scaled_msg)
 
