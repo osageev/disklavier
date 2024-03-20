@@ -109,7 +109,7 @@ class Listener:
             track.append(msg)
         mid.tracks.append(track)
 
-        mid = stretch_midi_file(mid, dt, caller=self.p)
+        # mid = stretch_midi_file(mid, dt, caller=self.p)
         mid.save(os.path.join(self.record_dir, self.outfile))
 
         if os.path.exists(os.path.join(self.record_dir, self.outfile)):

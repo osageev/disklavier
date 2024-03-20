@@ -47,7 +47,7 @@ class Seeker:
         self.input_dir = input_dir
         self.output_dir = output_dir
         self.force_rebuild = force_rebuild
-        self.probs = self.params.probabilities
+        self.probs = self.params.probabilities / np.sum(self.params.probabilities)
         self.cumprobs = np.cumsum(self.probs)
         self.rng = np.random.default_rng(1)
 
