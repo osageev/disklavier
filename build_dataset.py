@@ -64,7 +64,7 @@ if __name__ == "__main__":
         print(f"creating new output folder: '{args.output_dir}'")
         os.mkdir(args.output_dir)
 
-    graveyard = os.path.join("outputs", "graveyard")
+    graveyard = os.path.join("data", "outputs", "graveyard")
     if os.path.exists(graveyard):
         i = 0
         for i, file in enumerate(os.listdir(graveyard)):

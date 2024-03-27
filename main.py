@@ -106,7 +106,7 @@ if __name__ == "__main__":
     record_dir = os.path.join(args.output_dir, "records")
     plot_dir = os.path.join(args.output_dir, "plots", f"{datetime.now().strftime('%y%m%d-%H%M')}")
     playlist_dir = os.path.join(
-        "data", "playlist", datetime.now().strftime("%y%m%d-%H%M")
+        "data", "playlist", f"{datetime.now().strftime("%y%m%d-%H%M")}-{params.property}"
     )
 
     if not os.path.exists(args.output_dir):

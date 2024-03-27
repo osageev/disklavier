@@ -1,6 +1,6 @@
-inputs
-outputs
-data/playlist/*
+data/playlist
+data/datasets
+data/outputs
 notebooks/tmp
 *.tar.gz
 
