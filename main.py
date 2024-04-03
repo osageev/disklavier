@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from argparse import ArgumentParser
 from omegaconf import OmegaConf
-from threading import Thread, Event
+from threading import Thread, Event, enumerate
 from rich.prompt import Confirm, IntPrompt
 
 from overseer.overseer import Overseer
@@ -106,7 +106,7 @@ if __name__ == "__main__":
     record_dir = os.path.join(args.output_dir, "records")
     plot_dir = os.path.join(args.output_dir, "plots", f"{datetime.now().strftime('%y%m%d-%H%M')}")
     playlist_dir = os.path.join(
-        "data", "playlist", f"{datetime.now().strftime("%y%m%d-%H%M")}-{params.property}"
+        "data", "playlist", f"{datetime.now().strftime("%y%m%d-%H%M")}-{params.seeker.property}"
     )
 
     if not os.path.exists(args.output_dir):
@@ -152,4 +152,4 @@ if __name__ == "__main__":
     )
     console.log(f"{p}[green bold] session complete, exiting")
 
-    exit()
+    print(f"Currently alive threads: {len(enumerate())}")

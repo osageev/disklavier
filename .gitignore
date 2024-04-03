@@ -1,6 +1,7 @@
 data/playlist
 data/datasets
 data/outputs
+data/ableton
 notebooks/tmp
 *.tar.gz
 

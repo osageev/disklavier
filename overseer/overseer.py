@@ -1,11 +1,12 @@
 import os
-import mido
+from shutil import copy2
+from pathlib import Path
+from datetime import datetime
 from pynput import keyboard
 from queue import Queue
 from threading import Thread, Event
-from datetime import datetime
-from pathlib import Path
 from pretty_midi import PrettyMIDI
+import mido
 
 from player.player import Player
 from listener.listener import Listener
@@ -116,7 +117,7 @@ class Overseer:
         controller_thread.start()
 
         playback_thread = None
-        
+
         try:
             while True:
                 pass
@@ -153,7 +154,7 @@ class Overseer:
                                 recording_path = opt
                                 first_similarity = match_sim
                                 first_file = match_path
- 
+
                                 if recording_path.endswith("fh.mid"):
                                     change = "first half"
                                 elif recording_path.endswith("sh.mid"):
@@ -171,15 +172,26 @@ class Overseer:
                     self.playlist_queue.put((next_file_path, first_similarity))
                     self.playlist.append(next_file_path)
 
+                    # copy the version of the recording that we use to the playlist
+                    copy2(
+                        recording_path,
+                        os.path.join(
+                            self.playlist_dir, os.path.basename(recording_path)
+                        ),
+                    )
+
                     # start up player
-                    self.playlist.append(recording_path)
+                    self.playlist.append(
+                        os.path.join(
+                            self.playlist_dir, os.path.basename(recording_path)
+                        )
+                    )
                     playback_thread = Thread(
                         target=self.player.playback_loop,
                         args=(recording_path, "a"),
                         name="player",
                     )
                     playback_thread.start()
-                    self.playlist.append(recording_path)
 
                     # while not self.playlist_queue.qsize() == 0:
                     #     queued_file = self.playlist_queue.get()
@@ -202,7 +214,6 @@ class Overseer:
                 # check for next file requests from player
                 if self.give_next_event.is_set():
                     # get and prep next file
-                    # next_file, similarity = self.seeker.get_most_similar_file(
                     next_file, similarity = (self.player.playing_file, 1.0)
                     if not self.do_loop:
                         next_file, similarity = self.seeker.get_msf_new(
