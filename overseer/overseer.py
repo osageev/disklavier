@@ -409,6 +409,7 @@ class Overseer:
                 f"{self.p} [red]adding message to new track {new_message}", markup=True
             )
             new_track.append(new_message)
+            midi.tracks.append(new_track)
 
         new_file_path = os.path.join(
             self.playlist_dir, f"{Path(midi_file_path).stem}.mid"
