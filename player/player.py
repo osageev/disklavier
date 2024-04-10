@@ -83,8 +83,8 @@ class Player:
                     outport.send(msg)
                 else:
                     if msg.type == "set_tempo":  # type: ignore
-                        console.log(f"{self.p} playing at {mido.tempo2bpm(msg.tempo)} BPM", msg)  # type: ignore
-                    if msg.type == "text":  # type: ignore
+                        console.log(f"{self.p} playing at {mido.tempo2bpm(msg.tempo):.01f} BPM", msg)  # type: ignore
+                    if msg.type == "text" and self.params.do_tick:  # type: ignore
                         beat = time.time()
                         console.log(f"{self.p} {msg.text} [grey50]({beat - last_beat:.05f}s)")  # type: ignore
                         last_beat = beat
@@ -92,11 +92,11 @@ class Player:
 
                 # end active notes and return if killed
                 if self.killed.is_set():
-                    with mido.open_output(self.out_port) as outport:  # type: ignore
+                    with mido.open_output(self.params.out_port) as outport:  # type: ignore
                         for note in range(128):
                             msg = Message("note_off", note=note, velocity=0, channel=0)
                             outport.send(msg)
-                    break
+                    return
 
     # def playback_loop(self, seed_file_path: str, fh):
     #     """"""

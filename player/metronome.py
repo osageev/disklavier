@@ -37,22 +37,26 @@ class Metronome:
             beat = time.time()
             if beat - last_beat >= self.tick_rate:
                 if beats // self.params.beats_per_seg:
-                    console.log(
-                        f"{self.p} beat {beats} [grey50]({beat - last_beat:.05f}s)[/grey50]\t[green]go!"
-                    )
+                    if self.params.do_tick:
+                        console.log(
+                            f"{self.p} beat {beats} [grey50]({beat - last_beat:.05f}s)[/grey50]\t[green]go!"
+                        )
                     self.go.set()
                     beats = 0
                 elif beats // (self.params.beats_per_seg - 1):
-                    console.log(
-                        f"{self.p} beat {beats} [grey50]({beat - last_beat:.05f}s)[/grey50]\t[dark_orange]ready?"
-                    )
+                    if self.params.do_tick:
+                        console.log(
+                            f"{self.p} beat {beats} [grey50]({beat - last_beat:.05f}s)[/grey50]\t[dark_orange]ready?"
+                        )
                     self.ready.set()
                 else:
-                    console.log(
-                        f"{self.p} beat {beats} [grey50]({beat - last_beat:.05f}s)"
-                    )
+                    if self.params.do_tick:
+                        console.log(
+                            f"{self.p} beat {beats} [grey50]({beat - last_beat:.05f}s)"
+                        )
 
-                sa.WaveObject.from_wave_file(self.tick_file).play()
+                if self.params.do_tick:
+                    sa.WaveObject.from_wave_file(self.tick_file).play()
                 last_beat = beat
                 beats += 1
 

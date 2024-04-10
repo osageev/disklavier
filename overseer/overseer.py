@@ -61,6 +61,9 @@ class Overseer:
                 f"{self.p} [red]less than 10 files in input folder. are you sure you didnt screw something up?"
             )
 
+        if args.tick:
+            self.params.player1
+
         # set up events & queues for threading
         self.reset_e = Event()
         # players

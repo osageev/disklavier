@@ -7,14 +7,15 @@ listener:
 player1:
   p: "[blue1]playr1[/blue1]:"
   tick: "data/m_tick.wav"
-  do_tick: True
+  do_tick: False
 player2:
   p: "[deep_sky_blue3]playr2[/deep_sky_blue3]:"
   tick: "data/m_hat.wav"
-  do_tick: True
+  do_tick: False
 metronome:
   beats_per_seg: 8
   tick_file: "data/m_kick.wav"
+  do_tick: False
 seeker:
   w1: 0.5 
   w2: 0.5
