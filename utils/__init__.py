@@ -8,19 +8,34 @@ from threading import Event
 from rich.console import Console
 
 
-console = Console(record=True, log_time_format="%m-%d %H:%M:%S")
+console = Console(record=True, log_time_format="%m-%d %H:%M:%S.%f")
 
 
-def tick(bpm: int, stop_event: Event, p: str = "[cyan]metro[/cyan] : ", do_print=True):
+def tick(
+    tick_file: str = "data/m_tick.wav",
+    p: str = "[cyan]metro[/cyan] :",
+    do_print: bool = True,
+):
+    if do_print:
+        console.log(f"{p} [grey50]tick!")
+
+    sa.WaveObject.from_wave_file(tick_file).play()
+
+    return
+
+
+def tick_loop(
+    bpm: int, stop_event: Event, p: str = "[cyan]metro[/cyan] : ", do_print=True
+):
     """
     Plays a metronome tick at the specified BPM
 
     Args:
     bpm: Beats per minute, defines the tempo of the metronome.
     """
-    tick = sa.WaveObject.from_wave_file("data/tick.wav")
+    tick = sa.WaveObject.from_wave_file("data/m_tick.wav")
     tick_len = 0
-    with wave.open("data/tick.wav", "rb") as wave_file:
+    with wave.open("data/m_tick.wav", "rb") as wave_file:
         frames = wave_file.getnframes()
         rate = wave_file.getframerate()
         tick_len = frames / float(rate)

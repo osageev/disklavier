@@ -9,6 +9,7 @@ from pretty_midi import PrettyMIDI
 import mido
 
 from player.player import Player
+from player.metronome import Metronome
 from listener.listener import Listener
 from seeker.seeker import Seeker
 from controller.controller import Controller
@@ -36,17 +37,21 @@ class Overseer:
     ):
         console.log(f"{self.p} initializing")
 
-        self.params = params
-        self.playlist_dir = playlist_dir
-        self.record_dir = record_dir
+        # folders
+        self.playlist_dir = playlist_dir  # re-tempo'd files
+        self.record_dir = record_dir  # player recordings
         self.plot_dir = plot_dir
-        self.data_dir = args.data_dir
-        self.output_dir = args.output_dir
-        self.kickstart = args.kickstart
-        self.v_scale = args.velocity
-        self.do_plot = args.plot
+        self.data_dir = args.data_dir  # midi file library
+        # behavior
+        self.params = params
+        self.kickstart = args.kickstart  # pick random start file
+        self.v_scale = args.velocity  # TODO: unimplemented augmentation
+        self.do_plot = args.plot  # generate a bunch of plots
+        # tempo
         self.tempo = tempo
-        self.params.player.tempo = self.tempo
+        self.params.metronome.tempo = self.tempo
+        self.params.player1.tempo = self.tempo
+        self.params.player2.tempo = self.tempo
         self.params.listener.tempo = self.tempo
 
         self._init_midi()  # make sure MIDI port is available first
@@ -57,20 +62,29 @@ class Overseer:
             )
 
         # set up events & queues for threading
-        self.reset_event = Event()
-        self.kill_player_event = Event()
-        self.kill_listener_event = Event()
-        self.kill_controller_event = Event()
-        self.give_next_event = Event()
-        self.recording_ready_event = Event()
-        self.playback_commmand_queue = Queue()
-        self.playlist_queue = Queue()
-        self.progress_queue = Queue()
-        self.keypress_queue = Queue()
+        self.reset_e = Event()
+        # players
+        self.play_e = Event()
+        self.kill_player1_e = Event()
+        self.kill_player2_e = Event()
+        self.give_player1_e = Event()
+        self.give_player2_e = Event()
+        self.playlist1_q = Queue()
+        self.playlist2_q = Queue()
+        self.playback_commmand_q = Queue()
+        # metronome
+        self.kill_metro_e = Event()
+        self.ready_e = Event()
+        # listener
+        self.kill_listener_e = Event()
+        self.recording_ready_e = Event()
+        # keyboard controller
+        self.kill_controller_e = Event()
+        self.keypress_q = Queue()
 
         # initialize objects to be overseen
         self.seeker = Seeker(
-            self.params.seeker, self.data_dir, self.output_dir, args.force_rebuild
+            self.params.seeker, self.data_dir, args.output_dir, args.force_rebuild
         )
         self.seeker.build_properties()
         self.seeker.build_top_n_table()
@@ -78,30 +92,39 @@ class Overseer:
         self.listener = Listener(
             self.params.listener,
             self.record_dir,
-            self.recording_ready_event,
-            self.kill_listener_event,
-            self.reset_event,
+            self.recording_ready_e,
+            self.kill_listener_e,
+            self.reset_e,
         )
-        self.player = Player(
-            self.params.player,
-            self.record_dir,
-            args.tick,
-            self.kill_player_event,
-            self.give_next_event,
-            self.playlist_queue,
-            self.progress_queue,
-            self.playback_commmand_queue,
+        self.player1 = Player(
+            self.params.player1,
+            self.kill_player1_e,
+            self.give_player1_e,
+            self.play_e,
+            self.playlist1_q,
+            self.playback_commmand_q,
         )
-        self.controller = Controller(self.kill_controller_event, self.keypress_queue)
+        self.player2 = Player(
+            self.params.player2,
+            self.kill_player2_e,
+            self.give_player2_e,
+            self.play_e,
+            self.playlist2_q,
+            self.playback_commmand_q,
+        )
+        self.metronome = Metronome(
+            self.params.metronome, self.kill_metro_e, self.ready_e, self.play_e
+        )
+        self.controller = Controller(self.kill_controller_e, self.keypress_q)
 
-    def start(self) -> None:
-        """run the system"""
+    def run(self) -> None:
         if not self.input_port or not self.output_port:
+            console.log(f"{self.p}[red bold] input or output port unavailable, exiting")
             return
 
         # kickstart process
         if self.kickstart:
-            self.recording_ready_event.set()
+            self.recording_ready_e.set()
             random_file_path = os.listdir(self.data_dir)[0]
             self.listener.outfile = random_file_path
         # start listening for recording
@@ -111,18 +134,30 @@ class Overseer:
             )
             listen_thread.start()
 
+        # start up other threads
         controller_thread = Thread(
             target=self.controller.run, args=(), name="controller"
         )
         controller_thread.start()
+        player1_t = Thread(
+            target=self.player1.play_loop,
+            name="player1",
+        )
+        player2_t = Thread(
+            target=self.player2.play_loop,
+            name="player2",
+        )
+        player1_t.start()
+        player2_t.start()
+        metro_t = Thread(target=self.metronome.tick, name="metronome")
 
-        playback_thread = None
+        p1_playing = False  # used to alternate between players
 
         try:
             while True:
                 pass
                 # check for recordings
-                if self.recording_ready_event.is_set():
+                if self.recording_ready_e.is_set():
                     # get recording
                     if self.kickstart:
                         recording_path = os.path.join(
@@ -167,10 +202,23 @@ class Overseer:
                                 f"{self.p} using alt version of recording :: [bold deep_pink3]{change}[/bold deep_pink3] :: '{recording_path}'"
                             )
 
+                    self.playlist.append(
+                        os.path.join(
+                            self.playlist_dir, os.path.basename(recording_path)
+                        )
+                    )
                     next_file_path = os.path.join(self.data_dir, str(first_file))
                     next_file_path = self.change_tempo(next_file_path)
-                    self.playlist_queue.put((next_file_path, first_similarity))
-                    self.playlist.append(next_file_path)
+                    console.log(
+                        f"{self.p} queueing (ready: {self.give_player1_e.is_set()}) recording for p1: '{recording_path}'"
+                    )
+                    console.log(
+                        f"{self.p} next file would be '{os.path.basename(next_file_path)}'"
+                    )
+                    self.playlist1_q.put((recording_path, -1.0))
+                    self.give_player1_e.clear()
+                    self.play_e.set()
+                    metro_t.start()
 
                     # copy the version of the recording that we use to the playlist
                     copy2(
@@ -180,128 +228,136 @@ class Overseer:
                         ),
                     )
 
-                    # start up player
-                    self.playlist.append(
-                        os.path.join(
-                            self.playlist_dir, os.path.basename(recording_path)
-                        )
-                    )
-                    playback_thread = Thread(
-                        target=self.player.playback_loop,
-                        args=(recording_path, "a"),
-                        name="player",
-                    )
-                    playback_thread.start()
-
-                    # while not self.playlist_queue.qsize() == 0:
-                    #     queued_file = self.playlist_queue.get()
-                    #     console.log(f"{self.p} removed queued segment: '{queued_file}'")
-                    #     self.playlist_queue.task_done()
-                    # save plots of both PHs
-                    # plot_dir = f"pr_ph_{datetime.now().strftime('%y%m%d-%H%M%S')}"
-                    # plot_path = os.path.join(self.output_dir, "plots", plot_dir)
-                    # if os.path.exists(plot_path):
-                    #     plot_path += "_2"
-                    # os.mkdir(plot_path)
-                    # plot_piano_roll_and_pitch_histogram(recording_path, plot_path)
-                    # plot_piano_roll_and_pitch_histogram(next_file_path, plot_path)
-
                     # clear recording
                     self.listener.outfile = ""
-                    self.recording_ready_event.clear()
+                    self.recording_ready_e.clear()
+                    self.play_e.clear()
                     console.log(f"{self.p} finished triggering playback from recording")
 
-                # check for next file requests from player
-                if self.give_next_event.is_set():
-                    # get and prep next file
-                    next_file, similarity = (self.player.playing_file, 1.0)
+                # metronome says get ready
+                if self.ready_e.is_set():
+                    # ready next file
+                    next_file = (
+                        self.player2.playing_file
+                        if p1_playing
+                        else self.player1.playing_file
+                    )
+                    similarity = -1.0
                     if not self.do_loop:
                         next_file, similarity = self.seeker.get_msf_new(
                             os.path.basename(next_file_path)
                         )
                     next_file_path = os.path.join(self.data_dir, str(next_file))
                     next_file_path = self.change_tempo(next_file_path)
-                    # console.log(f"{self.p} player is playing '{self.player.playing_file}'\t(next up is '{next_file_path}')")
 
-                    # send next file to player
-                    self.playlist_queue.put((next_file_path, similarity))
-                    console.log(
-                        f"{self.p} added next file '{next_file}' to queue with similarity {similarity:.03f}"
-                    )
-
-                    self.playlist.append(next_file_path)
-                    self.give_next_event.clear()
-
-                if self.reset_event.is_set():
-                    console.log(f"{self.p} [bold deep_pink3]RESETTING")
-
-                    # reset player
-                    while not self.playlist_queue.qsize() == 0:
-                        queued_file = self.playlist_queue.get()
+                    # send to player
+                    if p1_playing:
                         console.log(
-                            f"{self.p}\tremoved queued segment: '{queued_file}'"
+                            f"{self.p} queueing (ready: {self.give_player1_e.is_set()}) next file for p1: '{next_file}' sim {similarity:.03f}"
                         )
-                        self.playlist_queue.task_done()
+                        self.playlist1_q.put((next_file_path, similarity))
+                        self.give_player1_e.clear()
+                    else:
+                        console.log(
+                            f"{self.p} queueing (ready: {self.give_player2_e.is_set()}) next file for p2: '{next_file}' sim {similarity:.03f}"
+                        )
+                        self.playlist2_q.put((next_file_path, similarity))
+                        self.give_player2_e.clear()
 
-                    if playback_thread is not None:
-                        self.kill_player_event.set()
-                        console.log(f"{self.p}\twaiting for player to die")
-                        playback_thread.join()
-                        self.kill_player_event.clear()
+                    p1_playing = not p1_playing
+                    self.playlist.append(next_file_path)
+                    self.ready_e.clear()
 
-                    # clear recording
-                    self.listener.outfile = ""
-                    self.listener.recorded_notes = []
-                    self.recording_ready_event.clear()
+                # check for next file requests from player
+                # if self.give_player1_e.is_set():
+                #     # get and prep next file
+                #     next_file, similarity = (self.player1.playing_file, 1.0)
+                #     if not self.do_loop:
+                #         next_file, similarity = self.seeker.get_msf_new(
+                #             os.path.basename(next_file_path)
+                #         )
+                #     next_file_path = os.path.join(self.data_dir, str(next_file))
+                #     next_file_path = self.change_tempo(next_file_path)
 
-                    self.reset_event.clear()
-                    console.log(f"{self.p} reset complete")
+                #     # send next file to player
+                #     self.playlist1_q.put((next_file_path, similarity))
+                #     console.log(
+                #         f"{self.p} added next file '{next_file}' to queue with similarity {similarity:.03f}"
+                #     )
+
+                #     self.playlist.append(next_file_path)
+                #     self.give_player1_e.clear()
+
+                # if self.reset_e.is_set():
+                #     console.log(f"{self.p} [bold deep_pink3]RESETTING")
+
+                #     # reset player
+                #     while not self.playlist1_q.qsize() == 0:
+                #         queued_file = self.playlist_q.get()
+                #         console.log(
+                #             f"{self.p}\tremoved queued segment: '{queued_file}'"
+                #         )
+                #         self.playlist_q.task_done()
+
+                #     if player1_t is not None:
+                #         self.kill_player1_e.set()
+                #         console.log(f"{self.p}\twaiting for player to die")
+                #         player1_t.join()
+                #         self.kill_player1_e.clear()
+
+                #     # clear recording
+                #     self.listener.outfile = ""
+                #     self.listener.recorded_notes = []
+                #     self.recording_ready_e.clear()
+
+                #     self.reset_e.clear()
+                #     console.log(f"{self.p} reset complete")
 
                 # check for keypresses
-                while not self.keypress_queue.qsize() == 0:
-                    try:
-                        command = self.keypress_queue.get()
-                        console.log(f"{self.p} got key command '{command}'")
-                        match command:
-                            case "FADE" | "MUTE" | "VOL DOWN" | "VOL UP":
-                                self.playback_commmand_queue.put(command)
-                            case "LOOP":
-                                self.do_loop = not self.do_loop
+                # while not self.keypress_q.qsize() == 0:
+                #     try:
+                #         command = self.keypress_q.get()
+                #         console.log(f"{self.p} got key command '{command}'")
+                #         match command:
+                #             case "FADE" | "MUTE" | "VOL DOWN" | "VOL UP":
+                #                 self.playback_commmand_q.put(command)
+                #             case "LOOP":
+                #                 self.do_loop = not self.do_loop
 
-                                self.player.next_file_path = (
-                                    self.player.playing_file_path
-                                )
+                #                 self.player.next_file_path = (
+                #                     self.player.playing_file_path
+                #                 )
 
-                                while not self.playlist_queue.qsize() == 0:
-                                    queued_file, sim = self.playlist_queue.get()
-                                    console.log(
-                                        f"{self.p}\tremoved queued segment: '{queued_file}'"
-                                    )
-                                    self.playlist_queue.task_done()
+                #                 while not self.playlist_q.qsize() == 0:
+                #                     queued_file, sim = self.playlist_q.get()
+                #                     console.log(
+                #                         f"{self.p}\tremoved queued segment: '{queued_file}'"
+                #                     )
+                #                     self.playlist_q.task_done()
 
-                                self.give_next_event.set()
+                #                 self.give_player1_e.set()
 
-                            case "BACK":
-                                console.log(f"\trewinding")
+                #             case "BACK":
+                #                 console.log(f"\trewinding")
 
-                                while not self.playlist_queue.qsize() == 0:
-                                    queued_file, sim = self.playlist_queue.get()
-                                    console.log(
-                                        f"{self.p}\tremoved queued segment: '{queued_file}'"
-                                    )
-                                    self.playlist_queue.task_done()
+                #                 while not self.playlist_q.qsize() == 0:
+                #                     queued_file, sim = self.playlist_q.get()
+                #                     console.log(
+                #                         f"{self.p}\tremoved queued segment: '{queued_file}'"
+                #                     )
+                #                     self.playlist_q.task_done()
 
-                                self.player.next_file_path = self.playlist[-1]
+                #                 self.player.next_file_path = self.playlist[-1]
 
-                                self.give_next_event.set()
-                            case _:
-                                console.log(
-                                    f"{self.p}\tcommand unsupported '{command}'"
-                                )
+                #                 self.give_player1_e.set()
+                #             case _:
+                #                 console.log(
+                #                     f"{self.p}\tcommand unsupported '{command}'"
+                #                 )
 
-                        self.keypress_queue.task_done()
-                    except:
-                        console.log(f"{self.p} [bold orange]whoops")
+                #         self.keypress_q.task_done()
+                #     except:
+                #         console.log(f"{self.p} [bold orange]whoops")
 
         except KeyboardInterrupt:  # ctrl + c
             # end threads
@@ -311,19 +367,29 @@ class Overseer:
                 for sample in self.playlist:
                     f.write(f"{sample}\n")
 
-            self.kill_controller_event.set()
-            self.kill_player_event.set()
-            self.kill_listener_event.set()
+            self.kill_controller_e.set()
+            self.kill_metro_e.set()
+            self.kill_player1_e.set()
+            self.kill_player2_e.set()
+            self.kill_listener_e.set()
 
             if controller_thread.is_alive():
                 controller_thread.join()
                 console.log(f"{self.p} controller killed successfully")
 
-            if playback_thread is not None:
-                playback_thread.join()
-                console.log(f"{self.p} player killed successfully")
+            if metro_t.is_alive():
+                metro_t.join()
+                console.log(f"{self.p} metronome killed successfully")
 
-            if listen_thread is not None:
+            if player1_t.is_alive():
+                player1_t.join()
+                console.log(f"{self.p} player1 killed successfully")
+
+            if player2_t.is_alive():
+                player2_t.join()
+                console.log(f"{self.p} player2 killed successfully")
+
+            if listen_thread.is_alive():
                 listen_thread.join()
                 console.log(f"{self.p} listener killed successfully")
 
@@ -345,14 +411,16 @@ class Overseer:
         # set up input connection
         if self.params.in_port in available_inputs:
             self.input_port = mido.open_input(self.params.in_port)  # type: ignore
-            self.params.player.in_port = self.params.in_port
+            self.params.player1.in_port = self.params.in_port
+            self.params.player2.in_port = self.params.in_port
             self.params.listener.in_port = self.params.in_port
         elif len(available_inputs) > 0:
             console.log(
                 f"{self.p} unable to find MIDI device '{self.params.in_port}' falling back on '{available_inputs[0]}'"
             )
             self.input_port = mido.open_input(available_inputs[0])  # type: ignore
-            self.params.player.in_port = available_inputs[0]
+            self.params.player1.in_port = available_inputs[0]
+            self.params.player2.in_port = available_inputs[0]
             self.params.listener.in_port = available_inputs[0]
         else:
             console.log(f"{self.p} no MIDI input devices available")
@@ -360,14 +428,16 @@ class Overseer:
         # set up output connection
         if self.params.out_port in available_inputs:
             self.output_port = mido.open_output(self.params.out_port)  # type: ignore
-            self.params.player.out_port = self.params.out_port
+            self.params.player1.out_port = self.params.out_port
+            self.params.player2.out_port = self.params.out_port
             self.params.listener.out_port = self.params.out_port
         elif len(available_outputs) > 0:
             console.log(
                 f"{self.p} unable to find MIDI device '{self.params.out_port}' falling back on '{available_outputs[0]}'"
             )
             self.output_port = mido.open_output(available_outputs[0])  # type: ignore
-            self.params.player.out_port = available_outputs[0]
+            self.params.player1.out_port = available_outputs[0]
+            self.params.player2.out_port = available_outputs[0]
             self.params.listener.out_port = available_outputs[0]
         else:
             console.log(f"{self.p} no MIDI output devices available")

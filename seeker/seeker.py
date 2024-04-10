@@ -239,10 +239,10 @@ class Seeker:
                 # console.log(f"\n{self.p} populating row '{name}'")
 
                 i = int(self.table.index.get_loc(name))  # type: ignore
-                i_name, i_seg_num, i_shift = name.split("_")
+                # i_name, i_seg_num, i_shift = name.split("_")
+                i_name, i_seg_num = name.split("_")
                 i_seg_start, i_seg_end = i_seg_num.split("-")
-                # i_track_name = f"{i_name}_{i_seg_num}"
-                # console.print(i_name, i_seg_num, i_shift, i_seg_start, i_seg_end)
+                i_seg_end = i_seg_end.split('.')[0]
 
                 # populate first five columns
                 # get prev file(s)
@@ -267,10 +267,7 @@ class Seeker:
                 for other_name in self.table.index:
                     # console.log(f"{self.p} checking col '{names[j]}'")
                     j = int(self.table.index.get_loc(other_name))  # type: ignore
-                    j_name, j_seg_num, j_shift = other_name.split("_")
-                    # j_seg_start, j_seg_end = j_seg_num.split("-")
-                    # j_track_name = f"{j_name}_{j_seg_num}"
-                    # console.print(j_name, j_seg_num, j_shift, j_seg_start, j_seg_end)
+                    j_name, j_seg_num = other_name.split("_")
 
                     sim = float(1 - cosine(vecs[i], vecs[j]))
 
@@ -470,22 +467,27 @@ class Seeker:
             self.table = None  # type: ignore
 
     def get_prev(self, filename):
-        i_name, i_seg_num, i_shift = filename.split("_")
+        # i_name, i_seg_num, i_shift = filename.split("_")
+        i_name, i_seg_num = filename.split("_")
         i_seg_start, i_seg_end = i_seg_num.split("-")
+        i_seg_end = i_seg_end.split(".")[0]
         delta = int(i_seg_end) - int(i_seg_start)
 
         if int(i_seg_start) == 0:
             return None
 
-        prev_file = f"{i_name}_{int(i_seg_start) - delta:04d}-{i_seg_start}_{i_shift}"
+        # prev_file = f"{i_name}_{int(i_seg_start) - delta:04d}-{i_seg_start}_{i_shift}"
+        prev_file = f"{i_name}_{int(i_seg_start) - delta:04d}-{i_seg_start}"
 
         for key in self.properties.keys():
-            k_name, k_seg_num, k_shift = key.split("_")
+            # k_name, k_seg_num, k_shift = key.split("_")
+            k_name, k_seg_num = key.split("_")
             k_seg_start, k_seg_end = k_seg_num.split("-")
+            k_seg_end = k_seg_end.split(".")[0]
 
             if (
                 k_name == i_name
-                and k_shift == i_shift
+                # and k_shift == i_shift
                 and abs(int(k_seg_end) - int(i_seg_start)) <= 2
             ):
                 prev_file = key
@@ -493,20 +495,25 @@ class Seeker:
         return prev_file
 
     def get_next(self, filename):
-        i_name, i_seg_num, i_shift = filename.split("_")
+        # i_name, i_seg_num, i_shift = filename.split("_")
+        i_name, i_seg_num = filename.split("_")
         i_seg_start, i_seg_end = i_seg_num.split("-")
+        i_seg_end = i_seg_end.split(".")[0]
         delta = int(i_seg_end) - int(i_seg_start)
 
-        next_file = f"{i_name}_{i_seg_end}-{int(i_seg_end) + delta:04d}_{i_shift}"
+        # next_file = f"{i_name}_{i_seg_end}-{int(i_seg_end) + delta:04d}_{i_shift}"
+        next_file = f"{i_name}_{i_seg_end}-{int(i_seg_end) + delta:04d}"
         if next_file not in self.properties.keys():
             next_file = None
             for key in self.properties.keys():
-                k_name, k_seg_num, k_shift = key.split("_")
+                # k_name, k_seg_num, k_shift = key.split("_")
+                k_name, k_seg_num = key.split("_")
                 k_seg_start, k_seg_end = k_seg_num.split("-")
+                k_seg_end = k_seg_end.split(".")[0]
 
                 if (
                     k_name == i_name
-                    and k_shift == i_shift
+                    # and k_shift == i_shift
                     and abs(int(k_seg_start) - int(i_seg_end)) <= 2
                 ):
                     next_file = key

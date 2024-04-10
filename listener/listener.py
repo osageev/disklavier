@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 from threading import Thread, Event
 
-from utils import console, tick
+from utils import console, tick_loop
 from utils.midi import stretch_midi_file
 
 
@@ -68,7 +68,7 @@ class Listener:
 
                         self.stop_tick_event = Event()
                         self.metro_thread = Thread(
-                            target=tick,
+                            target=tick_loop,
                             args=(self.params.tempo, self.stop_tick_event),
                             name="player",
                         )

@@ -144,7 +144,7 @@ if __name__ == "__main__":
         playback_tempo,
     )
     console.log(f"{p} overseer setup complete")
-    overseer.start()
+    overseer.run()
 
     # run complete
     console.save_text(
@@ -152,4 +152,4 @@ if __name__ == "__main__":
     )
     console.log(f"{p}[green bold] session complete, exiting")
 
-    print(f"Currently alive threads: {len(enumerate())}")
+    console.log(f"Current threads: {enumerate()}")
