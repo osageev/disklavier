@@ -66,8 +66,8 @@ if __name__ == "__main__":
         help="whether to rebuild similarity metrics",
     )
     parser.add_argument(
-        "-k",
-        "--kickstart",
+        "-r",
+        "--random_init",
         action="store_true",
         help="dont wait for user input, just start playing",
     )
@@ -94,6 +94,12 @@ if __name__ == "__main__":
         "--tempo",
         type=int,
         help="tempo to record and play at, in bpm",
+    )
+    parser.add_argument(
+        "-k",
+        "--kickstart",
+        type=str,
+        help="use provided midi file as prompt",
     )
     args = parser.parse_args()
     params = OmegaConf.load(args.param_file)

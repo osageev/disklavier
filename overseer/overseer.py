@@ -44,7 +44,8 @@ class Overseer:
         self.data_dir = args.data_dir  # midi file library
         # behavior
         self.params = params
-        self.kickstart = args.kickstart  # pick random start file
+        self.random_init = args.random_init  # pick random start file
+        self.kickstart_file = args.kickstart # start system from provided MIDI file
         self.v_scale = args.velocity  # TODO: unimplemented augmentation
         self.do_plot = args.plot  # generate a bunch of plots
         # tempo
@@ -125,11 +126,14 @@ class Overseer:
             console.log(f"{self.p}[red bold] input or output port unavailable, exiting")
             return
 
-        # kickstart process
-        if self.kickstart:
+        # random_init process
+        if self.random_init:
             self.recording_ready_e.set()
-            random_file_path = os.listdir(self.data_dir)[0]
-            self.listener.outfile = random_file_path
+            self.listener.outfile = os.listdir(self.data_dir)[0]
+        # kickstart
+        if self.kickstart_file is not None:
+            self.recording_ready_e.set()
+            self.listener.outfile = self.kickstart_file
         # start listening for recording
         else:
             listen_thread = Thread(
@@ -158,14 +162,15 @@ class Overseer:
 
         try:
             while True:
-                pass
                 # check for recordings
                 if self.recording_ready_e.is_set():
                     # get recording
-                    if self.kickstart:
+                    if self.random_init:
                         recording_path = os.path.join(
                             self.data_dir, self.listener.outfile
                         )
+                    elif self.kickstart_file:
+                        recording_path = self.kickstart_file
                     else:
                         recording_path = os.path.join(
                             self.record_dir, self.listener.outfile

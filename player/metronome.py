@@ -27,7 +27,7 @@ class Metronome:
             self.tick_file = self.params.tick_file
 
     def tick(self) -> None:
-        print(f"{self.p} ticking every {self.tick_rate:.01f} seconds")
+        console.log(f"{self.p} ticking every {self.tick_rate:.01f} seconds")
 
         beats = 1
         start_time = time.time()
