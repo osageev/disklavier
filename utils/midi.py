@@ -271,11 +271,16 @@ def get_velocities(midi_data: PrettyMIDI) -> List:
     return [[lowest_velocity, highest_velocity], bin_counts.tolist()]
 
 
-def augment_recording(path: str, storage_dir: str, tempo: int = 70):
+def augment_recording(path: str, storage_dir: str, tempo: int) -> List[str]:
     midi = PrettyMIDI(path)
     midi_first_half = PrettyMIDI(initial_tempo=tempo)
     midi_second_half = PrettyMIDI(initial_tempo=tempo)
-    midi_doubled = PrettyMIDI(path)
+    midi_doubled = midi
+
+    basename = Path(path).stem
+    first_half_path = os.path.join(storage_dir, f"{basename}_fh.mid")
+    second_half_path = os.path.join(storage_dir, f"{basename}_sh.mid")
+    doubled_path = os.path.join(storage_dir, f"{basename}_db.mid")
 
     length = midi.get_end_time()
     halfway_point = length / 2
@@ -296,29 +301,23 @@ def augment_recording(path: str, storage_dir: str, tempo: int = 70):
                 )
                 inst_sh.notes.append(new_note)
 
-            shifted_note = Note(
-                velocity=note.velocity,
-                pitch=note.pitch,
-                start=note.start + length,
-                end=note.end + length,
+            midi_doubled.instruments[i].notes.append(
+                Note(
+                    velocity=note.velocity,
+                    pitch=note.pitch,
+                    start=note.start + length,
+                    end=note.end + length,
+                )
             )
-            midi_doubled.instruments[i].notes.append(shifted_note)
 
         midi_first_half.instruments.append(inst_fh)
         midi_second_half.instruments.append(inst_sh)
 
-    basename = Path(path).stem
-    midi_first_half.write(os.path.join(storage_dir, f"{basename}_fh.mid"))
-    midi_second_half.write(os.path.join(storage_dir, f"{basename}_sh.mid"))
-    midi_doubled.write(os.path.join(storage_dir, f"{basename}_db.mid"))
+    midi_first_half.write(first_half_path)
+    midi_second_half.write(second_half_path)
+    midi_doubled.write(doubled_path)
 
-    results = [
-        os.path.join(storage_dir, f"{basename}_fh.mid"),
-        os.path.join(storage_dir, f"{basename}_sh.mid"),
-        os.path.join(storage_dir, f"{basename}_db.mid"),
-    ]
-
-    return results
+    return [first_half_path, second_half_path, doubled_path]
 
 
 def b2t(time_beats: float, tempo: int) -> float:

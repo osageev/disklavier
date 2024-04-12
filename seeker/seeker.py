@@ -314,7 +314,7 @@ class Seeker:
             n += 1
 
         console.log(
-            f"{self.p} found '{next_filename}' with similarity {similarity:03f}"
+            f"{self.p} found '{next_filename}' with similarity {similarity:.03f}"
         )
 
         return next_filename, similarity
@@ -387,7 +387,7 @@ class Seeker:
             )
 
         console.log(
-            f"{self.p} \tfound '{next_filename}' with similarity {similarity:03f}"
+            f"{self.p} \tfound '{next_filename}' with similarity {similarity:.03f}"
         )
 
         return next_filename, similarity
@@ -424,7 +424,7 @@ class Seeker:
                 most_similar_vector = name
 
         console.log(
-            f"{self.p} \tfound '{most_similar_vector}' with similarity {highest_similarity:03f}"
+            f"{self.p} \tfound '{most_similar_vector}' with similarity {highest_similarity:.03f}"
         )
 
         if self.params.calc_trans:

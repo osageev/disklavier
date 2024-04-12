@@ -44,6 +44,11 @@ class Player:
         while not self.killed.is_set():
             # get next file from queue
             console.log(f"{self.p} waiting for file")
+            while self.file_queue.empty():
+                time.sleep(0.01)
+                if self.killed.is_set():
+                    console.log(f"{self.p}[orange] shutting down")
+                    return
             self.playing_file_path, similarity = self.file_queue.get()
             self.playing_file = os.path.basename(self.playing_file_path)
             self.get_next.set()
@@ -72,9 +77,11 @@ class Player:
             console.log(f"{self.p} waiting to play")
             while not self.play.is_set():
                 time.sleep(0.00001)
+                if self.killed.is_set():
+                    console.log(f"{self.p}[orange] shutting down")
+                    return
 
             self.play.clear()
-            console.log(f"{self.p} playing")
 
             # play file
             last_beat = time.time()

@@ -117,6 +117,8 @@ if __name__ == "__main__":
     if not os.path.exists(record_dir):
         console.log(f"{p} creating new recordings folder: '{record_dir}'")
         os.mkdir(record_dir)
+    if not os.path.exists(os.path.join(args.output_dir, "plots")):
+        os.mkdir(os.path.join(args.output_dir, "plots"))
     if not os.path.exists(plot_dir):
         console.log(f"{p} creating new plots folder: '{plot_dir}'")
         os.mkdir(plot_dir)

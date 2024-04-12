@@ -181,7 +181,7 @@ class Overseer:
                     # check augments for any better matches
                     if self.params.augment_recording:
                         options = augment_recording(
-                            recording_path, self.plot_dir, self.tempo
+                            recording_path, self.record_dir, self.tempo
                         )
 
                         change = None
