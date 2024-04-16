@@ -385,3 +385,16 @@ def get_active_beats(beats, start):
         return beats[index - 1 :]
 
     return []
+
+
+def text_to_midi(filepath: str, tempo: int) -> None:
+    if not os.path.exists(filepath):
+        console.log(f"[red]unable to find notes file at[/red] '{filepath}'")
+        return
+
+    with open(filepath, "r") as f:
+        new_midi = mido.MidiFile()
+        new_track = mido.MidiTrack()
+        for line in f.readlines():
+            # console.log(f"[dark_sea_green2]midi[/dark_sea_green2]  : {line}")
+            note_properties = line.split(" ")

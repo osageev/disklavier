@@ -49,7 +49,8 @@ class Seeker:
         self.force_rebuild = force_rebuild
         self.probs = self.params.probabilities / np.sum(self.params.probabilities)
         self.cumprobs = np.cumsum(self.probs)
-        self.rng = np.random.default_rng(1)
+        self.params.seed = 1 if self.params.seed is None else self.params.seed
+        self.rng = np.random.default_rng(self.params.seed)
 
         console.log(f"{self.p} initialized to use metric '{self.params.property}'")
 

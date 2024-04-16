@@ -17,6 +17,7 @@ metronome:
   tick_file: "data/m_kick.wav"
   do_tick: True
 seeker:
+  seed: 1
   w1: 0.5 
   w2: 0.5
   bin_length: 1.0

@@ -1,6 +1,6 @@
 import time
 import simpleaudio as sa
-from threading import Event
+from threading import Event, Thread
 
 from utils import console
 
@@ -29,7 +29,7 @@ class Metronome:
     def tick(self) -> None:
         console.log(f"{self.p} ticking every {self.tick_rate:.01f} seconds")
 
-        beats = 1
+        beats = self.params.beats_per_seg - 1
         start_time = time.time()
         last_beat = start_time
 
@@ -56,7 +56,13 @@ class Metronome:
                         )
 
                 if self.params.do_tick:
-                    sa.WaveObject.from_wave_file(self.tick_file).play()
+                    thread_t = Thread(
+                        target=sa.WaveObject.from_wave_file(self.tick_file).play,
+                        args=(),
+                        name=''
+                    )
+                    thread_t.start()
+
                 last_beat = beat
                 beats += 1
 

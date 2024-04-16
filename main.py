@@ -66,7 +66,7 @@ if __name__ == "__main__":
         help="whether to rebuild similarity metrics",
     )
     parser.add_argument(
-        "-r",
+        "-i",
         "--random_init",
         action="store_true",
         help="dont wait for user input, just start playing",
@@ -94,6 +94,12 @@ if __name__ == "__main__":
         "--tempo",
         type=int,
         help="tempo to record and play at, in bpm",
+    )
+    parser.add_argument(
+        "-c",
+        "--commands",
+        action="store_true",
+        help="enable keyboard commands",
     )
     parser.add_argument(
         "-k",
