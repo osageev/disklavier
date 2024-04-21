@@ -174,54 +174,39 @@ def simultaneous_notes(midi: PrettyMIDI, bin_length=None) -> list[int]:
     return simultaneous_notes_counts
 
 
-def energy(midi_path) -> List[int]:
-    # new_path = scale_vels(midi_path, "outputs/graveyard")
+def energy(midi_path) -> np.ndarray:
+    """
+    Calculate the normalized energy distribution across pitch classes in a MIDI file.
+
+    This function computes a histogram of 'energy' for each pitch class in the MIDI file,
+    where energy is defined based on note velocity and duration, with consideration of 
+    a predefined envelope length.
+
+    Args:
+        midi_path (str): The file path to the MIDI file.
+
+    Returns:
+        numpy.ndarray: An array representing the normalized energy distribution across
+                       the 12 pitch classes (0-11) in the MIDI file.
+
+    """
     midi = PrettyMIDI(midi_path)
-    envelope_length = 10  # seconds
+    envelope_length = 10
     pitch_histogram = {i: 0 for i in range(12)}
 
     for instrument in midi.instruments:
         for note in instrument.notes:
             note_duration = note.end - note.start
-            energy = note.velocity * envelope_length / 2
-
             if note_duration < envelope_length:
-                energy = energy - (
-                    (envelope_length - note_duration) * note.velocity / 2
-                )
+                energy =  note_duration * note.velocity / 2
+            else:
+                energy = note.velocity * envelope_length / 2
 
             pitch_histogram[note.pitch % 12] += energy
 
-    return list(pitch_histogram.values())
+    energies = np.array(pitch_histogram.values())
 
-
-def energy_old(
-    midi: PrettyMIDI,
-    w1: float = 0.5,
-    w2: float = 0.5,
-    bin_length=None,
-) -> list[float]:
-    """
-    Calculate a weighted average of note lengths and average velocities
-    """
-    if bin_length == None:
-        bin_length = midi.get_end_time()
-    num_bins = int(math.ceil(midi.get_end_time() / bin_length))
-    energies = [0.0] * num_bins
-    v = total_velocity(midi, bin_length)
-    l = average_note_length(midi)
-
-    for instrument in midi.instruments:
-        for note in instrument.notes:
-            start_bin = int(note.start // bin_length)
-            end_bin = int(note.end // bin_length)
-
-            for bin in range(start_bin, min(end_bin + 1, num_bins)):
-                energies[bin] += (
-                    w1 * (v[bin]["total_velocity"] / v[bin]["count"]) + w2 * l
-                )
-
-    return energies
+    return energies / energies.sum()
 
 
 def norm(data):
