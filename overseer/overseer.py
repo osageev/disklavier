@@ -1,6 +1,7 @@
 import os
 from shutil import copy2
 from pathlib import Path
+import time
 from datetime import datetime
 from pynput import keyboard
 from queue import Queue
@@ -46,13 +47,14 @@ class Overseer:
         # behavior
         self.params = params
         self.random_init = args.random_init  # pick random start file
-        self.kickstart_file = args.kickstart # start system from provided MIDI file
-        self.read_commands = args.commands # enable keyboard commands
+        self.kickstart_file = args.kickstart  # start system from provided MIDI file
+        self.read_commands = args.commands  # enable keyboard commands
         self.v_scale = args.velocity  # TODO: unimplemented augmentation
         self.do_plot = args.plot  # generate a bunch of plots
         # tempo
         self.tempo = tempo
         self.params.metronome.tempo = self.tempo
+        self.params.playerR.tempo = self.tempo
         self.params.player1.tempo = self.tempo
         self.params.player2.tempo = self.tempo
         self.params.listener.tempo = self.tempo
@@ -71,10 +73,16 @@ class Overseer:
         self.reset_e = Event()
         # players
         self.play_e = Event()
+        self.wait_playerR_e = Event()
+        self.wait_player1_e = Event()
+        self.wait_player2_e = Event()
+        self.kill_playerR_e = Event()
         self.kill_player1_e = Event()
         self.kill_player2_e = Event()
+        self.give_playerR_e = Event()
         self.give_player1_e = Event()
         self.give_player2_e = Event()
+        self.playlistR_q = Queue()
         self.playlist1_q = Queue()
         self.playlist2_q = Queue()
         self.playback_commmand_q = Queue()
@@ -103,23 +111,35 @@ class Overseer:
             self.kill_listener_e,
             self.reset_e,
         )
+        self.playerR = Player(
+            self.params.playerR,
+            self.kill_playerR_e,
+            self.give_playerR_e,
+            self.wait_playerR_e,
+            self.play_e,
+            self.playlistR_q,
+            self.playback_commmand_q,
+            self.note_queue,
+        )
         self.player1 = Player(
             self.params.player1,
             self.kill_player1_e,
             self.give_player1_e,
+            self.wait_player1_e,
             self.play_e,
             self.playlist1_q,
             self.playback_commmand_q,
-            self.note_queue
+            self.note_queue,
         )
         self.player2 = Player(
             self.params.player2,
             self.kill_player2_e,
             self.give_player2_e,
+            self.wait_player2_e,
             self.play_e,
             self.playlist2_q,
             self.playback_commmand_q,
-            self.note_queue
+            self.note_queue,
         )
         self.metronome = Metronome(
             self.params.metronome, self.kill_metro_e, self.ready_e, self.play_e
@@ -151,6 +171,10 @@ class Overseer:
             target=self.controller.run, args=(), name="controller"
         )
         controller_thread.start()
+        playerR_t = Thread(
+            target=self.playerR.play_loop,
+            name="playerR",
+        )
         player1_t = Thread(
             target=self.player1.play_loop,
             name="player1",
@@ -159,11 +183,12 @@ class Overseer:
             target=self.player2.play_loop,
             name="player2",
         )
+        playerR_t.start()
         player1_t.start()
         player2_t.start()
         metro_t = Thread(target=self.metronome.tick, name="metronome")
 
-        p1_playing = False  # used to alternate between players
+        p1_playing = True  # used to alternate between players
 
         try:
             while True:
@@ -180,9 +205,6 @@ class Overseer:
                         recording_path = os.path.join(
                             self.record_dir, self.listener.outfile
                         )
-                    console.log(
-                        f"{self.p} triggering playback from recording '{recording_path}'"
-                    )
 
                     # get most similar file to recording
                     first_file, first_similarity = self.seeker.get_ms_to_recording(
@@ -192,6 +214,9 @@ class Overseer:
                     if self.params.augment_recording:
                         options = augment_recording(
                             recording_path, self.record_dir, self.tempo
+                        )
+                        console.log(
+                            f"{self.p} augmented recording generated options", options
                         )
 
                         change = None
@@ -215,24 +240,26 @@ class Overseer:
                                 f"{self.p} using alt version of recording :: [bold deep_pink3]{change}[/bold deep_pink3] :: '{recording_path}'"
                             )
 
+                    console.log(
+                        f"{self.p} triggering playback from recording '{recording_path}'"
+                    )
+
                     self.playlist.append(
                         os.path.join(
                             self.playlist_dir, os.path.basename(recording_path)
                         )
                     )
+                    self.ready_e.set()
+                    self.play_e.set()
+                    self.playlistR_q.put((recording_path, -1.0))
                     next_file_path = os.path.join(self.data_dir, str(first_file))
                     next_file_path = self.change_tempo(next_file_path)
                     console.log(
-                        f"{self.p} queueing (ready: {self.give_player1_e.is_set()}) recording for p1: '{recording_path}'"
+                        f"{self.p} queueing (ready: {self.give_playerR_e.is_set()}) recording for p1: '{recording_path}'"
                     )
                     console.log(
                         f"{self.p} next file would be '{os.path.basename(next_file_path)}'"
                     )
-                    self.playlist1_q.put((recording_path, -1.0))
-                    self.give_player1_e.clear()
-                    self.ready_e.set()
-                    self.play_e.set()
-                    metro_t.start()
 
                     # copy the version of the recording that we use to the playlist
                     copy2(
@@ -242,9 +269,27 @@ class Overseer:
                         ),
                     )
 
-                    # clear recording
+                    console.log(
+                        f"{self.p} finished triggering playback from recording,\n\twaiting for playback to end"
+                    )
+
+                    # wait till recording playback is done
+                    while not self.wait_playerR_e.is_set():
+                        time.sleep(0.001)
+
+                    # kill recording player and start rest of system
+                    console.log(
+                        f"{self.p} recording playback ended, starting regular playback"
+                    )
                     self.recording_ready_e.clear()
-                    console.log(f"{self.p} finished triggering playback from recording")
+                    self.give_playerR_e.clear()
+                    self.kill_playerR_e.set()
+                    # self.ready_e.set()
+                    # self.play_e.set()
+                    metro_t.start()
+                    self.playlist1_q.put((next_file_path, first_similarity))
+                    self.give_player1_e.clear()
+                    # self.ready_e.clear()
 
                 # metronome says get ready
                 if self.ready_e.is_set():
@@ -332,7 +377,7 @@ class Overseer:
                 # check for notes in queue
                 if self.note_queue.not_empty:
                     while not self.note_queue.qsize() == 0:
-                        with open(self.notes_path, 'a') as f:
+                        with open(self.notes_path, "a") as f:
                             try:
                                 note = self.note_queue.get_nowait()
                                 f.write(f"{note}\n")
@@ -350,6 +395,7 @@ class Overseer:
 
             self.kill_controller_e.set()
             self.kill_metro_e.set()
+            self.kill_playerR_e.set()
             self.kill_player1_e.set()
             self.kill_player2_e.set()
             self.kill_listener_e.set()
@@ -361,6 +407,10 @@ class Overseer:
             if metro_t.is_alive():
                 metro_t.join()
                 console.log(f"{self.p} metronome killed successfully")
+
+            if playerR_t.is_alive():
+                playerR_t.join()
+                console.log(f"{self.p} playerR killed successfully")
 
             if player1_t.is_alive():
                 player1_t.join()
@@ -392,6 +442,7 @@ class Overseer:
         # set up input connection
         if self.params.in_port in available_inputs:
             self.input_port = mido.open_input(self.params.in_port)  # type: ignore
+            self.params.playerR.in_port = self.params.in_port
             self.params.player1.in_port = self.params.in_port
             self.params.player2.in_port = self.params.in_port
             self.params.listener.in_port = self.params.in_port
@@ -400,6 +451,7 @@ class Overseer:
                 f"{self.p} unable to find MIDI device '{self.params.in_port}' falling back on '{available_inputs[0]}'"
             )
             self.input_port = mido.open_input(available_inputs[0])  # type: ignore
+            self.params.playerR.in_port = available_inputs[0]
             self.params.player1.in_port = available_inputs[0]
             self.params.player2.in_port = available_inputs[0]
             self.params.listener.in_port = available_inputs[0]
@@ -409,6 +461,7 @@ class Overseer:
         # set up output connection
         if self.params.out_port in available_inputs:
             self.output_port = mido.open_output(self.params.out_port)  # type: ignore
+            self.params.playerR.out_port = self.params.out_port
             self.params.player1.out_port = self.params.out_port
             self.params.player2.out_port = self.params.out_port
             self.params.listener.out_port = self.params.out_port
@@ -417,6 +470,7 @@ class Overseer:
                 f"{self.p} unable to find MIDI device '{self.params.out_port}' falling back on '{available_outputs[0]}'"
             )
             self.output_port = mido.open_output(available_outputs[0])  # type: ignore
+            self.params.playerR.out_port = available_outputs[0]
             self.params.player1.out_port = available_outputs[0]
             self.params.player2.out_port = available_outputs[0]
             self.params.listener.out_port = available_outputs[0]

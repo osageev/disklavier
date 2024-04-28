@@ -1,9 +1,13 @@
 in_port: 'Disklavier'
 out_port: 'Disklavier'
-augment_recording: False
+augment_recording: True
 listener:
   record: 67
   reset: 66
+playerR:
+  p: "[dodger_blue3]playrR[/dodger_blue3]:"
+  tick: "data/m_tick.wav"
+  do_tick: False
 player1:
   p: "[blue1]playr1[/blue1]:"
   tick: "data/m_tick.wav"

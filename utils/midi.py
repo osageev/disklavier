@@ -275,7 +275,7 @@ def augment_recording(path: str, storage_dir: str, tempo: int) -> List[str]:
     midi = PrettyMIDI(path)
     midi_first_half = PrettyMIDI(initial_tempo=tempo)
     midi_second_half = PrettyMIDI(initial_tempo=tempo)
-    midi_doubled = midi
+    midi_doubled = PrettyMIDI(path)
 
     basename = Path(path).stem
     first_half_path = os.path.join(storage_dir, f"{basename}_fh.mid")
@@ -286,6 +286,7 @@ def augment_recording(path: str, storage_dir: str, tempo: int) -> List[str]:
     halfway_point = length / 2
 
     for i, instrument in enumerate(midi.instruments):
+        console.log(f"augmenting {i}")
         inst_fh = Instrument(program=instrument.program, name=instrument.name)
         inst_sh = Instrument(program=instrument.program, name=instrument.name)
 

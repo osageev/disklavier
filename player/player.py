@@ -21,7 +21,8 @@ class Player:
         self,
         params,
         kill_event: Event,
-        playback_event: Event,
+        get_next_event: Event,
+        waiting_event: Event,
         play_event: Event,
         filename_queue: Queue,
         command_queue: Queue,
@@ -29,7 +30,8 @@ class Player:
     ) -> None:
         self.params = params
         self.killed = kill_event
-        self.get_next = playback_event
+        self.get_next = get_next_event
+        self.waiting = waiting_event
         self.play = play_event
         self.file_queue = filename_queue
         self.commands = command_queue
@@ -48,8 +50,9 @@ class Player:
             while self.file_queue.empty():
                 time.sleep(0.01)
                 if self.killed.is_set():
-                    console.log(f"{self.p}[orange] shutting down")
+                    console.log(f"{self.p}[bold orange1] shutting down")
                     return
+            self.waiting.clear()
             self.playing_file_path, similarity = self.file_queue.get()
             self.playing_file = os.path.basename(self.playing_file_path)
             self.get_next.set()
@@ -67,8 +70,9 @@ class Player:
 
             # play file
             self.play_midi(self.playing_file_path)
+            self.waiting.set()
 
-        console.log(f"{self.p}[orange] shutting down")
+        console.log(f"{self.p}[bold orange1] shutting down")
 
     def play_midi(self, midi_path: str) -> None:
         midi = MidiFile(midi_path)
@@ -79,7 +83,7 @@ class Player:
             while not self.play.is_set():
                 time.sleep(0.00001)
                 if self.killed.is_set():
-                    console.log(f"{self.p}[orange] shutting down")
+                    console.log(f"{self.p}[bold orange1] shutting down")
                     return
 
             self.play.clear()

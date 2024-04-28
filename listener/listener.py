@@ -83,7 +83,7 @@ class Listener:
                     self.recorded_notes.append(msg)
 
                 if self.kill_event.is_set():
-                    console.log(f"{self.p} [orange]shutting down")
+                    console.log(f"{self.p} [bold orange1]shutting down")
                     self.stop_tick_event.set()
                     self.metro_thread.join()
                     return
