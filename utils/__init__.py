@@ -1,10 +1,8 @@
 import time
 import wave
-import random
 import numpy as np
-from pathlib import Path
 import simpleaudio as sa
-from threading import Event
+from threading import Event, Thread
 from rich.console import Console
 
 
@@ -33,19 +31,21 @@ def tick_loop(
     Args:
     bpm: Beats per minute, defines the tempo of the metronome.
     """
-    tick = sa.WaveObject.from_wave_file("data/m_tick.wav")
-    tick_len = 0
-    with wave.open("data/m_tick.wav", "rb") as wave_file:
-        frames = wave_file.getnframes()
-        rate = wave_file.getframerate()
-        tick_len = frames / float(rate)
+    start_time = time.time()
+    last_beat = start_time
 
     while not stop_event.is_set():
-        if do_print:
-            console.log(f"{p} [grey50]tick!")
-        play_obj = tick.play()
-        play_obj.wait_done()
-        time.sleep(60.0 / bpm - tick_len)
+        beat = time.time()
+        if beat - last_beat >= 60.0 / bpm:
+            if do_print:
+                console.log(f"{p} [grey50]tick!")
+            thread_t = Thread(
+                target=sa.WaveObject.from_wave_file("data/m_tick.wav").play,
+                args=(),
+                name="",
+            )
+            thread_t.start()
+            last_beat = beat
     return
 
 

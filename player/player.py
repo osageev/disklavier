@@ -76,6 +76,7 @@ class Player:
 
     def play_midi(self, midi_path: str) -> None:
         midi = MidiFile(midi_path)
+        # midi.print_tracks()
 
         # open file and wait for play event
         with mido.open_output(self.params.out_port) as outport:  # type: ignore
