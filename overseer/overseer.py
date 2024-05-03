@@ -284,12 +284,9 @@ class Overseer:
                     self.recording_ready_e.clear()
                     self.give_playerR_e.clear()
                     self.kill_playerR_e.set()
-                    # self.ready_e.set()
-                    # self.play_e.set()
                     metro_t.start()
                     self.playlist1_q.put((next_file_path, first_similarity))
                     self.give_player1_e.clear()
-                    # self.ready_e.clear()
 
                 # metronome says get ready
                 if self.ready_e.is_set():

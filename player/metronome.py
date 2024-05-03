@@ -29,7 +29,7 @@ class Metronome:
     def tick(self) -> None:
         console.log(f"{self.p} ticking every {self.tick_rate:.01f} seconds")
 
-        beats = self.params.beats_per_seg - 1
+        beats = self.params.beats_per_seg
         start_time = time.time()
         last_beat = start_time
 
