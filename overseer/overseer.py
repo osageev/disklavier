@@ -18,7 +18,7 @@ from controller.controller import Controller
 from utils import console
 from utils.midi import augment_recording, text_to_midi
 from utils.metrics import scale_vels
-from utils.plot import plot_images, plot_piano_roll_and_pitch_histogram
+from utils.plot import plot_images, plot_piano_roll_and_pitch_histogram, plot_contours
 
 
 class Overseer:
@@ -26,6 +26,7 @@ class Overseer:
     playing_file = ""
     playlist = []
     do_loop = False
+    track_num = 0
 
     def __init__(
         self,
@@ -99,7 +100,11 @@ class Overseer:
 
         # initialize objects to be overseen
         self.seeker = Seeker(
-            self.params.seeker, self.data_dir, args.output_dir, args.force_rebuild
+            self.params.seeker,
+            self.data_dir,
+            args.output_dir,
+            tempo,
+            args.force_rebuild,
         )
         self.seeker.build_properties()
         self.seeker.build_top_n_table()
@@ -245,9 +250,9 @@ class Overseer:
                     )
 
                     self.playlist.append(
-                        os.path.join(
+                        f"{self.track_num:02d} {os.path.join(
                             self.playlist_dir, os.path.basename(recording_path)
-                        )
+                        )}" 
                     )
                     self.ready_e.set()
                     self.play_e.set()
@@ -319,8 +324,9 @@ class Overseer:
                         self.give_player2_e.clear()
 
                     p1_playing = not p1_playing
-                    self.playlist.append(next_file_path)
+                    self.playlist.append(f"{self.track_num:02d} {next_file_path}")
                     self.ready_e.clear()
+                    self.track_num += 1
 
                 # check for keypresses
                 if self.read_commands:
@@ -556,18 +562,26 @@ class Overseer:
             old_pr = PrettyMIDI(midi_file_path).get_piano_roll()
             new_pr = PrettyMIDI(new_file_path).get_piano_roll()
             plot_path = os.path.join(
-                self.plot_dir, f"{os.path.basename(midi_file_path)[-4:]}.png"
+                self.plot_dir, f"{self.track_num}-{Path(midi_file_path).stem}.png"
             )
 
-            plot_images(
-                [old_pr, new_pr],
-                [
-                    f"{os.path.basename(midi_file_path)} ({midi.length:.02f}s)",
-                    f"{os.path.basename(new_file_path)} ({new_midi.length:.02f}s)",
-                ],
-                plot_path,
-                (2, 1),
-                set_axis="on",
-            )
+            if self.params.seeker.property == "contour":
+                plot_contours(
+                    new_file_path,
+                    plot_path,
+                    self.tempo,
+                    self.params.seeker.beats_per_seg,
+                )
+            else:
+                plot_images(
+                    [old_pr, new_pr],
+                    [
+                        f"{os.path.basename(midi_file_path)} ({midi.length:.02f}s)",
+                        f"{os.path.basename(new_file_path)} ({new_midi.length:.02f}s)",
+                    ],
+                    plot_path,
+                    (2, 1),
+                    set_axis="on",
+                )
 
         return new_file_path

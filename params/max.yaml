@@ -27,7 +27,7 @@ seeker:
   bin_length: 1.0
   ph_weight_dur: False
   ph_weight_vel: False
-  property: "pitch_histogram"
+  property: "contour"
   calc_trans: False
   probabilities:
     - 0.15 # similar segment from another track
@@ -40,3 +40,4 @@ seeker:
     - 0.05
     - 0.05
     - 0.05
+  beats_per_seg: 8

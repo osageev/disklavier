@@ -6,6 +6,8 @@ from pretty_midi import PrettyMIDI
 import os
 from pathlib import Path
 
+from utils.metrics import contour
+
 DARK = True
 SEMITONES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
@@ -71,9 +73,7 @@ def plot_histograms(
     for num_plot in range(num_images):
         plt.subplot(shape[0], shape[1], num_plot + 1)
         plt.bar(range(12), histograms[num_plot])
-        plt.xticks(
-            range(12), SEMITONES
-        )
+        plt.xticks(range(12), SEMITONES)
         plt.title(titles[num_plot])
 
     plt.tight_layout()
@@ -167,4 +167,49 @@ def plot_pr_hists(midi: PrettyMIDI, energy_hist, title) -> None:
     ax3.set_xticks(range(12), SEMITONES)
 
     plt.tight_layout()
+    plt.close()
+
+
+def plot_contours(
+    midi_file_path: str, save_path: str, tempo: int, beats: int, simple=True
+) -> None:
+    if DARK:
+        plt.style.use("dark_background")
+
+    fs = 100  # frames per second
+    midi_data = PrettyMIDI(midi_file_path)
+    piano_roll = midi_data.get_piano_roll(fs)
+    beat_frames = np.arange(beats) * (60 / tempo * fs)
+
+    note_tuples = contour(midi_data, beats, tempo)
+
+    plt.figure(figsize=(12, 6))
+    plt.imshow(piano_roll, aspect="auto", origin="lower", cmap="magma", alpha=0.5)
+    plt.colorbar(label="Velocity")
+    plt.xlabel("Time (in frames)")
+    plt.ylabel("Pitch")
+
+    for i, beat in enumerate(beat_frames):
+        if simple:
+            plt.hlines(
+                y=note_tuples[i],
+                xmin=beat,
+                xmax=beat + (60.0 / tempo * fs),
+                color="green",
+                linewidth=1,
+                alpha=0.7,
+            )
+        else:
+            for line in note_tuples[i]:
+                plt.hlines(
+                    y=line,
+                    xmin=beat,
+                    xmax=beat + (60.0 / tempo * fs),
+                    color="green",
+                    linewidth=2,
+                    alpha=0.7,
+                )
+
+    plt.title(f"{Path(midi_file_path).stem}")
+    plt.savefig(save_path)
     plt.close()

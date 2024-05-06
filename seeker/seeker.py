@@ -40,7 +40,12 @@ class Seeker:
     ]
 
     def __init__(
-        self, params, input_dir: str, output_dir: str, force_rebuild: bool = False
+        self,
+        params,
+        input_dir: str,
+        output_dir: str,
+        tempo: int,
+        force_rebuild: bool = False,
     ) -> None:
         """"""
         self.params = params
@@ -48,7 +53,7 @@ class Seeker:
         self.output_dir = output_dir
         self.force_rebuild = force_rebuild
         self.probs = self.params.probabilities / np.sum(self.params.probabilities)
-        self.cumprobs = np.cumsum(self.probs)
+        self.params.tempo = tempo
         self.params.seed = 1 if self.params.seed is None else self.params.seed
         self.rng = np.random.default_rng(self.params.seed)
 
@@ -240,8 +245,8 @@ class Seeker:
                 # console.log(f"\n{self.p} populating row '{name}'")
 
                 i = int(self.table.index.get_loc(name))  # type: ignore
-                i_name, i_seg_num, i_shift = name.split("_")
-                # i_name, i_seg_num = name.split("_")
+                # i_name, i_seg_num, i_shift = name.split("_")
+                i_name, i_seg_num = name.split("_")
                 i_seg_start, i_seg_end = i_seg_num.split("-")
                 i_seg_end = i_seg_end.split(".")[0]
 
@@ -268,8 +273,11 @@ class Seeker:
                 for other_name in self.table.index:
                     # console.log(f"{self.p} checking col '{names[j]}'")
                     j = int(self.table.index.get_loc(other_name))  # type: ignore
-                    j_name, j_seg_num, j_shift = other_name.split("_")
-                    # j_name, j_seg_num = other_name.split("_")
+                    # j_name, j_seg_num, j_shift = other_name.split("_")
+                    j_name, j_seg_num = other_name.split("_")
+
+                    # console.log(f"{self.p} v i", vecs[i])
+                    # console.log(f"{self.p} v j", vecs[j])
 
                     sim = float(1 - cosine(vecs[i], vecs[j]))
 
@@ -408,6 +416,10 @@ class Seeker:
                 cmp_metric = metrics.blur_pr(midi, False)
             case "pr_blur_c":
                 cmp_metric = metrics.blur_pr(midi)
+            case "contour":
+                cmp_metric = metrics.contour(
+                    midi, self.params.beats_per_seg, self.params.tempo
+                )
             case _:
                 cmp_metric = midi.get_pitch_class_histogram()
 
@@ -469,8 +481,8 @@ class Seeker:
             self.table = None  # type: ignore
 
     def get_prev(self, filename):
-        i_name, i_seg_num, i_shift = filename.split("_")
-        # i_name, i_seg_num = filename.split("_")
+        # i_name, i_seg_num, i_shift = filename.split("_")
+        i_name, i_seg_num = filename.split("_")
         i_seg_start, i_seg_end = i_seg_num.split("-")
         i_seg_end = i_seg_end.split(".")[0]
         delta = int(i_seg_end) - int(i_seg_start)
@@ -482,8 +494,8 @@ class Seeker:
         prev_file = f"{i_name}_{int(i_seg_start) - delta:04d}-{i_seg_start}"
 
         for key in self.properties.keys():
-            k_name, k_seg_num, k_shift = key.split("_")
-            # k_name, k_seg_num = key.split("_")
+            # k_name, k_seg_num, k_shift = key.split("_")
+            k_name, k_seg_num = key.split("_")
             k_seg_start, k_seg_end = k_seg_num.split("-")
             k_seg_end = k_seg_end.split(".")[0]
 
@@ -497,8 +509,8 @@ class Seeker:
         return prev_file
 
     def get_next(self, filename):
-        i_name, i_seg_num, i_shift = filename.split("_")
-        # i_name, i_seg_num = filename.split("_")
+        # i_name, i_seg_num, i_shift = filename.split("_")
+        i_name, i_seg_num = filename.split("_")
         i_seg_start, i_seg_end = i_seg_num.split("-")
         i_seg_end = i_seg_end.split(".")[0]
         delta = int(i_seg_end) - int(i_seg_start)
@@ -508,8 +520,8 @@ class Seeker:
         if next_file not in self.properties.keys():
             next_file = None
             for key in self.properties.keys():
-                k_name, k_seg_num, k_shift = key.split("_")
-                # k_name, k_seg_num = key.split("_")
+                # k_name, k_seg_num, k_shift = key.split("_")
+                k_name, k_seg_num = key.split("_")
                 k_seg_start, k_seg_end = k_seg_num.split("-")
                 k_seg_end = k_seg_end.split(".")[0]
 

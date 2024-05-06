@@ -6,9 +6,10 @@ import numpy as np
 
 from utils.midi import blur_pr
 
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 TARGET_VEL = 80
+
 
 def all_properties(midi_path: str, filename: str, config) -> Dict:
     """"""
@@ -37,6 +38,7 @@ def all_properties(midi_path: str, filename: str, config) -> Dict:
         "lengths": [0.0] * num_bins,
         "energy": [0.0] * num_bins,
         "simultaneous_counts": [0] * num_bins,
+        "contour": contour(midi, 8, config.tempo),
     }
 
     # properties that are calculated from notes
@@ -54,7 +56,7 @@ def all_properties(midi_path: str, filename: str, config) -> Dict:
     properties["lengths"] = sum(properties["lengths"]) / len(properties["lengths"])
 
     # properties that are calculated from other properties
-    properties["energy"] = energy(midi_path)
+    properties["energy"] = energy(midi_path).tolist()
     properties["pr_blur"] = blur_pr(midi, False)
     properties["pr_blur_c"] = blur_pr(midi)
 
@@ -62,6 +64,7 @@ def all_properties(midi_path: str, filename: str, config) -> Dict:
 
 
 ############################  individual properties  ##########################
+
 
 def get_avg_vel(midi_file_path):
     midi = mido.MidiFile(midi_file_path)
@@ -179,7 +182,7 @@ def energy(midi_path) -> np.ndarray:
     Calculate the normalized energy distribution across pitch classes in a MIDI file.
 
     This function computes a histogram of 'energy' for each pitch class in the MIDI file,
-    where energy is defined based on note velocity and duration, with consideration of 
+    where energy is defined based on note velocity and duration, with consideration of
     a predefined envelope length.
 
     Args:
@@ -198,21 +201,88 @@ def energy(midi_path) -> np.ndarray:
         for note in instrument.notes:
             note_duration = note.end - note.start
             if note_duration < envelope_length:
-                energy =  note_duration * note.velocity / 2
+                energy = note_duration * note.velocity / 2
             else:
                 energy = note.velocity * envelope_length / 2
 
             pitch_histogram[note.pitch % 12] += energy
 
-    energies = np.array(pitch_histogram.values())
+    energies = np.array(list(pitch_histogram.values()))
 
     return energies / energies.sum()
 
 
+def contour(midi: PrettyMIDI, num_beats: int, tempo: int, simple=True) -> List[Tuple]:
+    """Calculate the lowest, weighted average, and highest note pitches for each beat.
+
+    This function processes the MIDI data to find the notes active during each beat
+    and computes three values: the lowest pitch, the weighted average pitch, and the
+    highest pitch for the notes active in that beat. The weighted average is computed
+    using normalized velocities and durations as weights for the pitches.
+
+    Args:
+        midi_data (pretty_midi.PrettyMIDI): The MIDI data to analyze.
+        tempo (int): The tempo of the piece in beats per minute (BPM).
+        beats (int): The number of beats to analyze in the MIDI data.
+        simple (bool): Whether to just return the average,
+        or also return the max and min note for each beat.
+
+    Returns:
+        list of tuple: A list where each tuple contains the average note of each beat.
+        If simple is False, a list where each tuple contains three elements corresponding
+        to the lowest pitch, weighted average pitch, and highest pitch for each beat.
+        If no notes are present in a beat, the values are returned as (0, 0, 0).
+
+    """
+    beat_duration = 60.0 / tempo
+    results = []
+
+    for beat in range(num_beats):
+        start_time = beat * beat_duration
+        end_time = start_time + beat_duration
+        notes = []
+
+        for instrument in midi.instruments:
+            for note in instrument.notes:
+                note_start = note.start
+                note_end = note.end
+                if note_start < end_time and note_end > start_time:
+                    overlap_start = max(note_start, start_time)
+                    overlap_end = min(note_end, end_time)
+                    overlap_duration = overlap_end - overlap_start
+                    if overlap_duration > 0:
+                        notes.append((note.pitch, note.velocity, overlap_duration))
+
+        if notes:
+            pitches = np.array([note[0] for note in notes])
+            velocities = np.array([note[1] for note in notes])
+            durations = np.array([note[2] for note in notes])
+            normalized_velocities = velocities / np.max(velocities)
+            normalized_durations = durations / np.max(durations)
+
+            weighted_avg = np.sum(
+                pitches * normalized_velocities * normalized_durations
+            ) / np.sum(normalized_velocities * normalized_durations)
+            if simple:
+                results.append((weighted_avg))
+            else:
+                results.append((np.min(pitches), weighted_avg, np.max(pitches)))
+        else:
+            if simple:
+                results.append((0))
+            else:
+                results.append((0, 0, 0))
+
+    return results
+
+
+###############################################################################
+##########################  helper functions  #################################
+###############################################################################
+
+
 def norm(data):
     return (data - np.min(data)) / (np.max(data) - np.min(data))
-
-# helper functions
 
 
 def scale_vels(midi_file_path, output_path):
