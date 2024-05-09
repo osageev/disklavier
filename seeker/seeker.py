@@ -217,13 +217,10 @@ class Seeker:
             "diff 5",
         ]
         column_labels = [[label, f"sim-{i + 1}"] for i, label in enumerate(labels)]
-        # column_labels = [
-        #     [f"{prob:.03f}-{i}", f"sim-{i + 1}"] for i, prob in enumerate(self.probs)
-        # ]
         column_labels = [label for sublist in column_labels for label in sublist]
 
         self.table = pd.DataFrame(
-            [["", -1.0] * n] * len(names),
+            [["", -1.0] * len(labels)] * len(names),
             index=names,
             columns=column_labels,
         )
@@ -297,7 +294,6 @@ class Seeker:
         )
 
         self.table.to_parquet(parquet, index=True)
-
         if os.path.isfile(parquet):
             console.log(f"{self.p} succesfully saved similarities file '{parquet}'")
         else:
@@ -348,14 +344,10 @@ class Seeker:
             self.last_trans = filename[-7:]
             filename = filename[:-7] + "n00.mid"
 
-        next_filename = self.table.at[filename, f"{roll}"]
+        if self.params.max_sim:
+            roll = self.get_max_sim(filename)
 
-        # next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
-        # console.log(
-        #     f"{self.p} looking for similarity at ['{filename}', '{self.table.columns[next_col]}']\n\t",
-        #     self.table.at[filename, self.table.columns[next_col]],
-        # )
-        # similarity = float(self.table.at[filename, self.table.columns[next_col]])
+        next_filename = self.table.at[filename, f"{roll}"]
 
         # when the source file is at the start or end of a track the prev/next
         # columns respectively can be None
@@ -366,27 +358,6 @@ class Seeker:
 
         next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
         similarity = float(self.table.at[filename, self.table.columns[next_col]])
-
-        # console.log(f"{self.p} rolled {roll}")
-        # console.log(f"{self.p} columns\n{columns}")
-        # console.log(f"{self.p} table columns\n{self.table.columns}")
-
-        # for i, col in enumerate(columns[1:]):
-        #     if float(columns[i - 1]) < roll <= float(col):
-        #         console.log(
-        #             f"{self.p} found a match: {columns[i-1]} < {roll:.05f} <= {col}",
-        #         )
-
-        #         next_filename = self.table.at[filename, col]
-        #         next_col = self.table.columns[i * 2 + 1]
-
-        #         # console.log(
-        #         #     f"{self.p} looking for similarity ({i} -> {i * 2 + 1}) at ['{filename}', '{next_col}']\n\t",
-        #         #     self.table.at[filename, next_col],
-        #         # )
-        #         similarity = float(self.table.at[filename, next_col])
-
-        #         break
 
         # check transposition if using centered blur
         if self.params.calc_trans:
@@ -419,6 +390,10 @@ class Seeker:
             case "contour":
                 cmp_metric = metrics.contour(
                     midi, self.params.beats_per_seg, self.params.tempo
+                )
+            case "contour-complex":
+                cmp_metric = metrics.contour(
+                    midi, self.params.beats_per_seg, self.params.tempo, False
                 )
             case _:
                 cmp_metric = midi.get_pitch_class_histogram()
@@ -602,3 +577,66 @@ class Seeker:
         self.count += 1
 
         return best_match, best_sim
+
+    def sort_row(self, row):
+        """Sorts the specified sections of a DataFrame row in descending order based on 'sim' values.
+
+        This function assumes the row contains a fixed part and a sortable part, where the sortable
+        part consists of 'diff' and 'sim' column pairs. The function sorts these pairs by the 'sim'
+        value in descending order while keeping each 'diff' directly in front of its corresponding 'sim'.
+
+        Args:
+            row (pd.Series): A single row of a DataFrame to be sorted. It is expected that the
+                            row contains mixed data types with 'diff' being filenames (str) and
+                            'sim' being numeric scores (float).
+
+        Returns:
+            pd.Series: A series with the first part unchanged and the last part sorted based on the
+                    'sim' values.
+
+        Note:
+            The function is designed to operate within a DataFrame.apply() method which allows it
+            to be applied row-wise. It specifically manages rows that split at index 10, where indices
+            from 10 onward contain 'diff' and 'sim' pairs.
+
+        Example:
+            # Assuming 'df' is a DataFrame loaded with the appropriate columns and data structure:
+            sorted_df = df.apply(sort_row, axis=1)
+        """
+        fixed_part = row.iloc[:10]  # Assumes the first 10 entries do not need sorting
+        to_sort_part = row.iloc[10:]  # The part that needs sorting
+
+        # Create a DataFrame from the parts that need sorting
+        # Assuming every two columns are 'diff' and 'sim' pairs starting from index 10
+        df_to_sort = pd.DataFrame(
+            {
+                "diff": to_sort_part[::2].values,  # Assumes even indices are 'diff'
+                "sim": to_sort_part[1::2].values,  # Assumes odd indices are 'sim'
+            },
+            index=pd.MultiIndex.from_arrays(
+                [to_sort_part[::2].index, to_sort_part[1::2].index]
+            ),
+        )
+
+        # Sort the DataFrame based on 'sim' values in descending order
+        sorted_df = df_to_sort.sort_values(by="sim", ascending=False)
+
+        # Flatten the sorted DataFrame back into a Series
+        sorted_series = pd.Series(
+            data=sorted_df.values.flatten(),
+            index=[idx for sub_idx in sorted_df.index for idx in sub_idx],
+        )
+
+        # Concatenate the fixed part and the sorted part
+        return pd.concat([fixed_part, sorted_series])
+
+    def get_max_sim(self, row_label):
+        row = self.table.loc[row_label]
+        most_similar_v = -1
+        most_similar_i = 1
+        for i, (k, v) in enumerate(row.items()):
+            if str(k).startswith("sim") and float(v) > most_similar_v:
+                most_similar_v = v
+                most_similar_i = i
+
+        return row.index[most_similar_i - 1]

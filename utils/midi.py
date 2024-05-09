@@ -35,7 +35,7 @@ def quantize_midi(filename, sections_per_beat) -> PrettyMIDI:
     return midi_data
 
 
-def blur_pr(midi: PrettyMIDI, do_center: bool = True, delta_max: int = 55):
+def blur_pr(midi: PrettyMIDI, do_center: bool = True, delta_max: int = 55) -> List:
     pr = midi.get_piano_roll()
     if do_center:
         pr = strip_and_pad(pr, delta_max)

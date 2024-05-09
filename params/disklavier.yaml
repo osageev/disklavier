@@ -27,7 +27,7 @@ seeker:
   bin_length: 1.0
   ph_weight_dur: False
   ph_weight_vel: False
-  property: "contour"
+  property: "contour-complex"
   calc_trans: False
   calc_shift: False
   probabilities:
@@ -42,3 +42,4 @@ seeker:
     - 0.05
     - 0.05
   beats_per_seg: 8
+  max_sim: True

@@ -39,6 +39,7 @@ def all_properties(midi_path: str, filename: str, config) -> Dict:
         "energy": [0.0] * num_bins,
         "simultaneous_counts": [0] * num_bins,
         "contour": contour(midi, 8, config.tempo),
+        "contour-complex": contour(midi, 8, config.tempo, False),
     }
 
     # properties that are calculated from notes
@@ -264,14 +265,17 @@ def contour(midi: PrettyMIDI, num_beats: int, tempo: int, simple=True) -> List[T
                 pitches * normalized_velocities * normalized_durations
             ) / np.sum(normalized_velocities * normalized_durations)
             if simple:
-                results.append((weighted_avg))
+                results.append(weighted_avg)
             else:
-                results.append((np.min(pitches), weighted_avg, np.max(pitches)))
+                results.append(int(np.min(pitches)))
+                results.append(weighted_avg)
+                results.append(int(np.max(pitches)))
         else:
-            if simple:
-                results.append((0))
-            else:
-                results.append((0, 0, 0))
+            results.append(0)
+
+            if not simple:
+                results.append(0)
+                results.append(0)
 
     return results
 

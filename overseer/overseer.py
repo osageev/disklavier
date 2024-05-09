@@ -295,6 +295,7 @@ class Overseer:
 
                 # metronome says get ready
                 if self.ready_e.is_set():
+                    self.track_num += 1
                     # ready next file
                     next_file = (
                         self.player2.playing_file
@@ -326,7 +327,6 @@ class Overseer:
                     p1_playing = not p1_playing
                     self.playlist.append(f"{self.track_num:02d} {next_file_path}")
                     self.ready_e.clear()
-                    self.track_num += 1
 
                 # check for keypresses
                 if self.read_commands:
@@ -523,27 +523,7 @@ class Overseer:
             self.playlist_dir, f"{Path(midi_file_path).stem}.mid"
         )
         midi.save(new_file_path)
-
-        # also stretch note timings
-        # if do_stretch:
-        #     new_len = midi.length * file_bpm / self.tempo
-        #     new_midi = um.stretch_midi_file(midi, new_len, self.p)
-
-        # save the modified MIDI file
-
-        # console.log(f"{self.p} saving modified MIDI file with new tempo {self.tempo} BPM to '{new_file_path}'")
-        # new_midi.save(new_file_path)
         new_midi = mido.MidiFile(new_file_path)
-        # segment_length = 60 * 16 / file_bpm  # in seconds
-        # if np.round(segment_length, 3) != np.round(midi.length, 3):
-        #     total_time_t = -1
-        #     for track in midi.tracks:
-        #         # Remove existing 'end_of_track' messages and calculate last note time
-        #         for msg in track:
-        #             total_time_t += msg.time
-        #             if msg.type == "end_of_track":
-        #                 track.remove(msg)
-        # console.log(f"{self.p} expected len {segment_length:.04f} but found {midi.length:.04f} and calcd {mido.tick2second(total_time_t, 220, mido.bpm2tempo(file_bpm))}")
 
         # scale velocities
         # if self.v_scale != 1.0 :
@@ -565,12 +545,13 @@ class Overseer:
                 self.plot_dir, f"{self.track_num}-{Path(midi_file_path).stem}.png"
             )
 
-            if self.params.seeker.property == "contour":
+            if self.params.seeker.property == "contour" or self.params.seeker.property == "contour-complex":
                 plot_contours(
                     new_file_path,
                     plot_path,
                     self.tempo,
                     self.params.seeker.beats_per_seg,
+                    self.params.seeker.property == "contour"
                 )
             else:
                 plot_images(
