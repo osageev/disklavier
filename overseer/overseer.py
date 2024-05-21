@@ -304,7 +304,8 @@ class Overseer:
                     )
                     similarity = -1.0
                     if not self.do_loop:
-                        next_file, similarity = self.seeker.get_msf_new(
+                        # next_file, similarity = self.seeker.get_msf_new(
+                        next_file, similarity = self.seeker.get_most_similar_file(
                             os.path.basename(next_file_path)
                         )
                     next_file_path = os.path.join(self.data_dir, str(next_file))

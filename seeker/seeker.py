@@ -16,7 +16,7 @@ from utils import console
 import utils.metrics as metrics
 from utils.plot import plot_histograms
 
-from typing import Tuple
+from typing import Tuple, Dict
 
 
 class Seeker:
@@ -300,7 +300,46 @@ class Seeker:
             console.log(f"{self.p} error saving similarities file '{parquet}'")
             raise FileNotFoundError
 
-    def get_most_similar_file(self, filename: str, different_parent: bool = True):
+    def get_most_similar_file(
+        self, filename: str, different_parent=True
+    ) -> Dict:
+        """"""
+        console.log(f"{self.p} finding most similar file to '{filename}'")
+        
+        self.properties[filename]["num_plays"] += 1
+        n = 1
+        parent_track, _ = filename.split("_")
+        next_largest = self.table[filename].nlargest(n)
+        console.log(f"{self.p} checking index {next_largest}")
+        next_filename: str = next_largest.index[-1] # type: ignore
+        next_track, _ = next_filename.split("_")
+
+        # TODO: refactor logic?
+        if different_parent:
+            while next_track == parent_track:
+                n += 1
+                value = next_largest.iloc[-1]
+                next_largest = self.table[filename].nlargest(n)
+                console.log(f"{self.p} checking index {next_largest}")
+                next_filename: str = next_largest.index[-1] # type: ignore
+                next_track, _ = next_filename.split("_")
+                value["filename"] = next_filename
+        else:
+            while next_filename == filename:
+                n += 1
+                value = next_largest.iloc[-1]
+                next_largest = self.table[filename].nlargest(n)
+                next_filename: str = next_largest.index[-1] # type: ignore
+                next_track, _ = next_filename.split("_")
+                value["filename"] = next_filename
+
+        console.log(
+            f"{self.p} found '{value['filename']}' with similarity {value["sim"]:.03f}"
+        )
+
+        return value
+
+    def get_most_similar_file_old(self, filename: str, different_parent: bool = True):
         """finds the filename and similarity of the next most similar unplayed file in the similarity table
         NOTE: will go into an infinite loop once all files are played!
         """
