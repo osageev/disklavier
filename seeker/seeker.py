@@ -3,6 +3,7 @@ import json
 import pretty_midi
 import numpy as np
 import pandas as pd
+import itertools
 from scipy.spatial.distance import cosine
 from rich.progress import (
     track,
@@ -11,10 +12,13 @@ from rich.progress import (
     TimeElapsedColumn,
     MofNCompleteColumn,
 )
+import multiprocessing
+from functools import partial
 
 from utils import console
 import utils.metrics as metrics
 from utils.plot import plot_histograms
+from utils.midi import transform
 
 from typing import Tuple, Dict
 
@@ -105,13 +109,14 @@ class Seeker:
 
     def build_similarity_table(self) -> None:
         """"""
-        sim_file = f"sims-{os.path.basename(self.input_dir).replace(' ', '_')}.parquet"
+        sim_file = f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}-{self.params.property}.parquet"
         console.log(f"{self.p} looking for similarity file '{sim_file}'")
         parquet = os.path.join(self.output_dir, sim_file)
         self.load_similarities(parquet)
 
         if self.table is not None:
             console.log(f"{self.p} loaded existing similarity file from '{parquet}'")
+            console.log(f"{self.p} {self.table.head()}")
         else:
             vectors = [
                 {
@@ -157,7 +162,7 @@ class Seeker:
         """ """
         parquet = os.path.join(
             self.output_dir,
-            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}_{self.params.property}.parquet",
+            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}-{self.params.property}.parquet",
         )
 
         self.load_similarities(parquet)
@@ -305,36 +310,53 @@ class Seeker:
     ) -> Dict:
         """"""
         console.log(f"{self.p} finding most similar file to '{filename}'")
+
+        if "num_plays" not in self.properties[filename]:
+            self.properties[filename]["num_plays"] = 0
         
         self.properties[filename]["num_plays"] += 1
-        n = 1
+        n = 0
         parent_track, _ = filename.split("_")
-        next_largest = self.table[filename].nlargest(n)
-        console.log(f"{self.p} checking index {next_largest}")
-        next_filename: str = next_largest.index[-1] # type: ignore
-        next_track, _ = next_filename.split("_")
+        console.log(f"{self.p} looking for '{filename}' in sim table")
+        row = self.table.loc[filename]
+        sorted_row = row.sort_values(key=lambda x: x.str['sim'], ascending=False)
+        # next_largest = self.table[filename].nlargest(n)
+        # console.log(f"{self.p} checking index {next_largest}")
+        # next_filename: str = next_largest.index[-1] # type: ignore
+        # next_track, _ = next_filename.split("_")
 
-        # TODO: refactor logic?
-        if different_parent:
-            while next_track == parent_track:
-                n += 1
-                value = next_largest.iloc[-1]
-                next_largest = self.table[filename].nlargest(n)
-                console.log(f"{self.p} checking index {next_largest}")
-                next_filename: str = next_largest.index[-1] # type: ignore
-                next_track, _ = next_filename.split("_")
-                value["filename"] = next_filename
-        else:
-            while next_filename == filename:
-                n += 1
-                value = next_largest.iloc[-1]
-                next_largest = self.table[filename].nlargest(n)
-                next_filename: str = next_largest.index[-1] # type: ignore
-                next_track, _ = next_filename.split("_")
-                value["filename"] = next_filename
+        for next_filename, val in sorted_row.items():
+            next_track, _ = next_filename.split("_")
+
+            if different_parent and next_track == parent_track:
+                continue
+            if not different_parent and next_filename == filename:
+                continue
+
+            value = val
+            value["filename"] = next_filename
+
+        # # TODO: refactor logic?
+        # if different_parent:
+        #     while next_track == parent_track:
+        #         n += 1
+        #         value = next_largest.iloc[-1]
+        #         next_largest = self.table[filename].nlargest(n)
+        #         console.log(f"{self.p} checking index {next_largest}")
+        #         next_filename: str = next_largest.index[-1] # type: ignore
+        #         next_track, _ = next_filename.split("_")
+        #         value["filename"] = next_filename
+        # else:
+        #     while next_filename == filename:
+        #         n += 1
+        #         value = next_largest.iloc[-1]
+        #         next_largest = self.table[filename].nlargest(n)
+        #         next_filename: str = next_largest.index[-1] # type: ignore
+        #         next_track, _ = next_filename.split("_")
+        #         value["filename"] = next_filename
 
         console.log(
-            f"{self.p} found '{value['filename']}' with similarity {value["sim"]:.03f}"
+            f"{self.p} found '{value['filename']}' with similarity {value["sim"]:.03f}", value
         )
 
         return value
@@ -411,6 +433,132 @@ class Seeker:
         )
 
         return next_filename, similarity
+    
+    def compute_similarity(self, progress, total, lock, params, vector_data, recording_metric):
+        """Helper function to compute the similarity of the transformed recording to the given vector.
+
+        Args:
+            progress (multiprocessing.Value): Shared memory value for tracking progress.
+            total (int): Total number of tasks to complete.
+            lock (multiprocessing.Lock): Lock to synchronize access to shared memory.
+            params (dict): Contains transformation parameters and the recording's metrics.
+            vector_data (dict): Contains the name and the metric of the vector.
+            recording_metric (array): Pitch class histogram of the recording.
+
+        Returns:
+            tuple: Contains the name of the segment, the highest similarity, and the best transformations.
+        """
+        name, _ = vector_data['name'], vector_data['metric']
+        highest_similarity = -1
+        best_transformations = {}
+        transformation_table = [list(p) for p in itertools.product(list(range(12)), list(range(8)))]
+        for semi, beat in transformation_table:
+            transformed_metric = params['transform'](params['recording_path'], params['tempo'], {"transpose": semi, "shift": beat})
+            similarity = float(1 - cosine(recording_metric, transformed_metric))  # type: ignore
+            if similarity > highest_similarity:
+                highest_similarity = similarity
+                best_transformations = {
+                    "pitch_transpose": semi,
+                    "beat_shift": beat
+                }
+        
+        with lock:
+            progress.value += 1
+            print(f"Progress: {progress.value}/{total}")
+
+        return name, highest_similarity, best_transformations
+
+    def match_recording_ai(self, recording_path: str):
+        """Find the most similar vector to a given recording using multiprocessing.
+
+        Args:
+            recording_path (str): Path to the MIDI recording.
+
+        Returns:
+            tuple: Contains the name of the most similar segment, highest similarity, and the best transformations.
+        """
+        console.log(
+            f"{self.p} finding most similar vector to '{recording_path}' with metric '{self.params.property}'"
+        )
+        recording = pretty_midi.PrettyMIDI(recording_path)
+        recording_metric = recording.get_pitch_class_histogram()
+
+        metric_array = [
+            {"name": filename, "metric": details["properties"][self.params.property]}
+            for filename, details in self.properties.items()
+        ]
+
+        transformation_params = {
+            'transform': transform,
+            'recording_path': recording_path,
+            'tempo': self.params.tempo
+        }
+        progress = multiprocessing.Value('i', 0)
+        total = len(metric_array)
+        lock = multiprocessing.Lock()
+
+        pool = multiprocessing.Pool(processes=8)#multiprocessing.cpu_count())
+        partial_func = partial(self.compute_similarity, progress, total, lock, transformation_params, recording_metric=recording_metric)
+
+        results = pool.map(partial_func, metric_array)
+        pool.close()
+        pool.join()
+
+        # Find the best overall match from the results
+        most_similar_segment = ""
+        highest_similarity = -1.0
+        best_transformations = {}
+
+        for name, similarity, transformations in results:
+            if similarity > highest_similarity:
+                most_similar_segment = name
+                highest_similarity = similarity
+                best_transformations = transformations
+
+        console.log(
+            f"{self.p} found '{most_similar_segment}' with similarity {highest_similarity:.03f} using transformations {best_transformations}"
+        )
+
+        return most_similar_segment, highest_similarity, best_transformations
+
+    def match_recording(self, recording_path: str):
+        console.log(
+            f"{self.p} finding most similar vector to '{recording_path}' with metric '{self.params.property}'"
+        )
+        recording = pretty_midi.PrettyMIDI(recording_path)
+        recording_metric = recording.get_pitch_class_histogram()
+
+        most_similar_segment = ""
+        highest_similarity = -1.0
+        best_transformations = {}
+
+        metric_array = [
+            {"name": filename, "metric": details["properties"][self.params.property]}
+            for filename, details in self.properties.items()
+        ]
+
+        transformation_table = list(range(12)) # [list(p) for p in itertools.product(list(range(12)), list(range(8)))]
+        for vector_data in track(metric_array, "calculating similarities...", refresh_per_second=1, update_period=1.0):
+            name, vector = vector_data.values()
+            for semi in transformation_table:
+                beat = 0
+                transformed_recording_path = transform(recording_path, self.params.tempo, {"transpose": semi, "shift": beat, "tempo": self.params.tempo})
+                recording_metric = pretty_midi.PrettyMIDI(transformed_recording_path).get_pitch_class_histogram()
+                similarity = float(1 - cosine(recording_metric, vector))  # type: ignore
+                if similarity > highest_similarity:
+                    console.log(f"{self.p} updating similarity {similarity:.03f} -> {highest_similarity:.03f}\n\t'{name}' -> '{most_similar_segment}'\n\tt{semi} & s{beat}")
+                    highest_similarity = similarity
+                    most_similar_segment = name
+                    best_transformations = {
+                        "transpose": semi,
+                        "shift": beat
+                    }
+
+        console.log(
+            f"{self.p} \tfound '{most_similar_segment}' with similarity {highest_similarity:.03f} using transformations {best_transformations}"
+        )
+
+        return most_similar_segment, highest_similarity, best_transformations
 
     def get_ms_to_recording(self, recording_path: str) -> Tuple[str | None, float]:
         console.log(

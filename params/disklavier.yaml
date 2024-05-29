@@ -4,7 +4,7 @@ augment_recording: False
 listener:
   record: 67
   reset: 66
-playerR:
+player0:
   p: "[blue1]playrR[/blue1]:"
   tick: "data/m_tick.wav"
   do_tick: False
@@ -27,7 +27,7 @@ seeker:
   bin_length: 1.0
   ph_weight_dur: False
   ph_weight_vel: False
-  property: "contour-complex"
+  property: "pitch_histogram"
   calc_trans: False
   calc_shift: False
   probabilities:
@@ -43,3 +43,6 @@ seeker:
     - 0.05
   beats_per_seg: 8
   max_sim: True
+  transformations:
+    - "pitch_transpose"
+    - "beat_shift"
