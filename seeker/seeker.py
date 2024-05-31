@@ -25,7 +25,7 @@ from typing import Tuple, Dict
 
 class Seeker:
     p = "[yellow]seeker[/yellow]:"
-    table: pd.DataFrame
+    sim_table: pd.DataFrame
     properties = {}
     count = 0
     trans_options = [
@@ -60,6 +60,8 @@ class Seeker:
         self.params.tempo = tempo
         self.params.seed = 1 if self.params.seed is None else self.params.seed
         self.rng = np.random.default_rng(self.params.seed)
+
+        self.load_transformation_table(os.path.join("data", "datasets", "careful_transpositions.parquet"))
 
         console.log(f"{self.p} initialized to use metric '{self.params.property}'")
 
@@ -114,9 +116,9 @@ class Seeker:
         parquet = os.path.join(self.output_dir, sim_file)
         self.load_similarities(parquet)
 
-        if self.table is not None:
+        if self.sim_table is not None:
             console.log(f"{self.p} loaded existing similarity file from '{parquet}'")
-            console.log(f"{self.p} {self.table.head()}")
+            console.log(f"{self.p} {self.sim_table.head()}")
         else:
             vectors = [
                 {
@@ -131,7 +133,7 @@ class Seeker:
 
             console.log(f"{self.p} building similarity table for {len(vecs)} vectors")
 
-            self.table = pd.DataFrame(index=names, columns=names, dtype="float64")
+            self.sim_table = pd.DataFrame(index=names, columns=names, dtype="float64")
 
             # compute cosine similarity for each pair of vectors
             with Progress() as progress:
@@ -141,16 +143,16 @@ class Seeker:
                 for i in range(len(vecs)):
                     for j in range(len(vecs)):
                         if i != j:
-                            self.table.iloc[i, j] = 1 - cosine(vecs[i], vecs[j])  # type: ignore
+                            self.sim_table.iloc[i, j] = 1 - cosine(vecs[i], vecs[j])  # type: ignore
                         else:
-                            self.table.iloc[i, j] = 1
+                            self.sim_table.iloc[i, j] = 1
                         progress.update(sims_task, advance=1)
 
             console.log(
-                f"{self.p} Generated a similarity table of shape {self.table.shape}"
+                f"{self.p} Generated a similarity table of shape {self.sim_table.shape}"
             )
 
-            self.table.to_parquet(parquet, index=False)
+            self.sim_table.to_parquet(parquet, index=False)
 
             if os.path.isfile(parquet):
                 console.log(f"{self.p} succesfully saved similarities file '{parquet}'")
@@ -167,11 +169,11 @@ class Seeker:
 
         self.load_similarities(parquet)
 
-        if self.table is not None:
+        if self.sim_table is not None:
             console.log(
-                f"{self.p} loaded existing similarity file from '{parquet}' ({self.table.shape})\n",
-                self.table.columns,
-                self.table.index[:4],
+                f"{self.p} loaded existing similarity file from '{parquet}' ({self.sim_table.shape})\n",
+                self.sim_table.columns,
+                self.sim_table.index[:4],
             )
 
             return
@@ -224,7 +226,7 @@ class Seeker:
         column_labels = [[label, f"sim-{i + 1}"] for i, label in enumerate(labels)]
         column_labels = [label for sublist in column_labels for label in sublist]
 
-        self.table = pd.DataFrame(
+        self.sim_table = pd.DataFrame(
             [["", -1.0] * len(labels)] * len(names),
             index=names,
             columns=column_labels,
@@ -243,10 +245,10 @@ class Seeker:
         )
         sims_task = progress.add_task("calculating sims", total=len(vecs) ** 2)
         with progress:
-            for name in self.table.index:
+            for name in self.sim_table.index:
                 # console.log(f"\n{self.p} populating row '{name}'")
 
-                i = int(self.table.index.get_loc(name))  # type: ignore
+                i = int(self.sim_table.index.get_loc(name))  # type: ignore
                 # i_name, i_seg_num, i_shift = name.split("_")
                 i_name, i_seg_num = name.split("_")
                 i_seg_start, i_seg_end = i_seg_num.split("-")
@@ -269,12 +271,12 @@ class Seeker:
                 names = [name, prev_file, next_file, prv2_file, nxt2_file]
 
                 for j, k in zip(range(0, n, 2), names):
-                    self.table.iat[i, j] = k
+                    self.sim_table.iat[i, j] = k
 
                 # update second five columns
-                for other_name in self.table.index:
+                for other_name in self.sim_table.index:
                     # console.log(f"{self.p} checking col '{names[j]}'")
-                    j = int(self.table.index.get_loc(other_name))  # type: ignore
+                    j = int(self.sim_table.index.get_loc(other_name))  # type: ignore
                     # j_name, j_seg_num, j_shift = other_name.split("_")
                     j_name, j_seg_num = other_name.split("_")
 
@@ -295,10 +297,10 @@ class Seeker:
                     progress.update(sims_task, advance=1)
 
         console.log(
-            f"{self.p} Generated a similarity table of shape {self.table.shape}"
+            f"{self.p} Generated a similarity table of shape {self.sim_table.shape}"
         )
 
-        self.table.to_parquet(parquet, index=True)
+        self.sim_table.to_parquet(parquet, index=True)
         if os.path.isfile(parquet):
             console.log(f"{self.p} succesfully saved similarities file '{parquet}'")
         else:
@@ -318,9 +320,9 @@ class Seeker:
         n = 0
         parent_track, _ = filename.split("_")
         console.log(f"{self.p} looking for '{filename}' in sim table")
-        row = self.table.loc[filename]
+        row = self.sim_table.loc[filename]
         sorted_row = row.sort_values(key=lambda x: x.str['sim'], ascending=False)
-        # next_largest = self.table[filename].nlargest(n)
+        # next_largest = self.sim_table[filename].nlargest(n)
         # console.log(f"{self.p} checking index {next_largest}")
         # next_filename: str = next_largest.index[-1] # type: ignore
         # next_track, _ = next_filename.split("_")
@@ -341,7 +343,7 @@ class Seeker:
         #     while next_track == parent_track:
         #         n += 1
         #         value = next_largest.iloc[-1]
-        #         next_largest = self.table[filename].nlargest(n)
+        #         next_largest = self.sim_table[filename].nlargest(n)
         #         console.log(f"{self.p} checking index {next_largest}")
         #         next_filename: str = next_largest.index[-1] # type: ignore
         #         next_track, _ = next_filename.split("_")
@@ -350,7 +352,7 @@ class Seeker:
         #     while next_filename == filename:
         #         n += 1
         #         value = next_largest.iloc[-1]
-        #         next_largest = self.table[filename].nlargest(n)
+        #         next_largest = self.sim_table[filename].nlargest(n)
         #         next_filename: str = next_largest.index[-1] # type: ignore
         #         next_track, _ = next_filename.split("_")
         #         value["filename"] = next_filename
@@ -373,7 +375,7 @@ class Seeker:
         self.properties[filename]["played"] = 1  # mark current file as played
 
         while next_file_played:
-            nl = self.table[filename].nlargest(n)  # get most similar columns
+            nl = self.sim_table[filename].nlargest(n)  # get most similar columns
             next_filename = nl.index[-1]
             similarity = nl.iloc[-1]
 
@@ -396,7 +398,7 @@ class Seeker:
 
         self.properties[filename]["played"] += 1  # mark current file as played
 
-        columns = list(self.table.columns[::2].values)
+        columns = list(self.sim_table.columns[::2].values)
         roll = self.rng.choice(columns, p=self.probs)
         if columns.index(roll) > 5:
             console.log(f"{self.p} \t[blue1]TRACK TRANSITION[/blue1] (rolled '{roll}')")
@@ -408,17 +410,17 @@ class Seeker:
         if self.params.max_sim:
             roll = self.get_max_sim(filename)
 
-        next_filename = self.table.at[filename, f"{roll}"]
+        next_filename = self.sim_table.at[filename, f"{roll}"]
 
         # when the source file is at the start or end of a track the prev/next
         # columns respectively can be None
         while next_filename == "" or next_filename == None:
             console.log(f"{self.p} \t[blue1]REROLL[/blue1] (rolled '{roll}')")
             roll = self.rng.choice(columns, p=self.probs)
-            next_filename = self.table.at[filename, f"{roll}"]
+            next_filename = self.sim_table.at[filename, f"{roll}"]
 
-        next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
-        similarity = float(self.table.at[filename, self.table.columns[next_col]])
+        next_col = self.sim_table.columns.get_loc(roll) + 1  # type: ignore
+        similarity = float(self.sim_table.at[filename, self.sim_table.columns[next_col]])
 
         # check transposition if using centered blur
         if self.params.calc_trans:
@@ -433,94 +435,7 @@ class Seeker:
         )
 
         return next_filename, similarity
-    
-    def compute_similarity(self, progress, total, lock, params, vector_data, recording_metric):
-        """Helper function to compute the similarity of the transformed recording to the given vector.
-
-        Args:
-            progress (multiprocessing.Value): Shared memory value for tracking progress.
-            total (int): Total number of tasks to complete.
-            lock (multiprocessing.Lock): Lock to synchronize access to shared memory.
-            params (dict): Contains transformation parameters and the recording's metrics.
-            vector_data (dict): Contains the name and the metric of the vector.
-            recording_metric (array): Pitch class histogram of the recording.
-
-        Returns:
-            tuple: Contains the name of the segment, the highest similarity, and the best transformations.
-        """
-        name, _ = vector_data['name'], vector_data['metric']
-        highest_similarity = -1
-        best_transformations = {}
-        transformation_table = [list(p) for p in itertools.product(list(range(12)), list(range(8)))]
-        for semi, beat in transformation_table:
-            transformed_metric = params['transform'](params['recording_path'], params['tempo'], {"transpose": semi, "shift": beat})
-            similarity = float(1 - cosine(recording_metric, transformed_metric))  # type: ignore
-            if similarity > highest_similarity:
-                highest_similarity = similarity
-                best_transformations = {
-                    "pitch_transpose": semi,
-                    "beat_shift": beat
-                }
-        
-        with lock:
-            progress.value += 1
-            print(f"Progress: {progress.value}/{total}")
-
-        return name, highest_similarity, best_transformations
-
-    def match_recording_ai(self, recording_path: str):
-        """Find the most similar vector to a given recording using multiprocessing.
-
-        Args:
-            recording_path (str): Path to the MIDI recording.
-
-        Returns:
-            tuple: Contains the name of the most similar segment, highest similarity, and the best transformations.
-        """
-        console.log(
-            f"{self.p} finding most similar vector to '{recording_path}' with metric '{self.params.property}'"
-        )
-        recording = pretty_midi.PrettyMIDI(recording_path)
-        recording_metric = recording.get_pitch_class_histogram()
-
-        metric_array = [
-            {"name": filename, "metric": details["properties"][self.params.property]}
-            for filename, details in self.properties.items()
-        ]
-
-        transformation_params = {
-            'transform': transform,
-            'recording_path': recording_path,
-            'tempo': self.params.tempo
-        }
-        progress = multiprocessing.Value('i', 0)
-        total = len(metric_array)
-        lock = multiprocessing.Lock()
-
-        pool = multiprocessing.Pool(processes=8)#multiprocessing.cpu_count())
-        partial_func = partial(self.compute_similarity, progress, total, lock, transformation_params, recording_metric=recording_metric)
-
-        results = pool.map(partial_func, metric_array)
-        pool.close()
-        pool.join()
-
-        # Find the best overall match from the results
-        most_similar_segment = ""
-        highest_similarity = -1.0
-        best_transformations = {}
-
-        for name, similarity, transformations in results:
-            if similarity > highest_similarity:
-                most_similar_segment = name
-                highest_similarity = similarity
-                best_transformations = transformations
-
-        console.log(
-            f"{self.p} found '{most_similar_segment}' with similarity {highest_similarity:.03f} using transformations {best_transformations}"
-        )
-
-        return most_similar_segment, highest_similarity, best_transformations
-
+   
     def match_recording(self, recording_path: str):
         console.log(
             f"{self.p} finding most similar vector to '{recording_path}' with metric '{self.params.property}'"
@@ -532,23 +447,17 @@ class Seeker:
         highest_similarity = -1.0
         best_transformations = {}
 
-        metric_array = [
-            {"name": filename, "metric": details["properties"][self.params.property]}
-            for filename, details in self.properties.items()
-        ]
+        segment_names = self.properties.keys()
 
         transformation_table = list(range(12)) # [list(p) for p in itertools.product(list(range(12)), list(range(8)))]
-        for vector_data in track(metric_array, "calculating similarities...", refresh_per_second=1, update_period=1.0):
-            name, vector = vector_data.values()
+        for segment_name in track(segment_names, "calculating similarities...", refresh_per_second=1, update_period=1.0):
             for semi in transformation_table:
                 beat = 0
-                transformed_recording_path = transform(recording_path, self.params.tempo, {"transpose": semi, "shift": beat, "tempo": self.params.tempo})
-                recording_metric = pretty_midi.PrettyMIDI(transformed_recording_path).get_pitch_class_histogram()
-                similarity = float(1 - cosine(recording_metric, vector))  # type: ignore
+                similarity = float(1 - cosine(recording_metric, self.trans_table.at[segment_name, semi]))  # type: ignore
                 if similarity > highest_similarity:
-                    console.log(f"{self.p} updating similarity {similarity:.03f} -> {highest_similarity:.03f}\n\t'{name}' -> '{most_similar_segment}'\n\tt{semi} & s{beat}")
+                    # console.log(f"{self.p} updating similarity {similarity:.03f} -> {highest_similarity:.03f}\n\t'{segment_name}' -> '{most_similar_segment}'\n\tt{semi} & s{beat}")
                     highest_similarity = similarity
-                    most_similar_segment = name
+                    most_similar_segment = segment_name
                     best_transformations = {
                         "transpose": semi,
                         "shift": beat
@@ -613,14 +522,14 @@ class Seeker:
     def replace_smallest_sim(
         self, src_row: str, cmp_file: str, sim: float, col_range: range
     ) -> None:
-        row_index = self.table.index.get_loc(src_row)
+        row_index = self.sim_table.index.get_loc(src_row)
         smallest_value = float("inf")
         smallest_index = None
 
-        # console.log(f"{self.p} checking row:\n{self.table.iloc[row_index]}")
+        # console.log(f"{self.p} checking row:\n{self.sim_table.iloc[row_index]}")
 
         for col in col_range:
-            current_value = self.table.iloc[row_index, col]  # type: ignore
+            current_value = self.sim_table.iloc[row_index, col]  # type: ignore
             # console.log(f"{self.p} got value at [{row_index}, {col}]: {current_value}")
 
             if current_value < sim and current_value < smallest_value:
@@ -629,18 +538,26 @@ class Seeker:
 
         # If a smaller value was found, replace the tuple at its index
         if smallest_index is not None:
-            self.table.iat[row_index, smallest_index] = sim
-            self.table.iat[row_index, smallest_index - 1] = cmp_file
+            self.sim_table.iat[row_index, smallest_index] = sim
+            self.sim_table.iat[row_index, smallest_index - 1] = cmp_file
 
     def reset_plays(self) -> None:
         for k in self.properties.keys():
             self.properties[k]["played"] = 0
 
-    def load_similarities(self, parquet_path) -> None:
+    def load_similarities(self, parquet_path: str) -> None:
         if os.path.isfile(parquet_path) and not self.force_rebuild:
-            self.table = pd.read_parquet(parquet_path)
+            console.log(f"{self.p} loading sim table at '{parquet_path}'")
+            self.sim_table = pd.read_parquet(parquet_path)
         else:
-            self.table = None  # type: ignore
+            self.sim_table = None  # type: ignore
+
+    def load_transformation_table(self, parquet_path: str) -> None:
+        if os.path.isfile(parquet_path) and not self.force_rebuild:
+            console.log(f"{self.p} loading trans table at '{parquet_path}'")
+            self.trans_table = pd.read_parquet(parquet_path)
+        else:
+            self.trans_table = None  # type: ignore
 
     def get_prev(self, filename):
         # i_name, i_seg_num, i_shift = filename.split("_")
@@ -818,7 +735,7 @@ class Seeker:
         return pd.concat([fixed_part, sorted_series])
 
     def get_max_sim(self, row_label):
-        row = self.table.loc[row_label]
+        row = self.sim_table.loc[row_label]
         most_similar_v = -1
         most_similar_i = 1
         for i, (k, v) in enumerate(row.items()):

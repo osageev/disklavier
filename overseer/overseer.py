@@ -109,7 +109,6 @@ class Overseer:
         )
         self.seeker.build_properties()
         self.seeker.build_similarity_table()
-        # self.seeker.build_top_n_table()
 
         self.listener = Listener(
             self.params.listener,

@@ -1,8 +1,10 @@
 import os
 import math
 import mido
+import itertools
 from pretty_midi import PrettyMIDI
 import numpy as np
+from scipy.spatial.distance import cosine
 
 from utils.midi import blur_pr
 

@@ -87,7 +87,8 @@ class Player:
                     console.log(f"{self.p}[bold orange1] shutting down")
                     return
 
-            self.play.clear()
+            if not self.params.is_recording:
+                self.play.clear()
 
             # play file
             last_beat = time.time()

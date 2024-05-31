@@ -5,9 +5,10 @@ listener:
   record: 67
   reset: 66
 player0:
-  p: "[blue1]playrR[/blue1]:"
+  p: "[blue1]playr0[/blue1]:"
   tick: "data/m_tick.wav"
   do_tick: False
+  is_recording: True
 player1:
   p: "[deep_sky_blue3]playr1[/deep_sky_blue3]:"
   tick: "data/m_tick.wav"
