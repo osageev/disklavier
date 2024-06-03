@@ -109,6 +109,7 @@ class Overseer:
         )
         self.seeker.build_properties()
         self.seeker.build_similarity_table()
+        self.seeker.build_neighbor_table()
 
         self.listener = Listener(
             self.params.listener,
@@ -260,7 +261,12 @@ class Overseer:
                     self.play_e.set()
                     self.playlistR_q.put((recording_path, -1.0))
                     next_file_path = os.path.join(self.data_dir, str(first_file))
-                    next_file_path = transform(next_file_path, self.tempo, first_transformations)
+                    console.log(f"{self.p} next file is at '{next_file_path}'")
+                    out_dir = os.path.join(
+                        self.playlist_dir, f"{Path(next_file_path).stem}.mid"
+                    )
+                    next_file_path = transform(next_file_path, out_dir, self.tempo, first_transformations)
+                    console.log(f"{self.p} next file is at '{next_file_path}'")
                     console.log(
                         f"{self.p} queueing (ready: {self.give_player0_e.is_set()}) recording for p1: '{recording_path}'"
                     )
@@ -289,6 +295,8 @@ class Overseer:
                         f"{self.p} recording playback ended, starting regular playback"
                     )
                     self.recording_ready_e.clear()
+                    self.ready_e.clear()
+                    self.play_e.clear()
                     self.give_player0_e.clear()
                     self.kill_player0_e.set()
                     metro_t.start()
@@ -307,15 +315,20 @@ class Overseer:
                     if not self.do_loop:
                         # next_file, similarity = self.seeker.get_msf_new(
                         next_file_spec = self.seeker.get_most_similar_file(
-                            os.path.basename(next_file_path)
+                            os.path.basename(next_file_path), bump_trans=self.track_num % 2 == 0
                         )
 
                     next_file_spec['transformations']['transpose'] = next_file_spec['transformations']['trans']
                     console.log(
-                        f"{self.p} applying transformations to '{next_file_spec['filename']}':", next_file_spec['transformations']
+                        f"{self.p} applying transformations to '{next_file_spec['filename']}':", next_file_spec['transformations'], self.tempo
                     )
                     next_file_path = os.path.join(self.data_dir, next_file_spec['filename'])
-                    next_file_path = transform(next_file_path, self.tempo, next_file_spec['transformations'])
+                    console.log(f"{self.p} next file is at '{next_file_path}'")
+                    out_dir = os.path.join(
+                        self.playlist_dir, f"{Path(next_file_path).stem}.mid"
+                    )
+                    next_file_path = transform(next_file_path, out_dir,self.tempo, next_file_spec['transformations'])
+                    console.log(f"{self.p} next file is at '{next_file_path}'")
 
                     # send to player
                     if p1_playing:
@@ -489,8 +502,7 @@ class Overseer:
 
     def change_tempo(self, file_path: str) -> str:
         midi = mido.MidiFile(file_path)
-        new_tempo = mido.bpm2tempo(self.tempo)
-        new_message = mido.MetaMessage("set_tempo", tempo=new_tempo, time=0)
+        new_message = mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(self.tempo), time=0)
         tempo_added = False
 
         for track in midi.tracks:
@@ -510,7 +522,10 @@ class Overseer:
             new_track.append(new_message)
             midi.tracks.append(new_track)
 
-        new_file_path = os.path.join("tmp", f"{Path(file_path).stem}_{self.tempo}.mid")
+        # new_file_path = os.path.join("tmp", f"{Path(file_path).stem}_{self.tempo}.mid")
+        new_file_path = os.path.join(
+            self.playlist_dir, f"{Path(file_path).stem}.mid"
+        )
         midi.save(new_file_path)
 
         return new_file_path

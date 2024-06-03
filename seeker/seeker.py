@@ -28,6 +28,7 @@ class Seeker:
     sim_table: pd.DataFrame
     properties = {}
     count = 0
+    transition_probability = 0. # max is 1.0
     trans_options = [
         "u01.mid",
         "d01.mid",
@@ -306,38 +307,139 @@ class Seeker:
         else:
             console.log(f"{self.p} error saving similarities file '{parquet}'")
             raise FileNotFoundError
+        
+    def build_neighbor_table(self, vision: int = 2) -> None:
+        """ """
+        parquet = os.path.join(
+            self.output_dir,
+            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}-n.parquet",
+        )
+
+        if os.path.isfile(parquet):
+            self.neighbor_table = pd.read_parquet(parquet)
+            console.log(f"{self.p} building neighbor table from '{parquet}'")
+
+            return
+
+        names = list(self.properties.keys())
+        names.sort()
+
+        console.log(f"{self.p} building nieghbor table for {len(names)} segments")
+
+        labels = [
+            "loop  ",
+            "prev 1",
+            "next 1",
+            "prev 2",
+            "next 2",
+        ]
+        self.neighbor_table = pd.DataFrame(
+            index=names,
+            columns=labels,
+        )
+
+        progress = Progress(
+            SpinnerColumn(),
+            *Progress.get_default_columns(),
+            TimeElapsedColumn(),
+            MofNCompleteColumn(),
+            refresh_per_second=1,
+        )
+        sims_task = progress.add_task("finding neighbors", total=len(names))
+        with progress:
+            for name in self.neighbor_table.index:
+                i = int(self.neighbor_table.index.get_loc(name))  # type: ignore
+                i_name, i_seg_num = name.split("_")
+                i_seg_start, i_seg_end = i_seg_num.split("-")
+                i_seg_end = i_seg_end.split(".")[0]
+
+                # get prev file(s)
+                prv2_file = None
+                prev_file = self.get_prev(name)
+                if prev_file:
+                    if int(i_seg_start) != 0:
+                        prv2_file = self.get_prev(prev_file)
+
+                # get next file(s)
+                nxt2_file = None
+                next_file = self.get_next(name)
+                if next_file:
+                    nxt2_file = self.get_next(next_file)
+
+                names = [name, prev_file, next_file, prv2_file, nxt2_file]
+
+                for j, k in zip(range(5), names):
+                    self.neighbor_table.iat[i, j] = k
+
+                progress.update(sims_task, advance=1)
+
+
+        self.neighbor_table.to_parquet(parquet, index=True)
+        if os.path.isfile(parquet):
+            console.log(f"{self.p} succesfully saved neighbors file '{parquet}'")
+        else:
+            console.log(f"{self.p} error saving neighbors file '{parquet}'")
+            raise FileNotFoundError
 
     def get_most_similar_file(
-        self, filename: str, different_parent=True
+        self, filename: str, different_parent=True, bump_trans=False
     ) -> Dict:
         """"""
         console.log(f"{self.p} finding most similar file to '{filename}'")
 
         if "num_plays" not in self.properties[filename]:
             self.properties[filename]["num_plays"] = 0
-        
+        if bump_trans:
+            console.log(f"{self.p} increasing transition probability {self.transition_probability} -> {self.transition_probability + self.params.transition_increment}")
+            self.transition_probability += self.params.transition_increment
+
+            if self.transition_probability > 1.:
+                self.transition_probability = 0
+
         self.properties[filename]["num_plays"] += 1
-        n = 0
         parent_track, _ = filename.split("_")
-        console.log(f"{self.p} looking for '{filename}' in sim table")
+
         row = self.sim_table.loc[filename]
         sorted_row = row.sort_values(key=lambda x: x.str['sim'], ascending=False)
+
+        change_track = self.rng.choice([True, False], p=[self.transition_probability, 1 - self.transition_probability])
+        console.log(f"{self.p} rolled {change_track} w/tprob {self.transition_probability}")
+
+        if change_track:
+            for next_filename, val in sorted_row.items():
+                next_track, _ = next_filename.split("_")
+
+                if next_track == parent_track or next_filename == filename:
+                    # console.log(f"{self.p} skipping invalid match\n\t'{next_track}' == '{parent_track}' or\n\t'{next_filename}' == '{filename}'")
+                    continue
+                if next_track != parent_track and next_filename != filename:
+                    value = val
+                    value["filename"] = next_filename
+                    break
+        else:
+            value = {
+                "filename": self.rng.choice(self.neighbor_table.loc[filename]),
+                "sim": -1.,
+                "transformations": {
+                    "shift": 0,
+                    "trans": 0,
+                },
+            }
+
+        # for next_filename, val in sorted_row.items():
+        #     next_track, _ = next_filename.split("_")
+
+        #     if different_parent and next_track == parent_track or not different_parent and next_filename == filename:
+        #         # segment is from same parent track                                         segment is the same
+        #         continue
+
+        #     value = val
+            # value["filename"] = next_filename
+
         # next_largest = self.sim_table[filename].nlargest(n)
         # console.log(f"{self.p} checking index {next_largest}")
         # next_filename: str = next_largest.index[-1] # type: ignore
         # next_track, _ = next_filename.split("_")
-
-        for next_filename, val in sorted_row.items():
-            next_track, _ = next_filename.split("_")
-
-            if different_parent and next_track == parent_track:
-                continue
-            if not different_parent and next_filename == filename:
-                continue
-
-            value = val
-            value["filename"] = next_filename
-
         # # TODO: refactor logic?
         # if different_parent:
         #     while next_track == parent_track:
@@ -362,32 +464,7 @@ class Seeker:
         )
 
         return value
-
-    def get_most_similar_file_old(self, filename: str, different_parent: bool = True):
-        """finds the filename and similarity of the next most similar unplayed file in the similarity table
-        NOTE: will go into an infinite loop once all files are played!
-        """
-        console.log(f"{self.p} finding most similar file to '{filename}'")
-        n = 1
-        similarity = -1
-        next_file_played = 1
-        next_filename = None
-        self.properties[filename]["played"] = 1  # mark current file as played
-
-        while next_file_played:
-            nl = self.sim_table[filename].nlargest(n)  # get most similar columns
-            next_filename = nl.index[-1]
-            similarity = nl.iloc[-1]
-
-            next_file_played = self.properties[next_filename]["played"]
-            n += 1
-
-        console.log(
-            f"{self.p} found '{next_filename}' with similarity {similarity:.03f}"
-        )
-
-        return next_filename, similarity
-
+    
     def get_msf_new(self, filename: str):
         """finds the filename and similarity of the next most similar unplayed file in the similarity table
         NOTE: will go into an infinite loop once all files are played!
@@ -548,7 +625,8 @@ class Seeker:
     def load_similarities(self, parquet_path: str) -> None:
         if os.path.isfile(parquet_path) and not self.force_rebuild:
             console.log(f"{self.p} loading sim table at '{parquet_path}'")
-            self.sim_table = pd.read_parquet(parquet_path)
+            with console.status("\t\t\t      loading similarities file..."):
+                self.sim_table = pd.read_parquet(parquet_path)
         else:
             self.sim_table = None  # type: ignore
 

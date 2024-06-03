@@ -12,10 +12,12 @@ player0:
 player1:
   p: "[deep_sky_blue3]playr1[/deep_sky_blue3]:"
   tick: "data/m_tick.wav"
+  is_recording: False
   do_tick: False
 player2:
   p: "[dodger_blue3]playr2[/dodger_blue3]:"
   tick: "data/m_hat.wav"
+  is_recording: False
   do_tick: False
 metronome:
   beats_per_seg: 8
@@ -47,3 +49,4 @@ seeker:
   transformations:
     - "pitch_transpose"
     - "beat_shift"
+  transition_increment: 0.25

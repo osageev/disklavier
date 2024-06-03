@@ -65,7 +65,7 @@ class Player:
                     if msg.type == "set_tempo":
                         found_tempo = msg.tempo
             console.log(
-                f"{self.p} playing '{self.playing_file}' ({file_tempo}BPM --> {round(mido.tempo2bpm(found_tempo)):01d}BPM) sim = {similarity:.03f}"
+                f"{self.p} loaded '{self.playing_file}' ({file_tempo}BPM --> {round(mido.tempo2bpm(found_tempo)):01d}BPM) sim = {similarity:.03f}"
             )
 
             # play file
@@ -88,6 +88,7 @@ class Player:
                     return
 
             if not self.params.is_recording:
+                console.log(f"{self.p} clearing play event")
                 self.play.clear()
 
             # play file

@@ -49,3 +49,4 @@ seeker:
   transformations:
     - "pitch_transpose"
     - "beat_shift"
+  transition_increment: 0.25

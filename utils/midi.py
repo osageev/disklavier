@@ -289,14 +289,23 @@ def transpose_and_shift(
     return s_t_midi
 
 
-def transform(file_path: str, tempo: int, transformations: Dict) -> str:
-    new_file_path = change_tempo(file_path, tempo)
-    # console.log(f"midi  : transforming midi '{new_file_path}'", transformations)
+def transform(file_path: str, out_dir: str, tempo: int, transformations: Dict) -> str:
+    """TODO: fix all the path garbage"""
+    new_file_path = os.path.join(
+        "data",
+        "outputs",
+        "tmp",
+        f"{Path(file_path).stem}.mid",
+    )
+    # new_file_path = change_tempo(file_path, tempo, out_dir)
+    # new_file_path = file_path
+    PrettyMIDI(file_path).write(new_file_path)
+    console.log(f"midi  : transforming midi at '{file_path}'", transformations)
 
     if transformations["transpose"] != 0:
         t_midi = PrettyMIDI()
 
-        for instrument in PrettyMIDI(new_file_path).instruments:
+        for instrument in PrettyMIDI(file_path).instruments:
             transposed_instrument = Instrument(program=instrument.program)
             for note in instrument.notes:
                 transposed_note = Note(
@@ -340,13 +349,14 @@ def transform(file_path: str, tempo: int, transformations: Dict) -> str:
 
         s_midi.write(new_file_path)
 
-    return new_file_path
+    out_dir = change_tempo(new_file_path, tempo, out_dir)
+
+    return out_dir
 
 
-def change_tempo(file_path: str, tempo: int) -> str:
+def change_tempo(file_path: str, tempo: int, out_dir: str) -> str:
     midi = mido.MidiFile(file_path)
-    new_tempo = mido.bpm2tempo(tempo)
-    new_message = mido.MetaMessage("set_tempo", tempo=new_tempo, time=0)
+    new_message = mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(tempo), time=0)
     tempo_added = False
 
     for track in midi.tracks:
@@ -357,25 +367,20 @@ def change_tempo(file_path: str, tempo: int) -> str:
 
         # add new set_tempo message to the first track
         if not tempo_added:
+            console.log(f"midi  : adding tempo msg for BPM {tempo}", new_message)
             track.insert(0, new_message)
             tempo_added = True
 
     # if no tracks had a set_tempo message and no new one was added, add a new track with the tempo message
     if not tempo_added:
+        console.log(f"midi  : adding tempo track for BPM {tempo}", new_message)
         new_track = mido.MidiTrack()
         new_track.append(new_message)
         midi.tracks.append(new_track)
 
-    new_file_path = os.path.join(
-        # "data", "outputs", "tmp", f"{Path(file_path).stem}_{tempo:03d}.mid"
-        "data",
-        "outputs",
-        "tmp",
-        f"{Path(file_path).stem}.mid",
-    )
-    midi.save(new_file_path)
+    midi.save(out_dir)
 
-    return new_file_path
+    return out_dir
 
 
 def get_velocities(midi_data: PrettyMIDI) -> List:
