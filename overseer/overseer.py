@@ -259,19 +259,17 @@ class Overseer:
                     )
                     self.ready_e.set()
                     self.play_e.set()
-                    self.playlistR_q.put((recording_path, -1.0))
+                    self.playlistR_q.put((recording_path, -1.0, {}))
                     next_file_path = os.path.join(self.data_dir, str(first_file))
-                    console.log(f"{self.p} next file is at '{next_file_path}'")
                     out_dir = os.path.join(
                         self.playlist_dir, f"{Path(next_file_path).stem}.mid"
                     )
                     next_file_path = transform(next_file_path, out_dir, self.tempo, first_transformations)
-                    console.log(f"{self.p} next file is at '{next_file_path}'")
                     console.log(
                         f"{self.p} queueing (ready: {self.give_player0_e.is_set()}) recording for p1: '{recording_path}'"
                     )
                     console.log(
-                        f"{self.p} next file would be '{os.path.basename(next_file_path)}'"
+                        f"{self.p} next up is '{os.path.basename(next_file_path)}'"
                     )
 
                     # copy the version of the recording that we use to the playlist
@@ -295,12 +293,10 @@ class Overseer:
                         f"{self.p} recording playback ended, starting regular playback"
                     )
                     self.recording_ready_e.clear()
-                    self.ready_e.clear()
-                    self.play_e.clear()
                     self.give_player0_e.clear()
                     self.kill_player0_e.set()
                     metro_t.start()
-                    self.playlist1_q.put((next_file_path, first_similarity))
+                    self.playlist1_q.put((next_file_path, first_similarity, {}))
                     self.give_player1_e.clear()
 
                 # metronome says get ready
@@ -323,25 +319,23 @@ class Overseer:
                         f"{self.p} applying transformations to '{next_file_spec['filename']}':", next_file_spec['transformations'], self.tempo
                     )
                     next_file_path = os.path.join(self.data_dir, next_file_spec['filename'])
-                    console.log(f"{self.p} next file is at '{next_file_path}'")
                     out_dir = os.path.join(
                         self.playlist_dir, f"{Path(next_file_path).stem}.mid"
                     )
                     next_file_path = transform(next_file_path, out_dir,self.tempo, next_file_spec['transformations'])
-                    console.log(f"{self.p} next file is at '{next_file_path}'")
 
                     # send to player
                     if p1_playing:
                         console.log(
                             f"{self.p} queueing (ready: {self.give_player1_e.is_set()}) next file for p1: '{next_file_spec['filename']}' sim {next_file_spec['sim']:.03f}"
                         )
-                        self.playlist1_q.put((next_file_path, next_file_spec['sim']))
+                        self.playlist1_q.put((next_file_path, next_file_spec['sim'], next_file_spec['transformations']))
                         self.give_player1_e.clear()
                     else:
                         console.log(
                             f"{self.p} queueing (ready: {self.give_player2_e.is_set()}) next file for p2: '{next_file_spec['filename']}' sim {next_file_spec['sim']:.03f}"
                         )
-                        self.playlist2_q.put((next_file_path, next_file_spec['sim']))
+                        self.playlist2_q.put((next_file_path, next_file_spec['sim'], next_file_spec['transformations']))
                         self.give_player2_e.clear()
 
                     p1_playing = not p1_playing

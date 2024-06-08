@@ -53,7 +53,7 @@ class Player:
                     console.log(f"{self.p}[bold orange1] shutting down")
                     return
             self.waiting.clear()
-            self.playing_file_path, similarity = self.file_queue.get()
+            self.playing_file_path, similarity, transformations = self.file_queue.get()
             self.playing_file = os.path.basename(self.playing_file_path)
             self.get_next.set()
 
@@ -65,7 +65,7 @@ class Player:
                     if msg.type == "set_tempo":
                         found_tempo = msg.tempo
             console.log(
-                f"{self.p} loaded '{self.playing_file}' ({file_tempo}BPM --> {round(mido.tempo2bpm(found_tempo)):01d}BPM) sim = {similarity:.03f}"
+                f"{self.p} loaded '{self.playing_file}' ({file_tempo}BPM -> {round(mido.tempo2bpm(found_tempo)):01d}BPM) sim = {similarity:.03f}", transformations
             )
 
             # play file
@@ -76,7 +76,6 @@ class Player:
 
     def play_midi(self, midi_path: str) -> None:
         midi = MidiFile(midi_path)
-        # midi.print_tracks()
 
         # open file and wait for play event
         with mido.open_output(self.params.out_port) as outport:  # type: ignore
@@ -88,7 +87,6 @@ class Player:
                     return
 
             if not self.params.is_recording:
-                console.log(f"{self.p} clearing play event")
                 self.play.clear()
 
             # play file
