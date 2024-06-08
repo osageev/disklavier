@@ -3,6 +3,7 @@ import json
 import pretty_midi
 import numpy as np
 import pandas as pd
+import itertools
 from scipy.spatial.distance import cosine
 from rich.progress import (
     track,
@@ -11,19 +12,23 @@ from rich.progress import (
     TimeElapsedColumn,
     MofNCompleteColumn,
 )
+import multiprocessing
+from functools import partial
 
 from utils import console
 import utils.metrics as metrics
 from utils.plot import plot_histograms
+from utils.midi import transform
 
-from typing import Tuple
+from typing import Tuple, Dict
 
 
 class Seeker:
     p = "[yellow]seeker[/yellow]:"
-    table: pd.DataFrame
+    sim_table: pd.DataFrame
     properties = {}
     count = 0
+    transition_probability = 0. # max is 1.0
     trans_options = [
         "u01.mid",
         "d01.mid",
@@ -56,6 +61,8 @@ class Seeker:
         self.params.tempo = tempo
         self.params.seed = 1 if self.params.seed is None else self.params.seed
         self.rng = np.random.default_rng(self.params.seed)
+
+        self.load_transformation_table(os.path.join("data", "datasets", "careful_transpositions.parquet"))
 
         console.log(f"{self.p} initialized to use metric '{self.params.property}'")
 
@@ -105,13 +112,14 @@ class Seeker:
 
     def build_similarity_table(self) -> None:
         """"""
-        sim_file = f"sims-{os.path.basename(self.input_dir).replace(' ', '_')}.parquet"
+        sim_file = f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}-{self.params.property}.parquet"
         console.log(f"{self.p} looking for similarity file '{sim_file}'")
         parquet = os.path.join(self.output_dir, sim_file)
         self.load_similarities(parquet)
 
-        if self.table is not None:
+        if self.sim_table is not None:
             console.log(f"{self.p} loaded existing similarity file from '{parquet}'")
+            console.log(f"{self.p} {self.sim_table.head()}")
         else:
             vectors = [
                 {
@@ -126,7 +134,7 @@ class Seeker:
 
             console.log(f"{self.p} building similarity table for {len(vecs)} vectors")
 
-            self.table = pd.DataFrame(index=names, columns=names, dtype="float64")
+            self.sim_table = pd.DataFrame(index=names, columns=names, dtype="float64")
 
             # compute cosine similarity for each pair of vectors
             with Progress() as progress:
@@ -136,16 +144,16 @@ class Seeker:
                 for i in range(len(vecs)):
                     for j in range(len(vecs)):
                         if i != j:
-                            self.table.iloc[i, j] = 1 - cosine(vecs[i], vecs[j])  # type: ignore
+                            self.sim_table.iloc[i, j] = 1 - cosine(vecs[i], vecs[j])  # type: ignore
                         else:
-                            self.table.iloc[i, j] = 1
+                            self.sim_table.iloc[i, j] = 1
                         progress.update(sims_task, advance=1)
 
             console.log(
-                f"{self.p} Generated a similarity table of shape {self.table.shape}"
+                f"{self.p} Generated a similarity table of shape {self.sim_table.shape}"
             )
 
-            self.table.to_parquet(parquet, index=False)
+            self.sim_table.to_parquet(parquet, index=False)
 
             if os.path.isfile(parquet):
                 console.log(f"{self.p} succesfully saved similarities file '{parquet}'")
@@ -157,16 +165,16 @@ class Seeker:
         """ """
         parquet = os.path.join(
             self.output_dir,
-            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}_{self.params.property}.parquet",
+            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}-{self.params.property}.parquet",
         )
 
         self.load_similarities(parquet)
 
-        if self.table is not None:
+        if self.sim_table is not None:
             console.log(
-                f"{self.p} loaded existing similarity file from '{parquet}' ({self.table.shape})\n",
-                self.table.columns,
-                self.table.index[:4],
+                f"{self.p} loaded existing similarity file from '{parquet}' ({self.sim_table.shape})\n",
+                self.sim_table.columns,
+                self.sim_table.index[:4],
             )
 
             return
@@ -217,13 +225,10 @@ class Seeker:
             "diff 5",
         ]
         column_labels = [[label, f"sim-{i + 1}"] for i, label in enumerate(labels)]
-        # column_labels = [
-        #     [f"{prob:.03f}-{i}", f"sim-{i + 1}"] for i, prob in enumerate(self.probs)
-        # ]
         column_labels = [label for sublist in column_labels for label in sublist]
 
-        self.table = pd.DataFrame(
-            [["", -1.0] * n] * len(names),
+        self.sim_table = pd.DataFrame(
+            [["", -1.0] * len(labels)] * len(names),
             index=names,
             columns=column_labels,
         )
@@ -241,10 +246,10 @@ class Seeker:
         )
         sims_task = progress.add_task("calculating sims", total=len(vecs) ** 2)
         with progress:
-            for name in self.table.index:
+            for name in self.sim_table.index:
                 # console.log(f"\n{self.p} populating row '{name}'")
 
-                i = int(self.table.index.get_loc(name))  # type: ignore
+                i = int(self.sim_table.index.get_loc(name))  # type: ignore
                 # i_name, i_seg_num, i_shift = name.split("_")
                 i_name, i_seg_num = name.split("_")
                 i_seg_start, i_seg_end = i_seg_num.split("-")
@@ -267,12 +272,12 @@ class Seeker:
                 names = [name, prev_file, next_file, prv2_file, nxt2_file]
 
                 for j, k in zip(range(0, n, 2), names):
-                    self.table.iat[i, j] = k
+                    self.sim_table.iat[i, j] = k
 
                 # update second five columns
-                for other_name in self.table.index:
+                for other_name in self.sim_table.index:
                     # console.log(f"{self.p} checking col '{names[j]}'")
-                    j = int(self.table.index.get_loc(other_name))  # type: ignore
+                    j = int(self.sim_table.index.get_loc(other_name))  # type: ignore
                     # j_name, j_seg_num, j_shift = other_name.split("_")
                     j_name, j_seg_num = other_name.split("_")
 
@@ -293,42 +298,173 @@ class Seeker:
                     progress.update(sims_task, advance=1)
 
         console.log(
-            f"{self.p} Generated a similarity table of shape {self.table.shape}"
+            f"{self.p} Generated a similarity table of shape {self.sim_table.shape}"
         )
 
-        self.table.to_parquet(parquet, index=True)
-
+        self.sim_table.to_parquet(parquet, index=True)
         if os.path.isfile(parquet):
             console.log(f"{self.p} succesfully saved similarities file '{parquet}'")
         else:
             console.log(f"{self.p} error saving similarities file '{parquet}'")
             raise FileNotFoundError
-
-    def get_most_similar_file(self, filename: str, different_parent: bool = True):
-        """finds the filename and similarity of the next most similar unplayed file in the similarity table
-        NOTE: will go into an infinite loop once all files are played!
-        """
-        console.log(f"{self.p} finding most similar file to '{filename}'")
-        n = 1
-        similarity = -1
-        next_file_played = 1
-        next_filename = None
-        self.properties[filename]["played"] = 1  # mark current file as played
-
-        while next_file_played:
-            nl = self.table[filename].nlargest(n)  # get most similar columns
-            next_filename = nl.index[-1]
-            similarity = nl.iloc[-1]
-
-            next_file_played = self.properties[next_filename]["played"]
-            n += 1
-
-        console.log(
-            f"{self.p} found '{next_filename}' with similarity {similarity:.03f}"
+        
+    def build_neighbor_table(self, vision: int = 2) -> None:
+        """ """
+        parquet = os.path.join(
+            self.output_dir,
+            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}-n.parquet",
         )
 
-        return next_filename, similarity
+        if os.path.isfile(parquet):
+            self.neighbor_table = pd.read_parquet(parquet)
+            console.log(f"{self.p} building neighbor table from '{parquet}'")
 
+            return
+
+        names = list(self.properties.keys())
+        names.sort()
+
+        console.log(f"{self.p} building nieghbor table for {len(names)} segments")
+
+        labels = [
+            "loop  ",
+            "prev 1",
+            "next 1",
+            "prev 2",
+            "next 2",
+        ]
+        self.neighbor_table = pd.DataFrame(
+            index=names,
+            columns=labels,
+        )
+
+        progress = Progress(
+            SpinnerColumn(),
+            *Progress.get_default_columns(),
+            TimeElapsedColumn(),
+            MofNCompleteColumn(),
+            refresh_per_second=1,
+        )
+        sims_task = progress.add_task("finding neighbors", total=len(names))
+        with progress:
+            for name in self.neighbor_table.index:
+                i = int(self.neighbor_table.index.get_loc(name))  # type: ignore
+                i_name, i_seg_num = name.split("_")
+                i_seg_start, i_seg_end = i_seg_num.split("-")
+                i_seg_end = i_seg_end.split(".")[0]
+
+                # get prev file(s)
+                prv2_file = None
+                prev_file = self.get_prev(name)
+                if prev_file:
+                    if int(i_seg_start) != 0:
+                        prv2_file = self.get_prev(prev_file)
+
+                # get next file(s)
+                nxt2_file = None
+                next_file = self.get_next(name)
+                if next_file:
+                    nxt2_file = self.get_next(next_file)
+
+                names = [name, prev_file, next_file, prv2_file, nxt2_file]
+
+                for j, k in zip(range(5), names):
+                    self.neighbor_table.iat[i, j] = k
+
+                progress.update(sims_task, advance=1)
+
+
+        self.neighbor_table.to_parquet(parquet, index=True)
+        if os.path.isfile(parquet):
+            console.log(f"{self.p} succesfully saved neighbors file '{parquet}'")
+        else:
+            console.log(f"{self.p} error saving neighbors file '{parquet}'")
+            raise FileNotFoundError
+
+    def get_most_similar_file(
+        self, filename: str, different_parent=True, bump_trans=False
+    ) -> Dict:
+        """"""
+        console.log(f"{self.p} finding most similar file to '{filename}'")
+
+        if "num_plays" not in self.properties[filename]:
+            self.properties[filename]["num_plays"] = 0
+        if bump_trans:
+            console.log(f"{self.p} increasing transition probability {self.transition_probability} -> {self.transition_probability + self.params.transition_increment}")
+            self.transition_probability += self.params.transition_increment
+
+            if self.transition_probability > 1.:
+                self.transition_probability = 0
+
+        self.properties[filename]["num_plays"] += 1
+        parent_track, _ = filename.split("_")
+
+        row = self.sim_table.loc[filename]
+        sorted_row = row.sort_values(key=lambda x: x.str['sim'], ascending=False)
+
+        change_track = self.rng.choice([True, False], p=[self.transition_probability, 1 - self.transition_probability])
+        console.log(f"{self.p} rolled {change_track} w/tprob {self.transition_probability}")
+
+        if change_track:
+            for next_filename, val in sorted_row.items():
+                next_track, _ = next_filename.split("_")
+
+                if next_track == parent_track or next_filename == filename:
+                    # console.log(f"{self.p} skipping invalid match\n\t'{next_track}' == '{parent_track}' or\n\t'{next_filename}' == '{filename}'")
+                    continue
+                if next_track != parent_track and next_filename != filename:
+                    value = val
+                    value["filename"] = next_filename
+                    break
+        else:
+            value = {
+                "filename": self.rng.choice(self.neighbor_table.loc[filename]),
+                "sim": -1.,
+                "transformations": {
+                    "shift": 0,
+                    "trans": 0,
+                },
+            }
+
+        # for next_filename, val in sorted_row.items():
+        #     next_track, _ = next_filename.split("_")
+
+        #     if different_parent and next_track == parent_track or not different_parent and next_filename == filename:
+        #         # segment is from same parent track                                         segment is the same
+        #         continue
+
+        #     value = val
+            # value["filename"] = next_filename
+
+        # next_largest = self.sim_table[filename].nlargest(n)
+        # console.log(f"{self.p} checking index {next_largest}")
+        # next_filename: str = next_largest.index[-1] # type: ignore
+        # next_track, _ = next_filename.split("_")
+        # # TODO: refactor logic?
+        # if different_parent:
+        #     while next_track == parent_track:
+        #         n += 1
+        #         value = next_largest.iloc[-1]
+        #         next_largest = self.sim_table[filename].nlargest(n)
+        #         console.log(f"{self.p} checking index {next_largest}")
+        #         next_filename: str = next_largest.index[-1] # type: ignore
+        #         next_track, _ = next_filename.split("_")
+        #         value["filename"] = next_filename
+        # else:
+        #     while next_filename == filename:
+        #         n += 1
+        #         value = next_largest.iloc[-1]
+        #         next_largest = self.sim_table[filename].nlargest(n)
+        #         next_filename: str = next_largest.index[-1] # type: ignore
+        #         next_track, _ = next_filename.split("_")
+        #         value["filename"] = next_filename
+
+        console.log(
+            f"{self.p} found '{value['filename']}' with similarity {value["sim"]:.03f}", value
+        )
+
+        return value
+    
     def get_msf_new(self, filename: str):
         """finds the filename and similarity of the next most similar unplayed file in the similarity table
         NOTE: will go into an infinite loop once all files are played!
@@ -339,7 +475,7 @@ class Seeker:
 
         self.properties[filename]["played"] += 1  # mark current file as played
 
-        columns = list(self.table.columns[::2].values)
+        columns = list(self.sim_table.columns[::2].values)
         roll = self.rng.choice(columns, p=self.probs)
         if columns.index(roll) > 5:
             console.log(f"{self.p} \t[blue1]TRACK TRANSITION[/blue1] (rolled '{roll}')")
@@ -348,45 +484,20 @@ class Seeker:
             self.last_trans = filename[-7:]
             filename = filename[:-7] + "n00.mid"
 
-        next_filename = self.table.at[filename, f"{roll}"]
+        if self.params.max_sim:
+            roll = self.get_max_sim(filename)
 
-        # next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
-        # console.log(
-        #     f"{self.p} looking for similarity at ['{filename}', '{self.table.columns[next_col]}']\n\t",
-        #     self.table.at[filename, self.table.columns[next_col]],
-        # )
-        # similarity = float(self.table.at[filename, self.table.columns[next_col]])
+        next_filename = self.sim_table.at[filename, f"{roll}"]
 
         # when the source file is at the start or end of a track the prev/next
         # columns respectively can be None
         while next_filename == "" or next_filename == None:
             console.log(f"{self.p} \t[blue1]REROLL[/blue1] (rolled '{roll}')")
             roll = self.rng.choice(columns, p=self.probs)
-            next_filename = self.table.at[filename, f"{roll}"]
+            next_filename = self.sim_table.at[filename, f"{roll}"]
 
-        next_col = self.table.columns.get_loc(roll) + 1  # type: ignore
-        similarity = float(self.table.at[filename, self.table.columns[next_col]])
-
-        # console.log(f"{self.p} rolled {roll}")
-        # console.log(f"{self.p} columns\n{columns}")
-        # console.log(f"{self.p} table columns\n{self.table.columns}")
-
-        # for i, col in enumerate(columns[1:]):
-        #     if float(columns[i - 1]) < roll <= float(col):
-        #         console.log(
-        #             f"{self.p} found a match: {columns[i-1]} < {roll:.05f} <= {col}",
-        #         )
-
-        #         next_filename = self.table.at[filename, col]
-        #         next_col = self.table.columns[i * 2 + 1]
-
-        #         # console.log(
-        #         #     f"{self.p} looking for similarity ({i} -> {i * 2 + 1}) at ['{filename}', '{next_col}']\n\t",
-        #         #     self.table.at[filename, next_col],
-        #         # )
-        #         similarity = float(self.table.at[filename, next_col])
-
-        #         break
+        next_col = self.sim_table.columns.get_loc(roll) + 1  # type: ignore
+        similarity = float(self.sim_table.at[filename, self.sim_table.columns[next_col]])
 
         # check transposition if using centered blur
         if self.params.calc_trans:
@@ -401,6 +512,39 @@ class Seeker:
         )
 
         return next_filename, similarity
+   
+    def match_recording(self, recording_path: str):
+        console.log(
+            f"{self.p} finding most similar vector to '{recording_path}' with metric '{self.params.property}'"
+        )
+        recording = pretty_midi.PrettyMIDI(recording_path)
+        recording_metric = recording.get_pitch_class_histogram()
+
+        most_similar_segment = ""
+        highest_similarity = -1.0
+        best_transformations = {}
+
+        segment_names = self.properties.keys()
+
+        transformation_table = list(range(12)) # [list(p) for p in itertools.product(list(range(12)), list(range(8)))]
+        for segment_name in track(segment_names, "calculating similarities...", refresh_per_second=1, update_period=1.0):
+            for semi in transformation_table:
+                beat = 0
+                similarity = float(1 - cosine(recording_metric, self.trans_table.at[segment_name, semi]))  # type: ignore
+                if similarity > highest_similarity:
+                    # console.log(f"{self.p} updating similarity {similarity:.03f} -> {highest_similarity:.03f}\n\t'{segment_name}' -> '{most_similar_segment}'\n\tt{semi} & s{beat}")
+                    highest_similarity = similarity
+                    most_similar_segment = segment_name
+                    best_transformations = {
+                        "transpose": semi,
+                        "shift": beat
+                    }
+
+        console.log(
+            f"{self.p} \tfound '{most_similar_segment}' with similarity {highest_similarity:.03f} using transformations {best_transformations}"
+        )
+
+        return most_similar_segment, highest_similarity, best_transformations
 
     def get_ms_to_recording(self, recording_path: str) -> Tuple[str | None, float]:
         console.log(
@@ -419,6 +563,10 @@ class Seeker:
             case "contour":
                 cmp_metric = metrics.contour(
                     midi, self.params.beats_per_seg, self.params.tempo
+                )
+            case "contour-complex":
+                cmp_metric = metrics.contour(
+                    midi, self.params.beats_per_seg, self.params.tempo, False
                 )
             case _:
                 cmp_metric = midi.get_pitch_class_histogram()
@@ -451,14 +599,14 @@ class Seeker:
     def replace_smallest_sim(
         self, src_row: str, cmp_file: str, sim: float, col_range: range
     ) -> None:
-        row_index = self.table.index.get_loc(src_row)
+        row_index = self.sim_table.index.get_loc(src_row)
         smallest_value = float("inf")
         smallest_index = None
 
-        # console.log(f"{self.p} checking row:\n{self.table.iloc[row_index]}")
+        # console.log(f"{self.p} checking row:\n{self.sim_table.iloc[row_index]}")
 
         for col in col_range:
-            current_value = self.table.iloc[row_index, col]  # type: ignore
+            current_value = self.sim_table.iloc[row_index, col]  # type: ignore
             # console.log(f"{self.p} got value at [{row_index}, {col}]: {current_value}")
 
             if current_value < sim and current_value < smallest_value:
@@ -467,18 +615,27 @@ class Seeker:
 
         # If a smaller value was found, replace the tuple at its index
         if smallest_index is not None:
-            self.table.iat[row_index, smallest_index] = sim
-            self.table.iat[row_index, smallest_index - 1] = cmp_file
+            self.sim_table.iat[row_index, smallest_index] = sim
+            self.sim_table.iat[row_index, smallest_index - 1] = cmp_file
 
     def reset_plays(self) -> None:
         for k in self.properties.keys():
             self.properties[k]["played"] = 0
 
-    def load_similarities(self, parquet_path) -> None:
+    def load_similarities(self, parquet_path: str) -> None:
         if os.path.isfile(parquet_path) and not self.force_rebuild:
-            self.table = pd.read_parquet(parquet_path)
+            console.log(f"{self.p} loading sim table at '{parquet_path}'")
+            with console.status("\t\t\t      loading similarities file..."):
+                self.sim_table = pd.read_parquet(parquet_path)
         else:
-            self.table = None  # type: ignore
+            self.sim_table = None  # type: ignore
+
+    def load_transformation_table(self, parquet_path: str) -> None:
+        if os.path.isfile(parquet_path) and not self.force_rebuild:
+            console.log(f"{self.p} loading trans table at '{parquet_path}'")
+            self.trans_table = pd.read_parquet(parquet_path)
+        else:
+            self.trans_table = None  # type: ignore
 
     def get_prev(self, filename):
         # i_name, i_seg_num, i_shift = filename.split("_")
@@ -602,3 +759,66 @@ class Seeker:
         self.count += 1
 
         return best_match, best_sim
+
+    def sort_row(self, row):
+        """Sorts the specified sections of a DataFrame row in descending order based on 'sim' values.
+
+        This function assumes the row contains a fixed part and a sortable part, where the sortable
+        part consists of 'diff' and 'sim' column pairs. The function sorts these pairs by the 'sim'
+        value in descending order while keeping each 'diff' directly in front of its corresponding 'sim'.
+
+        Args:
+            row (pd.Series): A single row of a DataFrame to be sorted. It is expected that the
+                            row contains mixed data types with 'diff' being filenames (str) and
+                            'sim' being numeric scores (float).
+
+        Returns:
+            pd.Series: A series with the first part unchanged and the last part sorted based on the
+                    'sim' values.
+
+        Note:
+            The function is designed to operate within a DataFrame.apply() method which allows it
+            to be applied row-wise. It specifically manages rows that split at index 10, where indices
+            from 10 onward contain 'diff' and 'sim' pairs.
+
+        Example:
+            # Assuming 'df' is a DataFrame loaded with the appropriate columns and data structure:
+            sorted_df = df.apply(sort_row, axis=1)
+        """
+        fixed_part = row.iloc[:10]  # Assumes the first 10 entries do not need sorting
+        to_sort_part = row.iloc[10:]  # The part that needs sorting
+
+        # Create a DataFrame from the parts that need sorting
+        # Assuming every two columns are 'diff' and 'sim' pairs starting from index 10
+        df_to_sort = pd.DataFrame(
+            {
+                "diff": to_sort_part[::2].values,  # Assumes even indices are 'diff'
+                "sim": to_sort_part[1::2].values,  # Assumes odd indices are 'sim'
+            },
+            index=pd.MultiIndex.from_arrays(
+                [to_sort_part[::2].index, to_sort_part[1::2].index]
+            ),
+        )
+
+        # Sort the DataFrame based on 'sim' values in descending order
+        sorted_df = df_to_sort.sort_values(by="sim", ascending=False)
+
+        # Flatten the sorted DataFrame back into a Series
+        sorted_series = pd.Series(
+            data=sorted_df.values.flatten(),
+            index=[idx for sub_idx in sorted_df.index for idx in sub_idx],
+        )
+
+        # Concatenate the fixed part and the sorted part
+        return pd.concat([fixed_part, sorted_series])
+
+    def get_max_sim(self, row_label):
+        row = self.sim_table.loc[row_label]
+        most_similar_v = -1
+        most_similar_i = 1
+        for i, (k, v) in enumerate(row.items()):
+            if str(k).startswith("sim") and float(v) > most_similar_v:
+                most_similar_v = v
+                most_similar_i = i
+
+        return row.index[most_similar_i - 1]

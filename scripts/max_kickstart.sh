@@ -5,4 +5,5 @@ python main.py\
     --param_file "params/max.yaml"\
     --output_dir "data/outputs"\
     --kickstart "data/datasets/careful/20231220-80-01_0000-0008.mid"\
+    -e 4\
     --tempo $1

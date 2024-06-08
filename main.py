@@ -96,6 +96,11 @@ if __name__ == "__main__":
         help="tempo to record and play at, in bpm",
     )
     parser.add_argument(
+        "-e",
+        type=int,
+        help="easy transition mode -- number of segments per transition",
+    )
+    parser.add_argument(
         "-c",
         "--commands",
         action="store_true",

@@ -9,7 +9,7 @@ from scipy.signal import convolve2d
 
 from utils import console
 
-from typing import Tuple, List
+from typing import Dict, Tuple, List
 
 
 def quantize_midi(filename, sections_per_beat) -> PrettyMIDI:
@@ -35,7 +35,7 @@ def quantize_midi(filename, sections_per_beat) -> PrettyMIDI:
     return midi_data
 
 
-def blur_pr(midi: PrettyMIDI, do_center: bool = True, delta_max: int = 55):
+def blur_pr(midi: PrettyMIDI, do_center: bool = True, delta_max: int = 55) -> List:
     pr = midi.get_piano_roll()
     if do_center:
         pr = strip_and_pad(pr, delta_max)
@@ -241,6 +241,146 @@ def semitone_transpose(
                 down -= 1
 
     return new_files
+
+
+def transpose_and_shift(
+    midi_path: str, semitones: int, beats: int, total_beats=8
+) -> PrettyMIDI:
+    """
+    Transpose and shift a MIDI file by a specified number of semitones and beats.
+
+    Args:
+        midi_path (str): The path to the MIDI file.
+        semitones (int): Number of semitones to transpose the MIDI file.
+        beats (int): Number of beats to shift the MIDI events.
+        total_beats (int): number of beats in the file (default 8)
+
+    Returns:
+        pretty_midi.PrettyMIDI: The modified MIDI file.
+    """
+    midi_data = PrettyMIDI(midi_path)
+    tempo = int(Path(midi_path).stem.split("-")[1])
+    beats_per_second = tempo / 60.0
+    shift_seconds = 1 / beats_per_second
+    s_t_midi = PrettyMIDI()
+
+    # shift
+    for instrument in midi_data.instruments:
+        new_inst = Instrument(program=instrument.program, is_drum=instrument.is_drum)
+        for note in instrument.notes:
+            # shift the start and end times of each note
+            shifted_start = (note.start + shift_seconds * beats) % (
+                total_beats / beats_per_second
+            )
+            shifted_end = (note.end + shift_seconds * beats) % (
+                total_beats / beats_per_second
+            )
+            if shifted_end < shifted_start:  # handle wrapping around the cycle
+                shifted_end += beats / beats_per_second
+            s_t_note = Note(
+                velocity=note.velocity,
+                pitch=note.pitch + semitones,  # transpose
+                start=shifted_start,
+                end=shifted_end,
+            )
+            new_inst.notes.append(s_t_note)
+        s_t_midi.instruments.append(new_inst)
+
+    return s_t_midi
+
+
+def transform(file_path: str, out_dir: str, tempo: int, transformations: Dict) -> str:
+    """TODO: fix all the path garbage"""
+    new_file_path = os.path.join(
+        "data",
+        "outputs",
+        "tmp",
+        f"{Path(file_path).stem}.mid",
+    )
+    # new_file_path = change_tempo(file_path, tempo, out_dir)
+    # new_file_path = file_path
+    PrettyMIDI(file_path).write(new_file_path)
+    console.log(f"midi  : transforming midi at '{file_path}'", transformations)
+
+    if transformations["transpose"] != 0:
+        t_midi = PrettyMIDI()
+
+        for instrument in PrettyMIDI(file_path).instruments:
+            transposed_instrument = Instrument(program=instrument.program)
+            for note in instrument.notes:
+                transposed_note = Note(
+                    velocity=note.velocity,
+                    pitch=note.pitch + int(transformations["transpose"]),
+                    start=note.start,
+                    end=note.end,
+                )
+                transposed_instrument.notes.append(transposed_note)
+            t_midi.instruments.append(transposed_instrument)
+
+        t_midi.write(new_file_path)
+
+    if transformations["shift"] != 0:
+        s_midi = PrettyMIDI()
+        beats_per_second = tempo / 60.0
+        shift_seconds = transformations["shift"] / beats_per_second
+
+        for instrument in PrettyMIDI(new_file_path).instruments:
+            shifted_instrument = Instrument(
+                program=instrument.program, is_drum=instrument.is_drum
+            )
+            for note in instrument.notes:
+                # shift the start and end times of each note
+                shifted_start = (
+                    note.start + shift_seconds * transformations["shift"]
+                ) % (8 / beats_per_second)
+                shifted_end = (note.end + shift_seconds * transformations["shift"]) % (
+                    8 / beats_per_second
+                )
+                if shifted_end < shifted_start:  # handle wrapping around the cycle
+                    shifted_end += 8 / beats_per_second
+                shifted_note = Note(
+                    velocity=note.velocity,
+                    pitch=note.pitch,
+                    start=shifted_start,
+                    end=shifted_end,
+                )
+                shifted_instrument.notes.append(shifted_note)
+            s_midi.instruments.append(shifted_instrument)
+
+        s_midi.write(new_file_path)
+
+    out_dir = change_tempo(new_file_path, tempo, out_dir)
+
+    return out_dir
+
+
+def change_tempo(file_path: str, tempo: int, out_dir: str) -> str:
+    midi = mido.MidiFile(file_path)
+    new_message = mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(tempo), time=0)
+    tempo_added = False
+
+    for track in midi.tracks:
+        # remove existing set_tempo messages
+        for msg in track:
+            if msg.type == "set_tempo":
+                track.remove(msg)
+
+        # add new set_tempo message to the first track
+        if not tempo_added:
+            console.log(f"midi  : adding tempo msg for BPM {tempo}", new_message)
+            track.insert(0, new_message)
+            tempo_added = True
+
+    # if no tracks had a set_tempo message and no new one was added, add a new track with the tempo message
+    if not tempo_added:
+        console.log(f"midi  : adding tempo track for BPM {tempo}", new_message)
+        new_track = mido.MidiTrack()
+        new_track.append(new_message)
+        midi.tracks.append(new_track)
+
+    midi.save(out_dir)
+
+    return out_dir
 
 
 def get_velocities(midi_data: PrettyMIDI) -> List:

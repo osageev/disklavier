@@ -24,16 +24,14 @@ def plot_images(
     if DARK:
         plt.style.use("dark_background")
 
-    num_images = len(images)
-
     if shape is None:
-        shape = [num_images, 1]
+        shape = [len(images), 1]
 
     plt.figure(figsize=(12, 12))
 
     if main_title:
         plt.suptitle(main_title)
-    for num_plot in range(num_images):
+    for num_plot in range(len(images)):
         plt.subplot(shape[0], shape[1], num_plot + 1)
         plt.imshow(
             np.squeeze(images[num_plot]),
@@ -181,7 +179,7 @@ def plot_contours(
     piano_roll = midi_data.get_piano_roll(fs)
     beat_frames = np.arange(beats) * (60 / tempo * fs)
 
-    note_tuples = contour(midi_data, beats, tempo)
+    note_tuples = contour(midi_data, beats, tempo, simple)
 
     plt.figure(figsize=(12, 6))
     plt.imshow(piano_roll, aspect="auto", origin="lower", cmap="magma", alpha=0.5)
@@ -190,25 +188,31 @@ def plot_contours(
     plt.ylabel("Pitch")
 
     for i, beat in enumerate(beat_frames):
-        if simple:
+        plt.hlines(
+            y=note_tuples[i],
+            xmin=beat,
+            xmax=beat + (60.0 / tempo * fs),
+            color="green",
+            linewidth=1,
+            alpha=0.7,
+        )
+        if not simple:
             plt.hlines(
-                y=note_tuples[i],
+                y=note_tuples[i + 1],
                 xmin=beat,
                 xmax=beat + (60.0 / tempo * fs),
                 color="green",
                 linewidth=1,
                 alpha=0.7,
             )
-        else:
-            for line in note_tuples[i]:
-                plt.hlines(
-                    y=line,
-                    xmin=beat,
-                    xmax=beat + (60.0 / tempo * fs),
-                    color="green",
-                    linewidth=2,
-                    alpha=0.7,
-                )
+            plt.hlines(
+                y=note_tuples[i + 2],
+                xmin=beat,
+                xmax=beat + (60.0 / tempo * fs),
+                color="green",
+                linewidth=1,
+                alpha=0.7,
+            )
 
     plt.title(f"{Path(midi_file_path).stem}")
     plt.savefig(save_path)

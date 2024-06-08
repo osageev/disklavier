@@ -6,7 +6,7 @@ from datetime import datetime
 from pynput import keyboard
 from queue import Queue
 from threading import Thread, Event
-from pretty_midi import PrettyMIDI
+from pretty_midi import PrettyMIDI, Instrument, Note
 import mido
 
 from player.player import Player
@@ -16,7 +16,7 @@ from seeker.seeker import Seeker
 from controller.controller import Controller
 
 from utils import console
-from utils.midi import augment_recording, text_to_midi
+from utils.midi import augment_recording, text_to_midi, transform
 from utils.metrics import scale_vels
 from utils.plot import plot_images, plot_piano_roll_and_pitch_histogram, plot_contours
 
@@ -55,10 +55,11 @@ class Overseer:
         # tempo
         self.tempo = tempo
         self.params.metronome.tempo = self.tempo
-        self.params.playerR.tempo = self.tempo
+        self.params.player0.tempo = self.tempo
         self.params.player1.tempo = self.tempo
         self.params.player2.tempo = self.tempo
         self.params.listener.tempo = self.tempo
+        self.params.seeker.tempo = self.tempo
 
         self._init_midi()  # make sure MIDI port is available first
 
@@ -74,13 +75,13 @@ class Overseer:
         self.reset_e = Event()
         # players
         self.play_e = Event()
-        self.wait_playerR_e = Event()
+        self.wait_player0_e = Event()
         self.wait_player1_e = Event()
         self.wait_player2_e = Event()
-        self.kill_playerR_e = Event()
+        self.kill_player0_e = Event()
         self.kill_player1_e = Event()
         self.kill_player2_e = Event()
-        self.give_playerR_e = Event()
+        self.give_player0_e = Event()
         self.give_player1_e = Event()
         self.give_player2_e = Event()
         self.playlistR_q = Queue()
@@ -107,7 +108,8 @@ class Overseer:
             args.force_rebuild,
         )
         self.seeker.build_properties()
-        self.seeker.build_top_n_table()
+        self.seeker.build_similarity_table()
+        self.seeker.build_neighbor_table()
 
         self.listener = Listener(
             self.params.listener,
@@ -116,11 +118,11 @@ class Overseer:
             self.kill_listener_e,
             self.reset_e,
         )
-        self.playerR = Player(
-            self.params.playerR,
-            self.kill_playerR_e,
-            self.give_playerR_e,
-            self.wait_playerR_e,
+        self.player0 = Player(
+            self.params.player0,
+            self.kill_player0_e,
+            self.give_player0_e,
+            self.wait_player0_e,
             self.play_e,
             self.playlistR_q,
             self.playback_commmand_q,
@@ -176,9 +178,9 @@ class Overseer:
             target=self.controller.run, args=(), name="controller"
         )
         controller_thread.start()
-        playerR_t = Thread(
-            target=self.playerR.play_loop,
-            name="playerR",
+        player0_t = Thread(
+            target=self.player0.play_loop,
+            name="player0",
         )
         player1_t = Thread(
             target=self.player1.play_loop,
@@ -188,7 +190,7 @@ class Overseer:
             target=self.player2.play_loop,
             name="player2",
         )
-        playerR_t.start()
+        player0_t.start()
         player1_t.start()
         player2_t.start()
         metro_t = Thread(target=self.metronome.tick, name="metronome")
@@ -212,7 +214,7 @@ class Overseer:
                         )
 
                     # get most similar file to recording
-                    first_file, first_similarity = self.seeker.get_ms_to_recording(
+                    first_file, first_similarity, first_transformations = self.seeker.match_recording(
                         recording_path
                     )
                     # check augments for any better matches
@@ -226,12 +228,13 @@ class Overseer:
 
                         change = None
                         for opt in options:
-                            match_path, match_sim = self.seeker.get_ms_to_recording(opt)
+                            match_path, match_sim, match_transformations = self.seeker.match_recording(opt)
 
                             if match_sim > first_similarity:
                                 recording_path = opt
                                 first_similarity = match_sim
                                 first_file = match_path
+                                first_transformations = match_transformations
 
                                 if recording_path.endswith("fh.mid"):
                                     change = "first half"
@@ -256,14 +259,17 @@ class Overseer:
                     )
                     self.ready_e.set()
                     self.play_e.set()
-                    self.playlistR_q.put((recording_path, -1.0))
+                    self.playlistR_q.put((recording_path, -1.0, {}))
                     next_file_path = os.path.join(self.data_dir, str(first_file))
-                    next_file_path = self.change_tempo(next_file_path)
+                    out_dir = os.path.join(
+                        self.playlist_dir, f"{Path(next_file_path).stem}.mid"
+                    )
+                    next_file_path = transform(next_file_path, out_dir, self.tempo, first_transformations)
                     console.log(
-                        f"{self.p} queueing (ready: {self.give_playerR_e.is_set()}) recording for p1: '{recording_path}'"
+                        f"{self.p} queueing (ready: {self.give_player0_e.is_set()}) recording for p1: '{recording_path}'"
                     )
                     console.log(
-                        f"{self.p} next file would be '{os.path.basename(next_file_path)}'"
+                        f"{self.p} next up is '{os.path.basename(next_file_path)}'"
                     )
 
                     # copy the version of the recording that we use to the playlist
@@ -279,7 +285,7 @@ class Overseer:
                     )
 
                     # wait till recording playback is done
-                    while not self.wait_playerR_e.is_set():
+                    while not self.wait_player0_e.is_set():
                         time.sleep(0.001)
 
                     # kill recording player and start rest of system
@@ -287,46 +293,54 @@ class Overseer:
                         f"{self.p} recording playback ended, starting regular playback"
                     )
                     self.recording_ready_e.clear()
-                    self.give_playerR_e.clear()
-                    self.kill_playerR_e.set()
+                    self.give_player0_e.clear()
+                    self.kill_player0_e.set()
                     metro_t.start()
-                    self.playlist1_q.put((next_file_path, first_similarity))
+                    self.playlist1_q.put((next_file_path, first_similarity, {}))
                     self.give_player1_e.clear()
 
                 # metronome says get ready
                 if self.ready_e.is_set():
+                    self.track_num += 1
                     # ready next file
                     next_file = (
                         self.player2.playing_file
                         if p1_playing
                         else self.player1.playing_file
                     )
-                    similarity = -1.0
                     if not self.do_loop:
-                        next_file, similarity = self.seeker.get_msf_new(
-                            os.path.basename(next_file_path)
+                        # next_file, similarity = self.seeker.get_msf_new(
+                        next_file_spec = self.seeker.get_most_similar_file(
+                            os.path.basename(next_file_path), bump_trans=self.track_num % 2 == 0
                         )
-                    next_file_path = os.path.join(self.data_dir, str(next_file))
-                    next_file_path = self.change_tempo(next_file_path)
+
+                    next_file_spec['transformations']['transpose'] = next_file_spec['transformations']['trans']
+                    console.log(
+                        f"{self.p} applying transformations to '{next_file_spec['filename']}':", next_file_spec['transformations'], self.tempo
+                    )
+                    next_file_path = os.path.join(self.data_dir, next_file_spec['filename'])
+                    out_dir = os.path.join(
+                        self.playlist_dir, f"{Path(next_file_path).stem}.mid"
+                    )
+                    next_file_path = transform(next_file_path, out_dir,self.tempo, next_file_spec['transformations'])
 
                     # send to player
                     if p1_playing:
                         console.log(
-                            f"{self.p} queueing (ready: {self.give_player1_e.is_set()}) next file for p1: '{next_file}' sim {similarity:.03f}"
+                            f"{self.p} queueing (ready: {self.give_player1_e.is_set()}) next file for p1: '{next_file_spec['filename']}' sim {next_file_spec['sim']:.03f}"
                         )
-                        self.playlist1_q.put((next_file_path, similarity))
+                        self.playlist1_q.put((next_file_path, next_file_spec['sim'], next_file_spec['transformations']))
                         self.give_player1_e.clear()
                     else:
                         console.log(
-                            f"{self.p} queueing (ready: {self.give_player2_e.is_set()}) next file for p2: '{next_file}' sim {similarity:.03f}"
+                            f"{self.p} queueing (ready: {self.give_player2_e.is_set()}) next file for p2: '{next_file_spec['filename']}' sim {next_file_spec['sim']:.03f}"
                         )
-                        self.playlist2_q.put((next_file_path, similarity))
+                        self.playlist2_q.put((next_file_path, next_file_spec['sim'], next_file_spec['transformations']))
                         self.give_player2_e.clear()
 
                     p1_playing = not p1_playing
                     self.playlist.append(f"{self.track_num:02d} {next_file_path}")
                     self.ready_e.clear()
-                    self.track_num += 1
 
                 # check for keypresses
                 if self.read_commands:
@@ -398,7 +412,7 @@ class Overseer:
 
             self.kill_controller_e.set()
             self.kill_metro_e.set()
-            self.kill_playerR_e.set()
+            self.kill_player0_e.set()
             self.kill_player1_e.set()
             self.kill_player2_e.set()
             self.kill_listener_e.set()
@@ -411,9 +425,9 @@ class Overseer:
                 metro_t.join()
                 console.log(f"{self.p} metronome killed successfully")
 
-            if playerR_t.is_alive():
-                playerR_t.join()
-                console.log(f"{self.p} playerR killed successfully")
+            if player0_t.is_alive():
+                player0_t.join()
+                console.log(f"{self.p} player0 killed successfully")
 
             if player1_t.is_alive():
                 player1_t.join()
@@ -445,7 +459,7 @@ class Overseer:
         # set up input connection
         if self.params.in_port in available_inputs:
             self.input_port = mido.open_input(self.params.in_port)  # type: ignore
-            self.params.playerR.in_port = self.params.in_port
+            self.params.player0.in_port = self.params.in_port
             self.params.player1.in_port = self.params.in_port
             self.params.player2.in_port = self.params.in_port
             self.params.listener.in_port = self.params.in_port
@@ -454,7 +468,7 @@ class Overseer:
                 f"{self.p} unable to find MIDI device '{self.params.in_port}' falling back on '{available_inputs[0]}'"
             )
             self.input_port = mido.open_input(available_inputs[0])  # type: ignore
-            self.params.playerR.in_port = available_inputs[0]
+            self.params.player0.in_port = available_inputs[0]
             self.params.player1.in_port = available_inputs[0]
             self.params.player2.in_port = available_inputs[0]
             self.params.listener.in_port = available_inputs[0]
@@ -464,7 +478,7 @@ class Overseer:
         # set up output connection
         if self.params.out_port in available_inputs:
             self.output_port = mido.open_output(self.params.out_port)  # type: ignore
-            self.params.playerR.out_port = self.params.out_port
+            self.params.player0.out_port = self.params.out_port
             self.params.player1.out_port = self.params.out_port
             self.params.player2.out_port = self.params.out_port
             self.params.listener.out_port = self.params.out_port
@@ -473,20 +487,51 @@ class Overseer:
                 f"{self.p} unable to find MIDI device '{self.params.out_port}' falling back on '{available_outputs[0]}'"
             )
             self.output_port = mido.open_output(available_outputs[0])  # type: ignore
-            self.params.playerR.out_port = available_outputs[0]
+            self.params.player0.out_port = available_outputs[0]
             self.params.player1.out_port = available_outputs[0]
             self.params.player2.out_port = available_outputs[0]
             self.params.listener.out_port = available_outputs[0]
         else:
             console.log(f"{self.p} no MIDI output devices available")
 
-    def change_tempo(self, midi_file_path: str, do_stretch: bool = True) -> str:
+    def change_tempo(self, file_path: str) -> str:
+        midi = mido.MidiFile(file_path)
+        new_message = mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(self.tempo), time=0)
+        tempo_added = False
+
+        for track in midi.tracks:
+            # remove existing set_tempo messages
+            for msg in track:
+                if msg.type == "set_tempo":
+                    track.remove(msg)
+
+            # add new set_tempo message to the first track
+            if not tempo_added:
+                track.insert(0, new_message)
+                tempo_added = True
+
+        # if no tracks had a set_tempo message and no new one was added, add a new track with the tempo message
+        if not tempo_added:
+            new_track = mido.MidiTrack()
+            new_track.append(new_message)
+            midi.tracks.append(new_track)
+
+        # new_file_path = os.path.join("tmp", f"{Path(file_path).stem}_{self.tempo}.mid")
+        new_file_path = os.path.join(
+            self.playlist_dir, f"{Path(file_path).stem}.mid"
+        )
+        midi.save(new_file_path)
+
+        return new_file_path
+    
+
+    def change_tempo_old(self, midi_file_path: str, transformations = None) -> str:
         """
         update midi file tempo and note timings so that it is played back at the set tempo.
 
         Parameters:
             midi_file_path (str): the path to the midi file
-            do_stretch (bool): also change the note timings to conform to the new tempo
+            transformations (Dict): any transformations to apply to the midi
 
         Returns:
             str: the path to the new midi file
@@ -523,27 +568,7 @@ class Overseer:
             self.playlist_dir, f"{Path(midi_file_path).stem}.mid"
         )
         midi.save(new_file_path)
-
-        # also stretch note timings
-        # if do_stretch:
-        #     new_len = midi.length * file_bpm / self.tempo
-        #     new_midi = um.stretch_midi_file(midi, new_len, self.p)
-
-        # save the modified MIDI file
-
-        # console.log(f"{self.p} saving modified MIDI file with new tempo {self.tempo} BPM to '{new_file_path}'")
-        # new_midi.save(new_file_path)
         new_midi = mido.MidiFile(new_file_path)
-        # segment_length = 60 * 16 / file_bpm  # in seconds
-        # if np.round(segment_length, 3) != np.round(midi.length, 3):
-        #     total_time_t = -1
-        #     for track in midi.tracks:
-        #         # Remove existing 'end_of_track' messages and calculate last note time
-        #         for msg in track:
-        #             total_time_t += msg.time
-        #             if msg.type == "end_of_track":
-        #                 track.remove(msg)
-        # console.log(f"{self.p} expected len {segment_length:.04f} but found {midi.length:.04f} and calcd {mido.tick2second(total_time_t, 220, mido.bpm2tempo(file_bpm))}")
 
         # scale velocities
         # if self.v_scale != 1.0 :
@@ -565,12 +590,13 @@ class Overseer:
                 self.plot_dir, f"{self.track_num}-{Path(midi_file_path).stem}.png"
             )
 
-            if self.params.seeker.property == "contour":
+            if self.params.seeker.property == "contour" or self.params.seeker.property == "contour-complex":
                 plot_contours(
                     new_file_path,
                     plot_path,
                     self.tempo,
                     self.params.seeker.beats_per_seg,
+                    self.params.seeker.property == "contour"
                 )
             else:
                 plot_images(

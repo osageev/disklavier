@@ -121,7 +121,7 @@ class Listener:
         if os.path.exists(os.path.join(self.record_dir, self.outfile)):
             console.log(f"{self.p} successfully saved recording '{self.outfile}'")
             mid = MidiFile(os.path.join(self.record_dir, self.outfile))
-            mid.print_tracks()
+            # mid.print_tracks()
         else:
             console.log(f"{self.p} failed to save recording '{self.outfile}'")
 
@@ -148,6 +148,6 @@ class Listener:
         if os.path.exists(os.path.join(self.record_dir, self.outfile)):
             console.log(f"{self.p} successfully saved recording '{self.outfile}'")
             mid = MidiFile(os.path.join(self.record_dir, self.outfile))
-            mid.print_tracks()
+            # mid.print_tracks()
         else:
             console.log(f"{self.p} failed to save recording '{self.outfile}'")

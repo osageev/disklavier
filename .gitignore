@@ -3,6 +3,9 @@ data/datasets
 data/outputs
 data/ableton
 notebooks/tmp
+inputs/*
+ml/outputs/checkpoints
+ml/outputs/runs
 *.tar.gz
 
 .DS_STORE

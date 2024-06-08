@@ -97,7 +97,7 @@ def segment_midi(input_file_path: str, params):
 
             # make sure track end is correct
             modify_end_of_track(filepath, segment_length, target_tempo)
-            test_mid = MidiFile(filepath)
+            # test_mid = MidiFile(filepath)
             # if np.round(test_mid.length, 3) != np.round(segment_length, 3):
             #     print(
             #         f"'{os.path.basename(filepath)}' is {test_mid.length:.3f} s at {target_tempo} BPM but should be {segment_length:.3f} s ({test_mid.ticks_per_beat} tpb)"
