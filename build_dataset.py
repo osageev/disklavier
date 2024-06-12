@@ -1,12 +1,14 @@
 import os
+from pathlib import Path
 from datetime import datetime
 from argparse import ArgumentParser
 from itertools import product
 from pretty_midi import PrettyMIDI
+import numpy as np
 
 from rich import print
 from rich.pretty import pprint
-from rich.progress import track
+from rich.progress import Progress
 
 from dataset.dataset import segment_midi
 from utils.midi import transform
@@ -42,7 +44,7 @@ def main(args):
     # segment files
     segment_paths = []
     augment_paths = []
-    for filename in track(tracks, description="generating segments"):
+    for filename in tracks:
         if filename.endswith(".mid"):
             print(f"segmenting '{filename}'")
             new_segments = segment_midi(
@@ -51,21 +53,25 @@ def main(args):
             )
             segment_paths.extend(new_segments)
 
-            if args.build_train:
-                for segment_filename in new_segments:
-                    transformations = [
-                        {"transpose": t, "shift": s}
-                        for t, s in product(range(12), range(8))
-                    ]
-                    for transformation in transformations:
-                        augment_paths.append(
-                            transform(
-                                segment_filename,
-                                t_path,
-                                int(filename.split("-")[1]),
-                                transformation,
+            p = Progress()
+            t = p.add_task("augmenting", total=len(new_segments) * 96)
+            with p:
+                if args.build_train:
+                    for segment_filename in new_segments:
+                        transformations = [
+                            {"transpose": t, "shift": s}
+                            for t, s in product(range(12), range(8))
+                        ]
+                        for transformation in transformations:
+                            augment_paths.append(
+                                transform(
+                                    segment_filename,
+                                    t_path,
+                                    int(filename.split("-")[1]),
+                                    transformation,
+                                )
                             )
-                        )
+                            p.advance(t)
 
             os.rename(
                 os.path.join(args.data_dir, filename),
@@ -75,6 +81,17 @@ def main(args):
     print(
         f"[green bold]segmentation complete, {len(segment_paths)} play files generated and {len(augment_paths)} train files generated"
     )
+
+    prs = {}
+    p = Progress()
+    t = p.add_task("saving prs", total=len(augment_paths))
+    with p:
+        for augmentation in augment_paths:
+            prs[Path(augmentation).stem] = PrettyMIDI(augmentation).get_piano_roll()
+            p.advance(t)
+    print("prs calculated, saving...")
+    np.savez_compressed(os.path.join(args.data_dir, "all_prs.npz"), **prs)
+    print("DONE")
 
 
 def build_fs(dirs: List[str]) -> None:

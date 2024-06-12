@@ -290,7 +290,7 @@ def transpose_and_shift(
 
 def transform(file_path: str, out_dir: str, tempo: int, transformations: Dict) -> str:
     """TODO: better path handling"""
-    new_filename = f"{Path(file_path).stem[:-6]}_t{transformations["transpose"]}s{transformations["shift"]:02d}.mid"
+    new_filename = f"{Path(file_path).stem}_t{transformations["transpose"]}s{transformations["shift"]:02d}.mid"
     tmp_path = os.path.join(
         "data",
         "tmp",
@@ -353,7 +353,10 @@ def transform(file_path: str, out_dir: str, tempo: int, transformations: Dict) -
 
         s_midi.write(tmp_path)
 
-    return change_tempo(tmp_path, tempo, os.path.join(out_dir, new_filename))
+    new_path = change_tempo(tmp_path, tempo, os.path.join(out_dir, new_filename))
+    os.remove(tmp_path)
+
+    return new_path
 
 
 def change_tempo(file_path: str, tempo: int, out_path: str) -> str:

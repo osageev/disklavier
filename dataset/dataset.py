@@ -23,9 +23,9 @@ def segment_midi(
     num_segments = int(np.round(total_length / segment_length))
     eighth_beat = segment_length / num_beats / 8  # eighth of a beat
 
-    print(
-        f"\tbreaking '{filename}' ({total_length:.03f} s at {target_tempo} bpm) into {num_segments:03d} segments of {segment_length:.03f}s\n\t(pre window is {eighth_beat:.03f} s)"
-    )
+    # print(
+    #     f"\tbreaking '{filename}' ({total_length:.03f} s at {target_tempo} bpm) into {num_segments:03d} segments of {segment_length:.03f}s\n\t(pre window is {eighth_beat:.03f} s)"
+    # )
 
     new_files = []
     for n in list(range(num_segments)):
