@@ -13,6 +13,7 @@ import redis
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from utils.metrics import blur_pr, energy, contour
+from utils.midi import transpose_and_shift
 
 dataset_path = "data/datasets/careful"
 properties_path = "data/outputs/careful.json"
@@ -38,11 +39,6 @@ def update_best_matches(
         metric (str): The metric to update.
     """
 
-    def extract_track_name(filename: str):
-        return filename.split("_")[0]
-
-    def format_entry(filename, sim):
-        return f"{filename}@{sim}"
 
     # get the current list from Redis
     # TODO: handle this nested list better
@@ -52,16 +48,16 @@ def update_best_matches(
     else:
         best_matches = best_matches[0]
         track_names = set(
-            extract_track_name(entry.split("@")[0]) for entry in best_matches
+            entry.split("@")[0].split("_")[0] for entry in best_matches
         )
 
     # check if the new track_name is already in the set or matches track_name_row
-    new_track_name = extract_track_name(file_bm)
+    new_track_name = file_bm.split("_")[0]
     if new_track_name in track_names or new_track_name == track_name_row:
         return  # dont update list
 
     # add the new entry
-    best_matches.append(format_entry(file_bm, sim_bm))
+    best_matches.append(f"{file_bm}@{sim_bm}")
 
     # sort by similarity in descending order
     best_matches.sort(key=lambda x: float(x.split("@")[1]), reverse=True)
@@ -153,54 +149,6 @@ def calc_sims(
     return index
 
 
-def transpose_and_shift_midi(
-    midi_path: str, semitones: int, beats: int, total_beats=8
-) -> pretty_midi.PrettyMIDI:
-    """
-    Transpose and shift a MIDI file by a specified number of semitones and beats.
-
-    Args:
-        midi_path (str): The path to the MIDI file.
-        semitones (int): Number of semitones to transpose the MIDI file.
-        beats (int): Number of beats to shift the MIDI events.
-        total_beats (int): number of beats in the file (default 8)
-
-    Returns:
-        pretty_midi.PrettyMIDI: The modified MIDI file.
-    """
-    midi_data = pretty_midi.PrettyMIDI(midi_path)
-    tempo = int(Path(midi_path).stem.split("-")[1])
-    beats_per_second = tempo / 60.0
-    shift_seconds = 1 / beats_per_second
-    s_t_midi = pretty_midi.PrettyMIDI()
-
-    # shift
-    for instrument in midi_data.instruments:
-        new_inst = pretty_midi.Instrument(
-            program=instrument.program, is_drum=instrument.is_drum
-        )
-        for note in instrument.notes:
-            # shift the start and end times of each note
-            shifted_start = (note.start + shift_seconds * beats) % (
-                total_beats / beats_per_second
-            )
-            shifted_end = (note.end + shift_seconds * beats) % (
-                total_beats / beats_per_second
-            )
-            if shifted_end < shifted_start:  # handle wrapping around the cycle
-                shifted_end += beats / beats_per_second
-            s_t_note = pretty_midi.Note(
-                velocity=note.velocity,
-                pitch=note.pitch + semitones,  # transpose
-                start=shifted_start,
-                end=shifted_end,
-            )
-            new_inst.notes.append(s_t_note)
-        s_t_midi.instruments.append(new_inst)
-
-    return s_t_midi
-
-
 def main():
     properties = {}
     with open(properties_path, "r") as f:
@@ -212,10 +160,10 @@ def main():
     num_processes = os.cpu_count()
     split_keys = np.array_split(names, num_processes)  # type: ignore
 
-    mod_table = list(range(12))  # []
-    # for s in range(8):
-    #     for t in range(12):
-    #         mod_table.append([s, t])
+    mod_table = []
+    for s in range(num_beats):
+        for t in range(num_transpositions):
+            mod_table.append([s, t])
 
     r = redis.Redis(host="localhost", port=6379, db=0)
 
@@ -233,9 +181,8 @@ def main():
     with progress:
         for file in names:
             r.json().set(f"file:{file}", "$", {f"{metric}": []}, nx=True)
-            for t in mod_table:
-                s = 0  # NOTE: fix before switching to other metrics
-                pch = transpose_and_shift_midi(
+            for t, s in mod_table:
+                pch = transpose_and_shift(
                     os.path.join(dataset_path, file), t, s
                 ).get_pitch_class_histogram(use_duration=True)
 
