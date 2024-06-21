@@ -4,7 +4,7 @@ from itertools import product
 import pretty_midi
 import numpy as np
 
-from utils.midi import set_tempo
+from utils.midi import set_tempo, semitone_transpose
 
 from typing import List
 
@@ -49,7 +49,6 @@ def segment_midi(
                     velocity=note.velocity,
                     pitch=note.pitch,
                     start=note.start - start,
-                    # end=min(note.end, end) - start,
                     end=note.end - start,
                 )
                 instrument.notes.append(new_note)
@@ -149,8 +148,6 @@ def segment_midi_old(input_file_path: str, params):
 
         set_tempo(segment_filename, target_tempo)
 
-            # make sure track end is correct
-            modify_end_of_track(filepath, segment_length, target_tempo)
         # make sure track end is correct
         modify_end_of_track(segment_filename, segment_length, target_tempo)
 
@@ -160,8 +157,6 @@ def segment_midi_old(input_file_path: str, params):
 def modify_end_of_track(midi_file_path, new_end_time, tempo):
     midi = MidiFile(midi_file_path)
     new_end_time_t = second2tick(new_end_time, 220, bpm2tempo(tempo))
-    # print(f"\t{midi_file_path} bpm2tempo(tempo)}")
-    # mid.print_tracks()
 
     for i, track in enumerate(midi.tracks):
         total_time_t = 0
@@ -181,6 +176,4 @@ def modify_end_of_track(midi_file_path, new_end_time, tempo):
 
     # Save the modified MIDI file
     os.remove(midi_file_path)
-    mid.save(midi_file_path)
-
-def augment_midi(input_file_path: str, params)
+    midi.save(midi_file_path)

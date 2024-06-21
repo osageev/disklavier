@@ -96,13 +96,7 @@ def main(args):
 
 def build_fs(dirs: List[str]) -> None:
     for dir in dirs:
-        if os.path.exists(dir):
-            i = 0
-            for i, file in enumerate(os.listdir(dir)):
-                os.remove(os.path.join(dir, file))
-                i += 1
-            print(f"cleaned {i} files out of folder: '{dir}'")
-        else:
+        if not os.path.exists(dir):
             os.mkdir(dir)
             print(f"created new folder: '{dir}'")
 
