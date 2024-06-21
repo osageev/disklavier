@@ -17,13 +17,15 @@ def segment_midi(input_file_path: str, params):
         params: A config object containing segmentation settings, such as:
             n__num_beats (int): Number of beats per segment.
             output_dir (str): Directory where segmented MIDI files will be stored.
-            do_shift (int): Indicates how many semitones to transpose the segments.
+            do_transpose (int): Indicates how many semitones to transpose the segments.
             strip_tempo (bool): If True, strip existing tempo information from segments.
 
     Returns:
         int: The number of new files created through segmentation and optional transposition.
 
-    This function reads a MIDI file, extracts its tempo from the filename, and segments it into smaller MIDI files each containing a specified number of beats. Optionally, it can transpose the segments by a specified number of semitones. The function adjusts tempo and track end as necessary for each segment.
+    This function reads a MIDI file, extracts its tempo from the filename, 
+    and segments it into smaller MIDI files each containing a specified number of beats.
+    The function adjusts tempo and track end as necessary for each segment.
     """
     target_tempo = int(os.path.basename(input_file_path).split("-")[1])
     set_tempo(input_file_path, target_tempo)
@@ -66,8 +68,8 @@ def segment_midi(input_file_path: str, params):
         )
         segment_midi.write(segment_filename)
 
-        # semitone shift
-        if params.do_shift > 1:
+        # semitone transpose
+        if params.do_transpose > 1:
             tpose_files = semitone_transpose(
                 segment_filename, params.output_dir, params.do_shift
             )
@@ -97,13 +99,6 @@ def segment_midi(input_file_path: str, params):
 
             # make sure track end is correct
             modify_end_of_track(filepath, segment_length, target_tempo)
-            # test_mid = MidiFile(filepath)
-            # if np.round(test_mid.length, 3) != np.round(segment_length, 3):
-            #     print(
-            #         f"'{os.path.basename(filepath)}' is {test_mid.length:.3f} s at {target_tempo} BPM but should be {segment_length:.3f} s ({test_mid.ticks_per_beat} tpb)"
-            #     )
-            # test_mid.print_tracks()
-
     return new_files
 
 
@@ -132,3 +127,5 @@ def modify_end_of_track(midi_file_path, new_end_time, tempo):
     # Save the modified MIDI file
     os.remove(midi_file_path)
     mid.save(midi_file_path)
+
+def augment_midi(input_file_path: str, params)

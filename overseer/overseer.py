@@ -164,6 +164,9 @@ class Overseer:
             self.listener.outfile = os.listdir(self.data_dir)[0]
         # kickstart
         if self.kickstart_file is not None:
+            if self.kickstart_file == "RAND":
+                self.kickstart_file = self.seeker.get_random()
+                console.log(f"{self.p} seeker kickstarting with random file '{self.kickstart_file}'")
             self.recording_ready_e.set()
             self.listener.outfile = self.kickstart_file
         # start listening for recording
