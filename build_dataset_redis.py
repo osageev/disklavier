@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import json
 import numpy as np
+from itertools import product
 from rich.progress import (
     Progress,
     SpinnerColumn,
@@ -12,12 +13,11 @@ import pretty_midi
 import redis
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from utils.metrics import blur_pr, energy, contour
-from utils.midi import transpose_and_shift
+# from utils.metrics import blur_pr, energy, contour
+# from utils.midi import transform, get_tempo
 
-dataset_path = "data/datasets/careful"
-properties_path = "data/outputs/careful.json"
-metric = "pitch_histogram_wd"
+dataset_path = "data/datasets/test"
+metric = "pitch_histogram"
 
 num_beats = 8
 num_transpositions = 12
@@ -28,7 +28,6 @@ def update_best_matches(
 ):
     """
     Update the pitch histogram in the Redis database based on the given criteria.
-    TODO: better variable names
 
     Args:
         redis_client: Redis client object.
@@ -39,9 +38,7 @@ def update_best_matches(
         metric (str): The metric to update.
     """
 
-
     # get the current list from Redis
-    # TODO: handle this nested list better
     best_matches = redis_client.json().get(key, f"$.{metric}")
     if best_matches is None or len(best_matches) < 1:
         track_names = set()
@@ -150,20 +147,12 @@ def calc_sims(
 
 
 def main():
-    properties = {}
-    with open(properties_path, "r") as f:
-        properties = json.load(f)
-
-    names = list(properties.keys())
+    names = os.listdir(dataset_path)
     names.sort()
 
     num_processes = os.cpu_count()
     split_keys = np.array_split(names, num_processes)  # type: ignore
-
-    mod_table = []
-    for s in range(num_beats):
-        for t in range(num_transpositions):
-            mod_table.append([s, t])
+    mod_table = list(product(range(num_transpositions), range(num_beats)))
 
     r = redis.Redis(host="localhost", port=6379, db=0)
 
@@ -175,23 +164,25 @@ def main():
         MofNCompleteColumn(),
         refresh_per_second=1,
     )
-    pitch_histogram_task = progress.add_task(
-        f"uploading '{metric}'", total=(len(names) * 12)
-    )
+    pitch_histogram_task = progress.add_task(f"uploading '{metric}'", total=len(names))
     with progress:
         for file in names:
             r.json().set(f"file:{file}", "$", {f"{metric}": []}, nx=True)
-            for t, s in mod_table:
-                pch = transpose_and_shift(
-                    os.path.join(dataset_path, file), t, s
-                ).get_pitch_class_histogram(use_duration=True)
+            # for t, s in mod_table:
+            #     transformed_path = transform(os.path.join(dataset_path, file), "outputs/tmp", get_tempo(file), {"transpose": t, "shift": s})
+            file_path = os.path.join(dataset_path, file)
+            transpose = file.split('_')[-1][:-4][:3]
+            shift = file.split('_')[-1][:-4][3:]
+            pch = pretty_midi.PrettyMIDI(file_path).get_pitch_class_histogram(
+                use_duration=True
+            )
 
-                r.set(
-                    f"{metric}:{file}:{s}-{t}",
-                    ",".join(map(str, pch)),
-                    nx=True,
-                )
-                progress.advance(pitch_histogram_task)
+            r.set(
+                f"{metric}:{file[:-11]}:{transpose}-{shift}",
+                ",".join(map(str, pch)),
+                nx=True,
+            )
+            progress.advance(pitch_histogram_task)
 
     # calculate similarities
     with ProcessPoolExecutor() as executor:

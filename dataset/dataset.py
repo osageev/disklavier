@@ -3,10 +3,42 @@ from mido import MidiFile, MetaMessage, bpm2tempo, second2tick
 from itertools import product
 import pretty_midi
 import numpy as np
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TimeElapsedColumn,
+    MofNCompleteColumn,
+)
 
-from utils.midi import set_tempo, semitone_transpose
+from utils.midi import set_tempo, semitone_transpose, transform
 
 from typing import List
+
+
+def augment_midi(p, filename: str, new_segments: List[str], output_path: str) -> List[str]:
+    augmented_files = []
+
+    task_a = p.add_task(f"augmenting {filename}", total=len(new_segments) * 96)
+
+    with p:
+        for segment_filename in new_segments:
+            transformations = [
+                {"transpose": t, "shift": s}
+                for t, s in product(range(12), range(8))
+            ]
+            for transformation in transformations:
+                augmented_files.append(
+                    transform(
+                        segment_filename,
+                        output_path,
+                        int(filename.split("-")[1]),
+                        transformation,
+                    )
+                )
+                p.update(task_a, advance=1)
+
+        p.remove_task(task_a)
+    return augmented_files
 
 
 def segment_midi(

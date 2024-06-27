@@ -86,8 +86,8 @@ def build_similarity_dataframe(all_files: List[str]):
                     print(f"ERROR@key {key}: no value")
             progress.advance(update_task)
 
-    df.to_feather(
-        os.path.join("outputs", "records", "chunks", "sim.feather")
+    df.to_parquet(
+        os.path.join("outputs", "records", "chunks", "sim.parquet")
     )
 
 if __name__ == "__main__":

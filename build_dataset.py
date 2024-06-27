@@ -1,17 +1,18 @@
 import os
-from pathlib import Path
+import zipfile
 from datetime import datetime
 from argparse import ArgumentParser
-from itertools import product
-from pretty_midi import PrettyMIDI
-import numpy as np
 
 from rich import print
 from rich.pretty import pprint
-from rich.progress import Progress
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TimeElapsedColumn,
+    MofNCompleteColumn,
+)
 
-from dataset.dataset import segment_midi
-from utils.midi import transform
+from dataset.dataset import augment_midi, segment_midi
 
 from typing import List
 
@@ -28,83 +29,70 @@ def main(args):
     t_path = os.path.join(args.data_dir, "train")
     u_path = os.path.join(args.data_dir, "unsegmented")
 
-    build_fs(
-        [
-            p_path,
-            t_path,
-            u_path,
-        ]
-    )
+    for dir in [p_path, t_path, u_path]:
+        if not os.path.exists(dir):
+            os.mkdir(dir)
+            print(f"created new folder: '{dir}'")
 
     if args.limit is None:
         tracks = os.listdir(args.data_dir)
     else:
         tracks = os.listdir(args.data_dir)[: args.limit]
 
+    p = Progress(
+        SpinnerColumn(),
+        *Progress.get_default_columns(),
+        TimeElapsedColumn(),
+        MofNCompleteColumn(),
+        refresh_per_second=1,
+    )
+    task_s = p.add_task("segmenting", total=len(tracks))
+
     # segment files
     segment_paths = []
     augment_paths = []
-    for filename in tracks:
-        if filename.endswith(".mid"):
-            print(f"segmenting '{filename}'")
-            new_segments = segment_midi(
-                os.path.join(args.data_dir, filename),
-                p_path,
-            )
-            segment_paths.extend(new_segments)
+    with p:
+        for filename in tracks:
+            if filename.endswith(".mid"):
+                # segment
+                new_segments = segment_midi(
+                    os.path.join(args.data_dir, filename),
+                    p_path,
+                )
+                segment_paths.extend(new_segments)
 
-            p = Progress()
-            t = p.add_task("augmenting", total=len(new_segments) * 96)
-            with p:
+                # augment
                 if args.build_train:
-                    for segment_filename in new_segments:
-                        transformations = [
-                            {"transpose": t, "shift": s}
-                            for t, s in product(range(12), range(8))
-                        ]
-                        for transformation in transformations:
-                            augment_paths.append(
-                                transform(
-                                    segment_filename,
-                                    t_path,
-                                    int(filename.split("-")[1]),
-                                    transformation,
-                                )
-                            )
-                            p.advance(t)
+                    augment_paths.extend(augment_midi(p, filename[:-4], new_segments, t_path))
 
-            os.rename(
-                os.path.join(args.data_dir, filename),
-                os.path.join(u_path, filename),
-            )
+                # move
+                os.rename(
+                    os.path.join(args.data_dir, filename),
+                    os.path.join(u_path, filename),
+                )
 
+                p.update(task_s, advance=1)
+
+    # CHATGPT UNTESTESTED
+    zip_path = os.path.join("data", "datasets", f"{args.dataset_name}_segmented.zip")
+    print(f"compressing to zipfile '{zip_path}'")
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(args.data_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, args.data_dir)
+                zipf.write(file_path, arcname)
+    
     print(
         f"[green bold]segmentation complete, {len(segment_paths)} play files generated and {len(augment_paths)} train files generated"
     )
-
-    prs = {}
-    p = Progress()
-    t = p.add_task("saving prs", total=len(augment_paths))
-    with p:
-        for augmentation in augment_paths:
-            prs[Path(augmentation).stem] = PrettyMIDI(augmentation).get_piano_roll()
-            p.advance(t)
-    print("prs calculated, saving...")
-    np.savez_compressed(os.path.join(args.data_dir, "all_prs.npz"), **prs)
-    print("DONE")
-
-
-def build_fs(dirs: List[str]) -> None:
-    for dir in dirs:
-        if not os.path.exists(dir):
-            os.mkdir(dir)
-            print(f"created new folder: '{dir}'")
 
 
 if __name__ == "__main__":
     # load args
     parser = ArgumentParser(description="Argparser description")
     parser.add_argument("--data_dir", default=None, help="location of MIDI files")
+    parser.add_argument("--dataset_name", default=None, help="name of dataset")
     parser.add_argument(
         "--store_metrics",
         default=f"metrics-{datetime.now().strftime('%y%m%d-%H%M%S')}.json",
@@ -125,6 +113,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--build_train",
         action="store_true",
+        default=True,
         help="augment dataset and store files",
     )
     parser.add_argument(
@@ -136,7 +125,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "-r",
         action="store_true",
+        default=False,
         help="upload files to redis",
+    )
+    parser.add_argument(
+        "-s",
+        action="store_true",
+        default=True,
+        help="segment files",
     )
     args = parser.parse_args()
 

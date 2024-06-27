@@ -303,6 +303,41 @@ def transform(file_path: str, out_dir: str, tempo: int, transformations: Dict, n
 
     return out_path
 
+
+def get_tempo(filename: str) -> int:
+    return int(filename.split('-')[1])
+
+
+def split_filename(filename: str, split_track=False) -> List[str]:
+    """Splits a filename into its components based on underscores.
+
+    Args:
+        filename (str): The filename to be split, expected to be in the format 
+        'base_segment_transformations'.
+        split_track (bool, optional): Whether to split the track part. Defaults to False.
+
+    Returns:
+        List[str]: A list containing the split parts of the filename. If split_track is False,
+        the list will contain the basename, trans, and shift. If split_track is True,
+        the list will contain basename, segment, trans, and shift.
+    """
+
+    b, s, t = filename.split("_")
+    trans = t[1:3]
+    shift = t[4:6]
+
+    if split_track:
+        return [b, s, trans, shift]
+        
+    basename = "_".join([b, s])
+
+    return [basename, trans, shift]
+
+
+def insert_transformations(filename: str, transformations: List[int]=[0,0]) -> str:
+    return f"{filename[:-4]}_t{transformations[0]:02d}s{transformations[1]:02d}{filename[-4:]}"
+
+
 def change_tempo(file_path: str, tempo: int):
     midi = mido.MidiFile(file_path)
     new_tempo = mido.bpm2tempo(tempo)
