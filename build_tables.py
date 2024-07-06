@@ -1,6 +1,10 @@
 import os
+import time
+import zipfile
 from pretty_midi import PrettyMIDI
 import numpy as np
+from rich import print
+from rich.pretty import pprint
 from rich.progress import (
     Progress,
     SpinnerColumn,
@@ -12,13 +16,15 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from argparse import ArgumentParser
 
 from utils.midi import insert_transformations
-from utils.redis import store_vector, load_vector, load_vectors
+from utils.redis import *
 
 from typing import List
 
 
 def calc_sims(rows: List[str], all_rows: List[str], metric: str, index: int):
-    print(f"[SUBR{index:02d}] starting subprocess {index:02d}")
+    print(
+        f"[SUBR{index:02d}] starting subprocess {index:02d} with {len(rows)}/{len(all_rows)} rows"
+    )
     r = redis.Redis(host="localhost", port=6379, db=0)
 
     progress = Progress(
@@ -34,7 +40,7 @@ def calc_sims(rows: List[str], all_rows: List[str], metric: str, index: int):
     with progress:
         for i, row_file in enumerate(rows):
             print(
-                f"[SUBR{index:02d}] {i:04d}/{len(rows):04d} calculating sims for file {row_file}"
+                f"[SUBR{index:02d}] {i:04d}/{len(rows):04d} calculating sims for file '{row_file}'"
             )
 
             # find optimal transformation for each other file in dataset to maximize similarity
@@ -71,6 +77,7 @@ def calc_sims(rows: List[str], all_rows: List[str], metric: str, index: int):
 
                 progress.advance(sim_task)
 
+    progress.remove_task(sim_task)
     print(f"[SUBR{index:02d}] subprocess complete")
 
     return index
@@ -78,8 +85,15 @@ def calc_sims(rows: List[str], all_rows: List[str], metric: str, index: int):
 
 def main(args):
     r = redis.Redis(host="localhost", port=6379, db=0)
+
+    # filenames
     train_dir = os.path.join(args.data_dir, "train")
     all_filenames = [f for f in os.listdir(train_dir) if f.endswith(".mid")]
+    all_filenames.sort()
+    play_dir = os.path.join(args.data_dir, "play")
+    base_filenames = [f for f in os.listdir(play_dir) if f.endswith(".mid")]
+    base_filenames.sort()
+    split_keys = np.array_split(base_filenames, os.cpu_count())  # type: ignore
 
     # calculate metrics for each file
     progress = Progress(
@@ -101,10 +115,6 @@ def main(args):
             progress.advance(pitch_histogram_task)
 
     # calculate similarities
-    play_dir = os.path.join(args.data_dir, "play")
-    base_filenames = [f for f in os.listdir(play_dir) if f.endswith(".mid")]
-    split_keys = np.array_split(base_filenames, os.cpu_count())  # type: ignore
-
     with ProcessPoolExecutor() as executor:
         futures = {
             executor.submit(calc_sims, chunk, base_filenames, args.metric, i): chunk
@@ -114,14 +124,82 @@ def main(args):
         for future in as_completed(futures):
             index = future.result()
             print(f"[MAIN]   subprocess {index} returned")
-            
+
+    # build tables
+    table_list = []
     if args.build_sim:
+        parquet_path = os.path.join(
+            "outputs", "tables", f"{args.dataset_name}_sim.parquet"
+        )
+        table_list.append(parquet_path)
+
+        start_time = time.time()
+        build_similarity_table(base_filenames, parquet_path)
+        end_time = time.time()
+
+        big_df = pd.read_parquet(parquet_path)
+        print(f"successfully built sim table '{parquet_path}'")
+        pprint(big_df.head())
+
+        memory_usage = big_df.memory_usage(index=True).sum()
+        print(f"Time taken to generate DataFrame: {end_time - start_time:.2f} s")
+        print(f"Memory usage of DataFrame: {memory_usage / (1024 * 1024):.2f} MB")
+        del big_df
+
+    if args.build_neighbor:
+        parquet_path = os.path.join(
+            "outputs", "tables", f"{args.dataset_name}_neighbor.parquet"
+        )
+        table_list.append(parquet_path)
+
+        start_time = time.time()
+        build_neighbor_table(base_filenames, parquet_path)
+        end_time = time.time()
+
+        big_df = pd.read_parquet(parquet_path)
+        print(f"successfully built neighbor table '{parquet_path}':")
+        pprint(big_df.head())
+
+        memory_usage = big_df.memory_usage(index=True).sum()
+        print(f"Time taken to generate DataFrame: {end_time - start_time:.2f} s")
+        print(f"Memory usage of DataFrame: {memory_usage / (1024 * 1024):.2f} MB")
+        del big_df
+
+    if args.build_transformation:
+        parquet_path = os.path.join(
+            "outputs", "tables", f"{args.dataset_name}_transformations.parquet"
+        )
+        table_list.append(parquet_path)
+
+        start_time = time.time()
+        build_transformation_table(base_filenames, parquet_path)
+        end_time = time.time()
+
+        big_df = pd.read_parquet(parquet_path)
+        print(f"successfully built transformation table '{parquet_path}':")
+        pprint(big_df.head())
+
+        memory_usage = big_df.memory_usage(index=True).sum()
+        print(f"Time taken to generate DataFrame: {end_time - start_time:.2f} s")
+        print(f"Memory usage of DataFrame: {memory_usage / (1024 * 1024):.2f} MB")
+        del big_df
+
+    # CHATGPT UNTESTED
+    zip_path = os.path.join("outputs", f"{args.dataset_name}_tables.zip")
+    print(f"compressing to zipfile '{zip_path}'")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for table in table_list:
+            zipf.write(table, os.path.basename(table))
+    print("DONE")
 
 
 if __name__ == "__main__":
     # load args
     parser = ArgumentParser(description="Argparser description")
     parser.add_argument("--data_dir", default=None, help="location of MIDI files")
+    parser.add_argument(
+        "--dataset_name", type=str, default="dataset", help="name of dataset"
+    )
     parser.add_argument(
         "--metric", "-m", default="pitch_histogram", help="metric to use/calculate"
     )
@@ -148,8 +226,30 @@ if __name__ == "__main__":
         "-s",
         action="store_true",
         default=False,
-        help="actually build table, vs. just uploading the files",
+        help="actually build sim table, vs. just uploading the files",
+    )
+    parser.add_argument(
+        "--build_neighbor",
+        "-n",
+        action="store_true",
+        default=False,
+        help="actually build neighbor table",
+    )
+    parser.add_argument(
+        "--build_transformation",
+        "-r",
+        action="store_true",
+        default=False,
+        help="actually build transformation table",
+    )
+    parser.add_argument(
+        "-t",
+        action="store_true",
+        default=False,
+        help="test dataset mode (don't expect transformations)",
     )
     args = parser.parse_args()
+
+    pprint(args)
 
     main(args)

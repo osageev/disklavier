@@ -3,12 +3,6 @@ from mido import MidiFile, MetaMessage, bpm2tempo, second2tick
 from itertools import product
 import pretty_midi
 import numpy as np
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    TimeElapsedColumn,
-    MofNCompleteColumn,
-)
 
 from utils.midi import set_tempo, semitone_transpose, transform
 

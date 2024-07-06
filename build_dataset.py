@@ -1,4 +1,5 @@
 import os
+from shutil import copy2
 import zipfile
 from datetime import datetime
 from argparse import ArgumentParser
@@ -14,12 +15,8 @@ from rich.progress import (
 
 from dataset.dataset import augment_midi, segment_midi
 
-from typing import List
-
 
 def main(args):
-    pprint(args)
-
     # set up filesystem
     if not os.path.exists(args.data_dir):
         print(f"no data dir found at {args.data_dir}")
@@ -54,16 +51,25 @@ def main(args):
     with p:
         for filename in tracks:
             if filename.endswith(".mid"):
-                # segment
-                new_segments = segment_midi(
-                    os.path.join(args.data_dir, filename),
-                    p_path,
-                )
-                segment_paths.extend(new_segments)
+                if args.segment:
+                    # segment
+                    new_segments = segment_midi(
+                        os.path.join(args.data_dir, filename),
+                        p_path,
+                    )
+                    segment_paths.extend(new_segments)
+                else:
+                    copy2(
+                        os.path.join(args.data_dir, filename),
+                        os.path.join(p_path, filename),
+                    )
+                    new_segments = [os.path.join(args.data_dir, filename)]
 
                 # augment
-                if args.build_train:
-                    augment_paths.extend(augment_midi(p, filename[:-4], new_segments, t_path))
+                if args.augment:
+                    augment_paths.extend(
+                        augment_midi(p, filename[:-4], new_segments, t_path)
+                    )
 
                 # move
                 os.rename(
@@ -76,13 +82,13 @@ def main(args):
     # CHATGPT UNTESTESTED
     zip_path = os.path.join("data", "datasets", f"{args.dataset_name}_segmented.zip")
     print(f"compressing to zipfile '{zip_path}'")
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(args.data_dir):
             for file in files:
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, args.data_dir)
                 zipf.write(file_path, arcname)
-    
+
     print(
         f"[green bold]segmentation complete, {len(segment_paths)} play files generated and {len(augment_paths)} train files generated"
     )
@@ -111,7 +117,12 @@ if __name__ == "__main__":
         help="strip all tempo messages from files",
     )
     parser.add_argument(
-        "--build_train",
+        "--segment",
+        action="store_true",
+        help="segment files",
+    )
+    parser.add_argument(
+        "--augment",
         action="store_true",
         default=True,
         help="augment dataset and store files",
@@ -128,12 +139,8 @@ if __name__ == "__main__":
         default=False,
         help="upload files to redis",
     )
-    parser.add_argument(
-        "-s",
-        action="store_true",
-        default=True,
-        help="segment files",
-    )
     args = parser.parse_args()
+
+    pprint(args)
 
     main(args)
