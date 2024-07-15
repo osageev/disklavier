@@ -1,7 +1,6 @@
 from pynput import keyboard
 from threading import Event
 from queue import Queue
-import time
 
 from utils import console
 

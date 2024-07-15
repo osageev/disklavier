@@ -62,177 +62,10 @@ class Seeker:
         self.params.seed = 1 if self.params.seed is None else self.params.seed
         self.rng = np.random.default_rng(self.params.seed)
 
-        self.load_transformation_table(os.path.join("data", "datasets", "careful_transpositions.parquet"))
+        # TODO: fix this, make it programatical
+        # self.load_transformation_table(os.path.join("data", "datasets", "careful_transpositions.parquet"))
 
         console.log(f"{self.p} initialized to use metric '{self.params.property}'")
-
-    def build_properties(self) -> None:
-        dict_file = os.path.join(
-            self.output_dir,
-            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}.json",
-        )
-
-        if os.path.exists(dict_file) and not self.force_rebuild:
-            console.log(f"{self.p} found existing properties file '{dict_file}'")
-            with console.status("loading properties file..."):
-                with open(dict_file, "r") as f:
-                    self.properties = json.load(f)
-                console.log(
-                    f"{self.p} loaded properties for {len(list(self.properties.keys()))} files"
-                )
-        else:
-            console.log(f"{self.p} calculating properties from '{self.input_dir}'")
-            for file in track(
-                os.listdir(self.input_dir),
-                description=f"{self.p} calculating properties",
-            ):
-                if file.endswith(".mid") or file.endswith(".midi"):
-                    file_path = os.path.join(self.input_dir, file)
-                    midi = pretty_midi.PrettyMIDI(file_path)
-                    properties = metrics.all_properties(file_path, file, self.params)
-                    self.properties[file] = {
-                        "filename": file,
-                        "properties": properties,
-                        "played": 0,
-                    }
-            console.log(
-                f"{self.p} calculated properties for {len(list(self.properties.keys()))} files"
-            )
-
-            with open(dict_file, "w") as f:
-                json.dump(self.properties, f)
-
-            if os.path.isfile(dict_file):
-                console.log(f"{self.p} succesfully saved properties file '{dict_file}'")
-            else:
-                console.log(f"{self.p} error saving properties file '{dict_file}'")
-                raise FileNotFoundError
-
-        self.reset_plays()
-
-    def build_similarity_table(self) -> None:
-        """"""
-        sim_file = f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}-{self.params.property}.parquet"
-        console.log(f"{self.p} looking for similarity file '{sim_file}'")
-        parquet = os.path.join(self.output_dir, sim_file)
-        self.load_similarities(parquet)
-
-        if self.sim_table is not None:
-            console.log(f"{self.p} loaded existing similarity file from '{parquet}'")
-            console.log(f"{self.p} {self.sim_table.head()}")
-        else:
-            vectors = [
-                {
-                    "name": filename,
-                    "metric": details["properties"][self.params.property],
-                }
-                for filename, details in self.properties.items()
-            ]
-
-            names = [v["name"] for v in vectors]
-            vecs = [v["metric"] for v in vectors]
-
-            console.log(f"{self.p} building similarity table for {len(vecs)} vectors")
-
-            self.sim_table = pd.DataFrame(index=names, columns=names, dtype="float64")
-
-            # compute cosine similarity for each pair of vectors
-            with Progress() as progress:
-                sims_task = progress.add_task(
-                    f"{self.p} calculating sims", total=len(vecs) ** 2
-                )
-                for i in range(len(vecs)):
-                    for j in range(len(vecs)):
-                        if i != j:
-                            self.sim_table.iloc[i, j] = 1 - cosine(vecs[i], vecs[j])  # type: ignore
-                        else:
-                            self.sim_table.iloc[i, j] = 1
-                        progress.update(sims_task, advance=1)
-
-            console.log(
-                f"{self.p} Generated a similarity table of shape {self.sim_table.shape}"
-            )
-
-            self.sim_table.to_parquet(parquet, index=False)
-
-            if os.path.isfile(parquet):
-                console.log(f"{self.p} succesfully saved similarities file '{parquet}'")
-            else:
-                console.log(f"{self.p} error saving similarities file '{parquet}'")
-                raise FileNotFoundError
-       
-    def build_neighbor_table(self, vision: int = 2) -> None:
-        """ """
-        parquet = os.path.join(
-            self.output_dir,
-            f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}-n.parquet",
-        )
-
-        if os.path.isfile(parquet):
-            self.neighbor_table = pd.read_parquet(parquet)
-            console.log(f"{self.p} building neighbor table from '{parquet}'")
-
-            return
-
-        names = list(self.properties.keys())
-        names.sort()
-
-        console.log(f"{self.p} building nieghbor table for {len(names)} segments")
-
-        labels = [
-            "loop  ",
-            "prev 1",
-            "next 1",
-            "prev 2",
-            "next 2",
-        ]
-        self.neighbor_table = pd.DataFrame(
-            index=names,
-            columns=labels,
-        )
-
-        progress = Progress(
-            SpinnerColumn(),
-            *Progress.get_default_columns(),
-            TimeElapsedColumn(),
-            MofNCompleteColumn(),
-            refresh_per_second=1,
-        )
-        sims_task = progress.add_task("finding neighbors", total=len(names))
-        with progress:
-            for name in self.neighbor_table.index:
-                i = int(self.neighbor_table.index.get_loc(name))  # type: ignore
-                i_name, i_seg_num = name.split("_")
-                i_seg_start, i_seg_end = i_seg_num.split("-")
-                i_seg_end = i_seg_end.split(".")[0]
-
-                # get prev file(s)
-                prv2_file = None
-                prev_file = self.get_prev(name)
-                if prev_file:
-                    if int(i_seg_start) != 0:
-                        prv2_file = self.get_prev(prev_file)
-
-                # get next file(s)
-                nxt2_file = None
-                next_file = self.get_next(name)
-                if next_file:
-                    nxt2_file = self.get_next(next_file)
-
-                names = [name, prev_file, next_file, prv2_file, nxt2_file]
-
-                for j, k in zip(range(5), names):
-                    self.neighbor_table.iat[i, j] = k
-
-                progress.update(sims_task, advance=1)
-
-
-        self.neighbor_table.to_parquet(parquet, index=True)
-        if os.path.isfile(parquet):
-            console.log(f"{self.p} succesfully saved neighbors file '{parquet}'")
-        else:
-            console.log(f"{self.p} error saving neighbors file '{parquet}'")
-            raise FileNotFoundError
 
     def get_most_similar_file(
         self, filename: str, different_parent=True, bump_trans=False
@@ -278,39 +111,6 @@ class Seeker:
                     "trans": 0,
                 },
             }
-
-        # for next_filename, val in sorted_row.items():
-        #     next_track, _ = next_filename.split("_")
-
-        #     if different_parent and next_track == parent_track or not different_parent and next_filename == filename:
-        #         # segment is from same parent track                                         segment is the same
-        #         continue
-
-        #     value = val
-            # value["filename"] = next_filename
-
-        # next_largest = self.sim_table[filename].nlargest(n)
-        # console.log(f"{self.p} checking index {next_largest}")
-        # next_filename: str = next_largest.index[-1] # type: ignore
-        # next_track, _ = next_filename.split("_")
-        # # TODO: refactor logic?
-        # if different_parent:
-        #     while next_track == parent_track:
-        #         n += 1
-        #         value = next_largest.iloc[-1]
-        #         next_largest = self.sim_table[filename].nlargest(n)
-        #         console.log(f"{self.p} checking index {next_largest}")
-        #         next_filename: str = next_largest.index[-1] # type: ignore
-        #         next_track, _ = next_filename.split("_")
-        #         value["filename"] = next_filename
-        # else:
-        #     while next_filename == filename:
-        #         n += 1
-        #         value = next_largest.iloc[-1]
-        #         next_largest = self.sim_table[filename].nlargest(n)
-        #         next_filename: str = next_largest.index[-1] # type: ignore
-        #         next_track, _ = next_filename.split("_")
-        #         value["filename"] = next_filename
 
         console.log(
             f"{self.p} found '{value['filename']}' with similarity {value["sim"]:.03f}", value
@@ -373,7 +173,6 @@ class Seeker:
     def get_random(self) -> str:
         return os.path.join(self.input_dir, self.rng.choice(os.listdir(self.input_dir)))
 
-   
 
 ###############################################################################
 #############################      GRAVEYARD     ##############################
@@ -835,3 +634,173 @@ class Seeker:
 #             most_similar_i = i
 
 #     return row.index[most_similar_i - 1]
+
+# def build_similarity_table(self) -> None:
+#     """"""
+#     sim_file = f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}-{self.params.property}.parquet"
+#     console.log(f"{self.p} looking for similarity file '{sim_file}'")
+#     parquet = os.path.join(self.output_dir, sim_file)
+#     self.load_similarities(parquet)
+
+#     if self.sim_table is not None:
+#         console.log(f"{self.p} loaded existing similarity file from '{parquet}'")
+#         console.log(f"{self.p} {self.sim_table.head()}")
+#     else:
+#         vectors = [
+#             {
+#                 "name": filename,
+#                 "metric": details["properties"][self.params.property],
+#             }
+#             for filename, details in self.properties.items()
+#         ]
+
+#         names = [v["name"] for v in vectors]
+#         vecs = [v["metric"] for v in vectors]
+
+#         console.log(f"{self.p} building similarity table for {len(vecs)} vectors")
+
+#         self.sim_table = pd.DataFrame(index=names, columns=names, dtype="float64")
+
+#         # compute cosine similarity for each pair of vectors
+#         with Progress() as progress:
+#             sims_task = progress.add_task(
+#                 f"{self.p} calculating sims", total=len(vecs) ** 2
+#             )
+#             for i in range(len(vecs)):
+#                 for j in range(len(vecs)):
+#                     if i != j:
+#                         self.sim_table.iloc[i, j] = 1 - cosine(vecs[i], vecs[j])  # type: ignore
+#                     else:
+#                         self.sim_table.iloc[i, j] = 1
+#                     progress.update(sims_task, advance=1)
+
+#         console.log(
+#             f"{self.p} Generated a similarity table of shape {self.sim_table.shape}"
+#         )
+
+#         self.sim_table.to_parquet(parquet, index=False)
+
+#         if os.path.isfile(parquet):
+#             console.log(f"{self.p} succesfully saved similarities file '{parquet}'")
+#         else:
+#             console.log(f"{self.p} error saving similarities file '{parquet}'")
+#             raise FileNotFoundError
+    
+# def build_neighbor_table(self, vision: int = 2) -> None:
+#     """ """
+#     parquet = os.path.join(
+#         self.output_dir,
+#         f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}-n.parquet",
+#     )
+
+#     if os.path.isfile(parquet):
+#         self.neighbor_table = pd.read_parquet(parquet)
+#         console.log(f"{self.p} building neighbor table from '{parquet}'")
+
+#         return
+
+#     names = list(self.properties.keys())
+#     names.sort()
+
+#     console.log(f"{self.p} building nieghbor table for {len(names)} segments")
+
+#     labels = [
+#         "loop  ",
+#         "prev 1",
+#         "next 1",
+#         "prev 2",
+#         "next 2",
+#     ]
+#     self.neighbor_table = pd.DataFrame(
+#         index=names,
+#         columns=labels,
+#     )
+
+#     progress = Progress(
+#         SpinnerColumn(),
+#         *Progress.get_default_columns(),
+#         TimeElapsedColumn(),
+#         MofNCompleteColumn(),
+#         refresh_per_second=1,
+#     )
+#     sims_task = progress.add_task("finding neighbors", total=len(names))
+#     with progress:
+#         for name in self.neighbor_table.index:
+#             i = int(self.neighbor_table.index.get_loc(name))  # type: ignore
+#             i_name, i_seg_num = name.split("_")
+#             i_seg_start, i_seg_end = i_seg_num.split("-")
+#             i_seg_end = i_seg_end.split(".")[0]
+
+#             # get prev file(s)
+#             prv2_file = None
+#             prev_file = self.get_prev(name)
+#             if prev_file:
+#                 if int(i_seg_start) != 0:
+#                     prv2_file = self.get_prev(prev_file)
+
+#             # get next file(s)
+#             nxt2_file = None
+#             next_file = self.get_next(name)
+#             if next_file:
+#                 nxt2_file = self.get_next(next_file)
+
+#             names = [name, prev_file, next_file, prv2_file, nxt2_file]
+
+#             for j, k in zip(range(5), names):
+#                 self.neighbor_table.iat[i, j] = k
+
+#             progress.update(sims_task, advance=1)
+
+
+#     self.neighbor_table.to_parquet(parquet, index=True)
+#     if os.path.isfile(parquet):
+#         console.log(f"{self.p} succesfully saved neighbors file '{parquet}'")
+#     else:
+#         console.log(f"{self.p} error saving neighbors file '{parquet}'")
+#         raise FileNotFoundError
+
+
+    # def build_properties(self) -> None:
+    #     dict_file = os.path.join(
+    #         self.output_dir,
+    #         f"{os.path.basename(os.path.normpath(self.input_dir)).replace(' ', '_')}.json",
+    #     )
+
+    #     if os.path.exists(dict_file) and not self.force_rebuild:
+    #         console.log(f"{self.p} found existing properties file '{dict_file}'")
+    #         with console.status("loading properties file..."):
+    #             with open(dict_file, "r") as f:
+    #                 self.properties = json.load(f)
+    #             console.log(
+    #                 f"{self.p} loaded properties for {len(list(self.properties.keys()))} files"
+    #             )
+    #     else:
+    #         console.log(f"{self.p} calculating properties from '{self.input_dir}'")
+    #         for file in track(
+    #             os.listdir(self.input_dir),
+    #             description=f"{self.p} calculating properties",
+    #         ):
+    #             if file.endswith(".mid") or file.endswith(".midi"):
+    #                 file_path = os.path.join(self.input_dir, file)
+    #                 midi = pretty_midi.PrettyMIDI(file_path)
+    #                 properties = metrics.all_properties(file_path, file, self.params)
+    #                 self.properties[file] = {
+    #                     "filename": file,
+    #                     "properties": properties,
+    #                     "played": 0,
+    #                 }
+    #         console.log(
+    #             f"{self.p} calculated properties for {len(list(self.properties.keys()))} files"
+    #         )
+
+    #         with open(dict_file, "w") as f:
+    #             json.dump(self.properties, f)
+
+    #         if os.path.isfile(dict_file):
+    #             console.log(f"{self.p} succesfully saved properties file '{dict_file}'")
+    #         else:
+    #             console.log(f"{self.p} error saving properties file '{dict_file}'")
+    #             raise FileNotFoundError
+
+    #     self.reset_plays()
+

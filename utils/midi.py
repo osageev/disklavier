@@ -139,24 +139,6 @@ def set_tempo(input_file_path: str, bpm: int) -> None:
     midi.save(input_file_path)
 
 
-def get_tempo(midi_file_path) -> float:
-    """"""
-    midi_file = MidiFile(midi_file_path)
-
-    # Default MIDI tempo is 120 BPM, which equals 500000 microseconds per beat
-    tempo = 500000  # Default tempo
-
-    for track in midi_file.tracks:
-        for msg in track:
-            if msg.type == "set_tempo":
-                tempo = msg.tempo
-                break
-        if tempo != 500000:
-            break
-
-    return mido.tempo2bpm(tempo)
-
-
 def get_note_min_max(input_file_path) -> Tuple[int, int]:
     """returns the values of the highest and lowest notes in a midi file"""
     mid = MidiFile(input_file_path)

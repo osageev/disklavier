@@ -9,6 +9,7 @@ ml/outputs/runs
 *.tar.gz
 *.feather
 *.parquet
+*.zip
 
 .DS_STORE
 

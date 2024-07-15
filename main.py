@@ -5,8 +5,8 @@ import time
 # import logging.config
 from datetime import datetime
 from argparse import ArgumentParser
-from omegaconf import OmegaConf
 from threading import Thread, Event, enumerate
+from omegaconf import OmegaConf
 from rich.prompt import Confirm, IntPrompt
 
 from overseer.overseer import Overseer
