@@ -26,23 +26,8 @@ from typing import Tuple, Dict
 class Seeker:
     p = "[yellow]seeker[/yellow]:"
     sim_table: pd.DataFrame
-    properties = {}
     count = 0
     transition_probability = 0. # max is 1.0
-    trans_options = [
-        "u01.mid",
-        "d01.mid",
-        "u02.mid",
-        "d02.mid",
-        "u03.mid",
-        "d03.mid",
-        "u04.mid",
-        "d04.mid",
-        "u05.mid",
-        "d05.mid",
-        "u06.mid",
-        "d06.mid",
-    ]
 
     def __init__(
         self,
@@ -50,20 +35,51 @@ class Seeker:
         input_dir: str,
         output_dir: str,
         tempo: int,
-        force_rebuild: bool = False,
+        dataset: str,
+        mode: str,
     ) -> None:
         """"""
         self.params = params
         self.input_dir = input_dir
         self.output_dir = output_dir
-        self.force_rebuild = force_rebuild
-        self.probs = self.params.probabilities / np.sum(self.params.probabilities)
         self.params.tempo = tempo
         self.params.seed = 1 if self.params.seed is None else self.params.seed
         self.rng = np.random.default_rng(self.params.seed)
+        self.mode=mode
 
-        # TODO: fix this, make it programatical
-        # self.load_transformation_table(os.path.join("data", "datasets", "careful_transpositions.parquet"))
+        # load similarity table
+        sim_table_path = os.path.join("data", "tables", f"{dataset}_sim.parquet")
+        console.log(f"{self.p} looking for similarity table '{sim_table_path}'")
+        if os.path.isfile(sim_table_path):
+            console.log(f"{self.p} loading sim table at '{sim_table_path}'")
+            with console.status("\t\t\t      loading similarities file..."):
+                self.sim_table = pd.read_parquet(sim_table_path)
+        else:
+            console.log(f"{self.p} error loading similarity table, exiting...")
+            exit()
+        
+        # load neighbor table
+        neighbor_table_path = os.path.join("data", "tables", f"{dataset}_neighbor.parquet")
+        console.log(f"{self.p} looking for neighbor table '{neighbor_table_path}'")
+        if os.path.isfile(neighbor_table_path):
+            console.log(f"{self.p} loading neighbor table at '{neighbor_table_path}'")
+            with console.status("\t\t\t      loading neighbor file..."):
+                self.neighbor_table = pd.read_parquet(neighbor_table_path)
+        else:
+            console.log(f"{self.p} error loading neighbor table, exiting...")
+            exit()
+        
+        # load transformation table
+        trans_table_path = os.path.join("data", "tables", f"{dataset}_transformations.parquet")
+        console.log(f"{self.p} looking for tranformation table '{trans_table_path}'")
+        if os.path.isfile(trans_table_path):
+            console.log(f"{self.p} loading tranformation table at '{trans_table_path}'")
+            with console.status("\t\t\t      loading tranformation file..."):
+                self.trans_table = pd.read_parquet(trans_table_path)
+        else:
+            console.log(f"{self.p} error loading tranformation table, exiting...")
+            exit()
+        console.log(f"{self.p} [green]successfully loaded tables")
 
         console.log(f"{self.p} initialized to use metric '{self.params.property}'")
 
@@ -71,10 +87,8 @@ class Seeker:
         self, filename: str, different_parent=True, bump_trans=False
     ) -> Dict:
         """"""
-        console.log(f"{self.p} finding most similar file to '{filename}'")
+        console.log(f"{self.p} finding most similar file to '{filename}' (MODE={self.mode})")
 
-        if "num_plays" not in self.properties[filename]:
-            self.properties[filename]["num_plays"] = 0
         if bump_trans:
             console.log(f"{self.p} increasing transition probability {self.transition_probability} -> {self.transition_probability + self.params.transition_increment}")
             self.transition_probability += self.params.transition_increment
@@ -82,8 +96,7 @@ class Seeker:
             if self.transition_probability > 1.:
                 self.transition_probability = 0
 
-        self.properties[filename]["num_plays"] += 1
-        parent_track, _ = filename.split("_")
+        parent_track, _, _ = filename.split("_")
 
         row = self.sim_table.loc[filename]
         sorted_row = row.sort_values(key=lambda x: x.str['sim'], ascending=False)
@@ -123,21 +136,19 @@ class Seeker:
             f"{self.p} finding most similar vector to '{recording_path}' with metric '{self.params.property}'"
         )
         recording = pretty_midi.PrettyMIDI(recording_path)
-        recording_metric = recording.get_pitch_class_histogram()
+        recording_metric = recording.get_pitch_class_histogram(True, True)
 
         most_similar_segment = ""
         highest_similarity = -1.0
         best_transformations = {}
 
-        segment_names = self.properties.keys()
-
-        transformation_table = list(range(12)) # [list(p) for p in itertools.product(list(range(12)), list(range(8)))]
-        for segment_name in track(segment_names, "calculating similarities...", refresh_per_second=1, update_period=1.0):
-            for semi in transformation_table:
+        # TODO: VECTORIZE THIS
+        for segment_name in track(self.trans_table.index.tolist(), "calculating similarities...", refresh_per_second=1, update_period=1.0):
+            for semi in list(range(12)): # [list(p) for p in itertools.product(list(range(12)), list(range(8)))]
                 beat = 0
-                similarity = float(1 - cosine(recording_metric, self.trans_table.at[segment_name, semi]))  # type: ignore
+                similarity = float(1 - cosine(recording_metric, self.trans_table.at[segment_name, f"{semi:02d}{beat:02d}"]))  # type: ignore
                 if similarity > highest_similarity:
-                    # console.log(f"{self.p} updating similarity {similarity:.03f} -> {highest_similarity:.03f}\n\t'{segment_name}' -> '{most_similar_segment}'\n\tt{semi} & s{beat}")
+                    # console.log(f"{self.p} updating similarity {highest_similarity:.03f} -> {similarity:.03f}\n\t'{segment_name}' -> '{most_similar_segment}'\tt{semi} & s{beat}")
                     highest_similarity = similarity
                     most_similar_segment = segment_name
                     best_transformations = {
@@ -154,21 +165,6 @@ class Seeker:
     def reset_plays(self) -> None:
         for k in self.properties.keys():
             self.properties[k]["played"] = 0
-
-    def load_similarities(self, parquet_path: str) -> None:
-        if os.path.isfile(parquet_path) and not self.force_rebuild:
-            console.log(f"{self.p} loading sim table at '{parquet_path}'")
-            with console.status("\t\t\t      loading similarities file..."):
-                self.sim_table = pd.read_parquet(parquet_path)
-        else:
-            self.sim_table = None  # type: ignore
-
-    def load_transformation_table(self, parquet_path: str) -> None:
-        if os.path.isfile(parquet_path) and not self.force_rebuild:
-            console.log(f"{self.p} loading trans table at '{parquet_path}'")
-            self.trans_table = pd.read_parquet(parquet_path)
-        else:
-            self.trans_table = None  # type: ignore
 
     def get_random(self) -> str:
         return os.path.join(self.input_dir, self.rng.choice(os.listdir(self.input_dir)))

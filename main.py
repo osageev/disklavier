@@ -1,8 +1,5 @@
 import os
 import time
-
-# import logging
-# import logging.config
 from datetime import datetime
 from argparse import ArgumentParser
 from threading import Thread, Event, enumerate
@@ -42,9 +39,70 @@ def check_tempo(tempo: int = 60) -> int:
             console.log(f"{p} [prompt.invalid]tempo must be between 20 and 200")
 
 
+def main(args, params):
+    # filesystem setup
+    table_dir = os.path.join("data", "tables")
+    log_dir = os.path.join(args.output_dir, "logs")
+    record_dir = os.path.join(args.output_dir, "records")
+    plot_dir = os.path.join(args.output_dir, "plots", f"{datetime.now().strftime('%y%m%d-%H%M')}")
+    playlist_dir = os.path.join(
+        "data", "playlist", f"{datetime.now().strftime("%y%m%d-%H%M")}-{params.seeker.property}"
+    )
+
+    if not os.path.exists(table_dir):
+        console.error("table dir not found, exiting...")
+        exit()
+    if not os.path.exists(args.output_dir):
+        os.mkdir(args.output_dir)
+    if not os.path.exists(log_dir):
+        console.log(f"{p} creating new logging folder: '{log_dir}'")
+        os.mkdir(log_dir)
+    if not os.path.exists(record_dir):
+        console.log(f"{p} creating new recordings folder: '{record_dir}'")
+        os.mkdir(record_dir)
+    if not os.path.exists(os.path.join(args.output_dir, "plots")):
+        os.mkdir(os.path.join(args.output_dir, "plots"))
+    if not os.path.exists(plot_dir):
+        console.log(f"{p} creating new plots folder: '{plot_dir}'")
+        os.mkdir(plot_dir)
+    if not os.path.exists(os.path.join("data", "playlist")):
+        os.mkdir(os.path.join("data", "playlist"))
+    if not os.path.exists(playlist_dir):
+        console.log(f"{p} creating new playlist folder: '{playlist_dir}'")
+        os.mkdir(playlist_dir)
+    console.log(f"{p}[green bold] filesystem set up complete")
+
+    if args.tempo:
+        # playback_tempo = check_tempo(args.tempo)
+        playback_tempo = args.tempo
+
+    if args.velocity < 0.1 or args.velocity > 2.0:
+        console.log(f"{p}[red] velocity argument is out of bounds\n{args.velocity} must be between [0.1, 2.0]")
+
+    # setup 
+    overseer = Overseer(
+        params,
+        args,
+        playlist_dir,
+        record_dir,
+        plot_dir,
+        playback_tempo,
+    )
+    console.log(f"{p} overseer setup complete")
+    # run
+    overseer.run()
+    # run complete
+    console.save_text(
+        os.path.join(log_dir, f"{datetime.now().strftime('%y-%m-%d_%H%M%S')}.log")
+    )
+    console.log(f"{p}[green bold] session complete, exiting")
+
+    console.log(f"Current threads: {enumerate()}")
+
 if __name__ == "__main__":
     # load args and params
     parser = ArgumentParser(description="Argparser description")
+    parser.add_argument("--dataset", default=None, help="name of dataset")
     parser.add_argument("--data_dir", default=None, help="location of MIDI files")
     parser.add_argument(
         "--param_file", default=None, help="path to parameter file, in .yaml"
@@ -112,63 +170,15 @@ if __name__ == "__main__":
         type=str,
         help="use provided midi file as prompt",
     )
+    parser.add_argument(
+        "-s",
+        action="store_true",
+        help="sequential playback mode. always choose next neighbor (if available)",
+    )
     args = parser.parse_args()
     params = OmegaConf.load(args.param_file)
 
     console.log(f"{p} loading with args:\n\t{args}")
     console.log(f"{p} loading with params:\n\t{params}")
 
-    # filesystem setup
-    log_dir = os.path.join(args.output_dir, "logs")
-    record_dir = os.path.join(args.output_dir, "records")
-    plot_dir = os.path.join(args.output_dir, "plots", f"{datetime.now().strftime('%y%m%d-%H%M')}")
-    playlist_dir = os.path.join(
-        "data", "playlist", f"{datetime.now().strftime("%y%m%d-%H%M")}-{params.seeker.property}"
-    )
-
-    if not os.path.exists(args.output_dir):
-        os.mkdir(args.output_dir)
-    if not os.path.exists(log_dir):
-        console.log(f"{p} creating new logging folder: '{log_dir}'")
-        os.mkdir(log_dir)
-    if not os.path.exists(record_dir):
-        console.log(f"{p} creating new recordings folder: '{record_dir}'")
-        os.mkdir(record_dir)
-    if not os.path.exists(os.path.join(args.output_dir, "plots")):
-        os.mkdir(os.path.join(args.output_dir, "plots"))
-    if not os.path.exists(plot_dir):
-        console.log(f"{p} creating new plots folder: '{plot_dir}'")
-        os.mkdir(plot_dir)
-    if not os.path.exists(os.path.join("data", "playlist")):
-        os.mkdir(os.path.join("data", "playlist"))
-    if not os.path.exists(playlist_dir):
-        console.log(f"{p} creating new playlist folder: '{playlist_dir}'")
-        os.mkdir(playlist_dir)
-    console.log(f"{p}[green bold] filesystem set up complete")
-
-    if args.tempo:
-        # playback_tempo = check_tempo(args.tempo)
-        playback_tempo = args.tempo
-
-    if args.velocity < 0.1 or args.velocity > 2.0:
-        console.log(f"{p}[red] velocity argument is out of bounds\n{args.velocity} must be between [0.1, 2.0]")
-
-    # run!
-    overseer = Overseer(
-        params,
-        args,
-        playlist_dir,
-        record_dir,
-        plot_dir,
-        playback_tempo,
-    )
-    console.log(f"{p} overseer setup complete")
-    overseer.run()
-
-    # run complete
-    console.save_text(
-        os.path.join(log_dir, f"{datetime.now().strftime('%y-%m-%d_%H%M%S')}.log")
-    )
-    console.log(f"{p}[green bold] session complete, exiting")
-
-    console.log(f"Current threads: {enumerate()}")
+    main(args, params)
