@@ -65,7 +65,7 @@ class Overseer:
 
         if len(os.listdir(self.data_dir)) < 10:
             console.log(
-                f"{self.p} [red]less than 10 files in input folder. are you sure you didnt screw something up?"
+                f"{self.p} [red]fewer than 10 files in input folder. are you sure you didnt screw something up?"
             )
 
         if args.tick:
@@ -105,12 +105,9 @@ class Overseer:
             self.data_dir,
             args.output_dir,
             tempo,
-            args.force_rebuild,
+            args.dataset,
+            "sequential" if args.s else "nearest"
         )
-        self.seeker.build_properties()
-        self.seeker.build_similarity_table()
-        self.seeker.build_neighbor_table()
-
         self.listener = Listener(
             self.params.listener,
             self.record_dir,
@@ -264,10 +261,7 @@ class Overseer:
                     self.play_e.set()
                     self.playlistR_q.put((recording_path, -1.0, {}))
                     next_file_path = os.path.join(self.data_dir, str(first_file))
-                    out_dir = os.path.join(
-                        self.playlist_dir, f"{Path(next_file_path).stem}.mid"
-                    )
-                    next_file_path = transform(next_file_path, out_dir, self.tempo, first_transformations)
+                    next_file_path = transform(next_file_path, self.playlist_dir, self.tempo, first_transformations)
                     console.log(
                         f"{self.p} queueing (ready: {self.give_player0_e.is_set()}) recording for p1: '{recording_path}'"
                     )

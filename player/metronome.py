@@ -59,7 +59,7 @@ class Metronome:
                     thread_t = Thread(
                         target=sa.WaveObject.from_wave_file(self.tick_file).play,
                         args=(),
-                        name=''
+                        name="",
                     )
                     thread_t.start()
 

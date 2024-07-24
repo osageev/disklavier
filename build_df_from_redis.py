@@ -44,7 +44,7 @@ def verify_df(row, df, p):
     print("check complete")
 
 
-def build_similarity_dataframe(all_files: List[str]):
+def build_similarity_table(all_files: List[str]):
     r = redis.Redis(host="localhost", port=6379, db=0)
     df = pd.DataFrame(index=all_files, columns=all_files)
 
@@ -86,8 +86,8 @@ def build_similarity_dataframe(all_files: List[str]):
                     print(f"ERROR@key {key}: no value")
             progress.advance(update_task)
 
-    df.to_feather(
-        os.path.join("outputs", "records", "chunks", "sim.feather")
+    df.to_parquet(
+        os.path.join("outputs", "records", "chunks", "sim.parquet")
     )
 
 if __name__ == "__main__":
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     names.sort()
 
     st = time.time()
-    build_similarity_dataframe(names)
+    build_similarity_table(names)
     et = time.time()
 
     big_df = pd.read_feather(
@@ -112,8 +112,8 @@ if __name__ == "__main__":
 
     memory_usage = big_df.memory_usage(index=True).sum()
     print(
-        f"[MAIN] Time taken to generate DataFrame: {et - st:.2f}s"
+        f"Time taken to generate DataFrame: {et - st:.2f}s"
     )
-    print(f"[MAIN] Memory usage of DataFrame: {memory_usage / (1024 * 1024):.2f} MB")
+    print(f"Memory usage of DataFrame: {memory_usage / (1024 * 1024):.2f} MB")
 
     # verify_df(r, big_df, 10)

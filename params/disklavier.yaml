@@ -33,9 +33,8 @@ seeker:
   property: "pitch_histogram"
   calc_trans: False
   calc_shift: False
-  beats_per_seg: 8
   max_sim: True
   transformations:
     - "pitch_transpose"
     - "beat_shift"
-  transition_increment: 0.25
+  transition_increment: 0.1
