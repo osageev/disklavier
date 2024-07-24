@@ -59,8 +59,8 @@ def calc_sims(rows: List[str], all_rows: List[str], metric: str, index: int):
 
                     if similarity > best_sim:
                         best_sim = np.round(similarity, 5)
-                        best_shift = f"{key}"[:2]
-                        best_trans = f"{key}"[2:]
+                        best_trans = f"{key}"[:2]
+                        best_shift = f"{key}"[2:]
 
                 value = {
                     "sim": best_sim,
@@ -129,7 +129,7 @@ def main(args):
     table_list = []
     if args.build_sim:
         parquet_path = os.path.join(
-            "outputs", "tables", f"{args.dataset_name}_sim.parquet"
+            "data", "tables", f"{args.dataset_name}_sim.parquet"
         )
         table_list.append(parquet_path)
 
@@ -148,7 +148,7 @@ def main(args):
 
     if args.build_neighbor:
         parquet_path = os.path.join(
-            "outputs", "tables", f"{args.dataset_name}_neighbor.parquet"
+            "data", "tables", f"{args.dataset_name}_neighbor.parquet"
         )
         table_list.append(parquet_path)
 
@@ -167,7 +167,7 @@ def main(args):
 
     if args.build_transformation:
         parquet_path = os.path.join(
-            "outputs", "tables", f"{args.dataset_name}_transformations.parquet"
+            "data", "tables", f"{args.dataset_name}_transformations.parquet"
         )
         table_list.append(parquet_path)
 
