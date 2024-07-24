@@ -14,7 +14,8 @@ import redis
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # from utils.metrics import blur_pr, energy, contour
-# from utils.midi import transform, get_tempo
+# from utils.midi import transform
+# from utils import get_tempo
 
 dataset_path = "data/datasets/test"
 metric = "pitch_histogram"

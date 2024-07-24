@@ -1,12 +1,10 @@
 import os
 import mido
-from mido import MidiFile, MidiTrack, Message
-import time
+from mido import MidiFile, MidiTrack
 from datetime import datetime
 from threading import Thread, Event
 
 from utils import console, tick_loop
-from utils.midi import stretch_midi_file
 
 
 class Listener:

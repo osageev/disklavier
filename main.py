@@ -113,17 +113,6 @@ if __name__ == "__main__":
         help="directory in which to store outputs (logs, recordings, etc...)",
     )
     parser.add_argument(
-        "--log_config",
-        default=None,
-        help="where the logging config file is found",
-    )
-    parser.add_argument(
-        "-f",
-        "--force_rebuild",
-        action="store_true",
-        help="whether to rebuild similarity metrics",
-    )
-    parser.add_argument(
         "-i",
         "--random_init",
         action="store_true",
@@ -157,6 +146,11 @@ if __name__ == "__main__":
         "-e",
         type=int,
         help="easy transition mode -- number of segments per transition",
+    )
+    parser.add_argument(
+        "-n",
+        type=int,
+        help="number of transitions to run for",
     )
     parser.add_argument(
         "-c",

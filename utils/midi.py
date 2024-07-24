@@ -227,8 +227,8 @@ def semitone_transpose(
 def transform(file_path: str, out_dir: str, tempo: int, transformations: Dict, num_beats: int = 8) -> str:
     new_filename = f"{Path(file_path).stem}_t{transformations["transpose"]:02d}s{transformations["shift"]:02d}.mid"
     out_path = os.path.join(out_dir, new_filename)
+    console.log(f"reading from {file_path} and writing to {out_path}")
     MidiFile(file_path).save(out_path) # in case transpose is 0
-
     if transformations["transpose"] != 0:
         t_midi = PrettyMIDI(initial_tempo=tempo)
 
@@ -326,7 +326,6 @@ def change_tempo(in_path: str, out_path: str, tempo: int):
         # remove existing set_tempo messages
         tempo_messages = []
         for j, msg in enumerate(track):
-            console.log(msg)
             if msg.type == "set_tempo":
                 tempo_messages.append(j)
 
