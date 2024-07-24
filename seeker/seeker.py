@@ -87,9 +87,8 @@ class Seeker:
             if self.transition_probability > 1.:
                 self.transition_probability = 0
 
-        console.log(f"{self.p} splitting '{prev_filename}'")
-        parent_track, _, _ = prev_filename.split("_")
         [filename, transformations] = extract_transformations(prev_filename)
+        parent_track, _ = filename.split("_")
         console.log(f"{self.p} extracted '{prev_filename}' -> '{filename}' and {transformations}")
 
         change_track = self.rng.choice([True, False], p=[self.transition_probability, 1 - self.transition_probability])
@@ -102,7 +101,7 @@ class Seeker:
             for next_filename, val in sorted_row.items():
                 next_track, _ = next_filename.split("_")
                 if next_track == parent_track or next_filename == filename:
-                    # console.log(f"{self.p} skipping invalid match\n\t'{next_track}' == '{parent_track}' or\n\t'{next_filename}' == '{filename}'")
+                    console.log(f"{self.p} skipping invalid match\n\t'{next_track}' == '{parent_track}' or\n\t'{next_filename}' == '{filename}'")
                     continue
                 if next_track != parent_track and next_filename != filename:
                     value = val
@@ -118,10 +117,11 @@ class Seeker:
                 num_tries += 1
 
             # if we couldn't find one, get most similar file
-            if neighbor == None:
+            if neighbor == None or neighbor == filename:
                 for next_filename, val in sorted_row.items():
                     next_track, _ = next_filename.split("_")
                     if next_track == parent_track or next_filename == filename:
+                        console.log(f"{self.p} skipping invalid match\n\t'{next_track}' == '{parent_track}' or\n\t'{next_filename}' == '{filename}'")
                         continue
                     if next_track != parent_track and next_filename != filename:
                         value = val
