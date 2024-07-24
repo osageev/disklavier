@@ -1,10 +1,10 @@
 import os
-from pretty_midi import PrettyMIDI, Instrument, Note
+from pathlib import Path
 import mido
 from mido import MidiFile, MetaMessage
-import numpy as np
-from pathlib import Path
+from pretty_midi import PrettyMIDI, Instrument, Note
 import cv2
+import numpy as np
 from scipy.signal import convolve2d
 
 from utils import console
@@ -281,13 +281,9 @@ def transform(file_path: str, out_dir: str, tempo: int, transformations: Dict, n
 
         s_midi.write(out_path)
 
-    change_tempo(out_path, tempo)
+    change_tempo(out_path, out_path, tempo)
 
     return out_path
-
-
-def get_tempo(filename: str) -> int:
-    return int(filename.split('-')[1])
 
 
 def split_filename(filename: str, split_track=False) -> List[str]:
@@ -320,17 +316,22 @@ def insert_transformations(filename: str, transformations: List[int]=[0,0]) -> s
     return f"{filename[:-4]}_t{transformations[0]:02d}s{transformations[1]:02d}{filename[-4:]}"
 
 
-def change_tempo(file_path: str, tempo: int):
-    midi = mido.MidiFile(file_path)
+def change_tempo(in_path: str, out_path: str, tempo: int):
+    midi = mido.MidiFile(in_path)
     new_tempo = mido.bpm2tempo(tempo)
     new_message = mido.MetaMessage("set_tempo", tempo=new_tempo, time=0)
     tempo_added = False
 
-    for track in midi.tracks:
+    for i, track in enumerate(midi.tracks):
         # remove existing set_tempo messages
-        for msg in track:
+        tempo_messages = []
+        for j, msg in enumerate(track):
+            console.log(msg)
             if msg.type == "set_tempo":
-                track.remove(msg)
+                tempo_messages.append(j)
+
+        for index in tempo_messages:
+            midi.tracks[i][index] = new_message
 
         # add new set_tempo message to the first track
         if not tempo_added:
@@ -343,7 +344,7 @@ def change_tempo(file_path: str, tempo: int):
         new_track.append(new_message)
         midi.tracks.append(new_track)
 
-    midi.save(file_path)
+    midi.save(out_path)
 
 
 def get_velocities(midi_data: PrettyMIDI) -> List:
