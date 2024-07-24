@@ -1,5 +1,3 @@
-import os
-import json
 import redis
 import hashlib
 import numpy as np
@@ -50,7 +48,7 @@ class Comparison:
 
 def get_track_id(track_name: str) -> str:
     """Generate a unique ID for a track name."""
-    # return hashlib.md5(track_name.encode()).hexdigest()
+    # return hashlib.md5(track_name.encode()).hexdigest()[:5]
     return track_name
 
 
@@ -68,7 +66,6 @@ def store_vector(
     # generate key parts
     basename, transpose, shift = split_filename(filename)
     track_id = get_track_id(basename)
-    # track_id = basename
 
     all_ids = redis_client.json().get("track_ids")
 
@@ -106,6 +103,7 @@ def load_vector(
     vector_bytes = redis_client.hget(f"file:{track_id}:{metric}", f"{transpose}{shift}")
 
     if vector_bytes is None:
+        print(f"WARNING: couldn't get vector for key 'file:{track_id}:{metric}'")
         return None
 
     # convert bytes back to vector
@@ -143,6 +141,7 @@ def load_vectors(
         vector_dict = redis_client.hmget(f"file:{track_id}:{metric}", fields)
 
     if vector_dict is None:
+        print(f"WARNING: couldn't get vector for key 'file:{track_id}:{metric}'")
         return None
 
     # convert bytes back to vector
@@ -270,7 +269,7 @@ def build_transformation_table(
     all_files: List[str], output_path: str, metric: str = "pitch_histogram"
 ) -> None:
     r = redis.Redis(host="localhost", port=6379, db=0)
-    column_names = [f"{t:02d}{s:02d}" for t, s in product(range(12), range(8))]
+    column_names = [f"{t:03d}{s:02d}" for t, s in product(range(12), range(8))]
     t_table = pd.DataFrame(index=all_files, columns=column_names)
 
     progress = Progress(
