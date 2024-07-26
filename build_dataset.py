@@ -41,11 +41,25 @@ if __name__ == "__main__":
         help="generate a segment for a number of semitone shifts",
     )
     parser.add_argument(
+        "-a",
+        "--augment",
+        action="store_true",
+        default=True,
+        help="augment dataset and store files",
+    )
+    parser.add_argument(
         "-l",
         "--limit",
         type=int,
         default=None,
         help="stop after a certain number of files",
+    )
+    parser.add_argument(
+        "-r",
+        "--redis",
+        action="store_true",
+        default=False,
+        help="upload files to redis",
     )
     args = parser.parse_args()
     pprint(args)
