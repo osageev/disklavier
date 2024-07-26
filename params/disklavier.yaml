@@ -1,6 +1,6 @@
 in_port: 'Disklavier'
 out_port: 'Disklavier'
-augment_recording: False
+augment_recording: True
 listener:
   record: 67
   reset: 66
@@ -20,7 +20,7 @@ player2:
   is_recording: False
   do_tick: False
 metronome:
-  beats_per_seg: 8
+  beats_per_seg: 9
   tick_file: "data/m_kick.wav"
   do_tick: True
 seeker:
@@ -33,20 +33,8 @@ seeker:
   property: "pitch_histogram"
   calc_trans: False
   calc_shift: False
-  probabilities:
-    - 0.15 # similar segment from another track
-    - 0.15 # prev segment in same track
-    - 0.15 # next segment in same track
-    - 0.15 # 2nd next segment in same track
-    - 0.15 # 2nd prev segment in same track
-    - 0.05 # similar segment from another track
-    - 0.05
-    - 0.05
-    - 0.05
-    - 0.05
-  beats_per_seg: 8
   max_sim: True
   transformations:
     - "pitch_transpose"
     - "beat_shift"
-  transition_increment: 0.25
+  transition_increment: 0.1

@@ -1,3 +1,4 @@
+import re
 import time
 import numpy as np
 import simpleaudio as sa
@@ -48,3 +49,41 @@ def shift_array(arr, up=0, down=0):
         arr = np.roll(arr, down, axis=0)
         arr[:down] = 0
     return arr
+
+
+def get_tempo(filename: str) -> int:
+    return int(filename.split('-')[1])
+
+def extract_transformations(filename: str):
+    """CHATGPT UNTESTESTED
+    Parses the filename, strips out the transformation section, and returns the modified filename
+    and the transformations as a dictionary.
+
+    Args:
+        filename (str): The input filename with the transformation section.
+
+    Returns:
+        list: A list containing the modified filename and the transformations dictionary.
+    """
+    # regex pattern to match the transformation section
+    pattern = r'_(t\d+s\d+)\.mid$'
+    
+    # search for the transformation section in the filename
+    match = re.search(pattern, filename)
+    if not match:
+        raise ValueError("Filename format is incorrect or does not contain transformations.")
+
+    # extract the transformation section
+    transformation_str = match.group(1)
+
+    # parse the transformation values
+    transpose = int(transformation_str[1:3])
+    shift = int(transformation_str[4:6])
+
+    # create the transformations dictionary
+    transformations = {'transpose': transpose, 'shift': shift}
+
+    # create the modified filename
+    modified_filename = filename.replace(f'_{transformation_str}', '')
+
+    return [modified_filename, transformations]

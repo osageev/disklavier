@@ -91,14 +91,16 @@ class Player:
 
             # play file
             last_beat = time.time()
+            printed_speed = False
             for msg in midi.play(meta_messages=True):
                 if not msg.is_meta:
                     if msg.type == "note_on":  # type: ignore
                         self.notes.put_nowait(msg)
                     outport.send(msg)
                 else:
-                    if msg.type == "set_tempo":  # type: ignore
-                        console.log(f"{self.p} playing at {mido.tempo2bpm(msg.tempo):.01f} BPM\t{msg}")  # type: ignore
+                    if msg.type == "set_tempo" and not printed_speed:  # type: ignore
+                        console.log(f"{self.p} playing at {mido.tempo2bpm(msg.tempo):.01f} BPM")  # type: ignore
+                        printed_speed = True
                     if msg.type == "text" and self.params.do_tick:  # type: ignore
                         beat = time.time()
                         console.log(f"{self.p} {msg.text} [grey50]({beat - last_beat:.05f}s)")  # type: ignore

@@ -1,31 +1,114 @@
 import os
+from shutil import copy2
+import zipfile
 from datetime import datetime
 from argparse import ArgumentParser
 
 from rich import print
 from rich.pretty import pprint
-from rich.progress import track
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TimeElapsedColumn,
+    MofNCompleteColumn,
+)
 
-from dataset.dataset import segment_midi
+from dataset.dataset import augment_midi, segment_midi
+
+
+def main(args):
+    # set up filesystem
+    if not os.path.exists(args.data_dir):
+        print(f"no data dir found at {args.data_dir}")
+        raise IsADirectoryError
+
+    p_path = os.path.join(args.data_dir, "play")
+    t_path = os.path.join(args.data_dir, "train")
+    u_path = os.path.join(args.data_dir, "unsegmented")
+
+    for dir in [p_path, t_path, u_path]:
+        if not os.path.exists(dir):
+            os.mkdir(dir)
+            print(f"created new folder: '{dir}'")
+
+    if args.limit is None:
+        tracks = os.listdir(args.data_dir)
+    else:
+        tracks = os.listdir(args.data_dir)[: args.limit]
+
+    p = Progress(
+        SpinnerColumn(),
+        *Progress.get_default_columns(),
+        TimeElapsedColumn(),
+        MofNCompleteColumn(),
+        refresh_per_second=1,
+    )
+    task_s = p.add_task("segmenting", total=len(tracks))
+
+    # segment files
+    segment_paths = []
+    augment_paths = []
+    with p:
+        for filename in tracks:
+            if filename.endswith(".mid"):
+                if args.segment:
+                    # segment
+                    new_segments = segment_midi(
+                        os.path.join(args.data_dir, filename),
+                        p_path,
+                    )
+                    segment_paths.extend(new_segments)
+                else:
+                    copy2(
+                        os.path.join(args.data_dir, filename),
+                        os.path.join(p_path, filename),
+                    )
+                    new_segments = [os.path.join(args.data_dir, filename)]
+
+                # augment
+                if args.augment:
+                    augment_paths.extend(
+                        augment_midi(p, filename[:-4], new_segments, t_path)
+                    )
+
+                # move
+                os.rename(
+                    os.path.join(args.data_dir, filename),
+                    os.path.join(u_path, filename),
+                )
+
+                p.update(task_s, advance=1)
+
+    # CHATGPT UNTESTESTED
+    zip_path = os.path.join("data", "datasets", f"{args.dataset_name}_segmented.zip")
+    print(f"compressing to zipfile '{zip_path}'")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(args.data_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, args.data_dir)
+                zipf.write(file_path, arcname)
+
+    print(
+        f"[green bold]segmentation complete, {len(segment_paths)} play files generated and {len(augment_paths)} train files generated"
+    )
+
 
 if __name__ == "__main__":
     # load args
     parser = ArgumentParser(description="Argparser description")
     parser.add_argument("--data_dir", default=None, help="location of MIDI files")
+    parser.add_argument("--dataset_name", default=None, help="name of dataset")
     parser.add_argument(
-        "--output_dir", default=None, help="location to write segments to"
-    )
-    parser.add_argument(
-        "-m",
         "--store_metrics",
         default=f"metrics-{datetime.now().strftime('%y%m%d-%H%M%S')}.json",
         help="file to write segment metrics to (must be JSON)",
     )
     parser.add_argument(
-        "-n" "--num_beats",
+        "--num_beats",
         type=int,
         default=8,
-        help="number of beats each segment should have",
+        help="number of beats each segment should have, not including the leading and trailing sections of each segment",
     )
     parser.add_argument(
         "-t",
@@ -48,7 +131,6 @@ if __name__ == "__main__":
         help="augment dataset and store files",
     )
     parser.add_argument(
-        "-l",
         "--limit",
         type=int,
         default=None,
@@ -62,43 +144,7 @@ if __name__ == "__main__":
         help="upload files to redis",
     )
     args = parser.parse_args()
+
     pprint(args)
 
-    # set up filesystem
-    if not os.path.exists(args.data_dir):
-        print(f"no data dir found at {args.data_dir}")
-        exit()
-    if os.path.exists(args.output_dir):
-        i = 0
-        for i, file in enumerate(os.listdir(args.output_dir)):
-            os.remove(os.path.join(args.output_dir, file))
-            i += 1
-        print(f"cleaned {i} files out of output folder: '{args.output_dir}'")
-    else:
-        print(f"creating new output folder: '{args.output_dir}'")
-        os.mkdir(args.output_dir)
-
-    graveyard = os.path.join("data", "outputs", "graveyard")
-    if os.path.exists(graveyard):
-        i = 0
-        for i, file in enumerate(os.listdir(graveyard)):
-            os.remove(os.path.join(graveyard, file))
-            i += 1
-        print(f"cleaned {i} files out of graveyard: '{graveyard}'")
-    else:
-        print(f"creating new graveyard: '{graveyard}'")
-        os.mkdir(graveyard)
-
-    if args.limit is None:
-        dataset = os.listdir(args.data_dir)
-    else:
-        dataset = os.listdir(args.data_dir)[: args.limit]
-
-    # segment files
-    num_files = 0
-    for filename in track(dataset, description="generating segments"):
-        if filename.endswith(".mid") or filename.endswith(".midi"):
-            num_files += segment_midi(os.path.join(args.data_dir, filename), args)
-
-    total_segs = len(os.listdir(args.output_dir))
-    print(f"[green]segmentation complete, {num_files} files generated")
+    main(args)

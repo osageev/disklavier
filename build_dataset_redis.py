@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import json
 import numpy as np
+from itertools import product
 from rich.progress import (
     Progress,
     SpinnerColumn,
@@ -12,11 +13,12 @@ import pretty_midi
 import redis
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from utils.metrics import blur_pr, energy, contour
+# from utils.metrics import blur_pr, energy, contour
+# from utils.midi import transform
+# from utils import get_tempo
 
-dataset_path = "data/datasets/careful"
-properties_path = "data/outputs/careful.json"
-metric = "pitch_histogram_wd"
+dataset_path = "data/datasets/test"
+metric = "pitch_histogram"
 
 num_beats = 8
 num_transpositions = 12
@@ -27,7 +29,6 @@ def update_best_matches(
 ):
     """
     Update the pitch histogram in the Redis database based on the given criteria.
-    TODO: better variable names
 
     Args:
         redis_client: Redis client object.
@@ -38,30 +39,23 @@ def update_best_matches(
         metric (str): The metric to update.
     """
 
-    def extract_track_name(filename: str):
-        return filename.split("_")[0]
-
-    def format_entry(filename, sim):
-        return f"{filename}@{sim}"
-
     # get the current list from Redis
-    # TODO: handle this nested list better
     best_matches = redis_client.json().get(key, f"$.{metric}")
     if best_matches is None or len(best_matches) < 1:
         track_names = set()
     else:
         best_matches = best_matches[0]
         track_names = set(
-            extract_track_name(entry.split("@")[0]) for entry in best_matches
+            entry.split("@")[0].split("_")[0] for entry in best_matches
         )
 
     # check if the new track_name is already in the set or matches track_name_row
-    new_track_name = extract_track_name(file_bm)
+    new_track_name = file_bm.split("_")[0]
     if new_track_name in track_names or new_track_name == track_name_row:
         return  # dont update list
 
     # add the new entry
-    best_matches.append(format_entry(file_bm, sim_bm))
+    best_matches.append(f"{file_bm}@{sim_bm}")
 
     # sort by similarity in descending order
     best_matches.sort(key=lambda x: float(x.split("@")[1]), reverse=True)
@@ -153,69 +147,13 @@ def calc_sims(
     return index
 
 
-def transpose_and_shift_midi(
-    midi_path: str, semitones: int, beats: int, total_beats=8
-) -> pretty_midi.PrettyMIDI:
-    """
-    Transpose and shift a MIDI file by a specified number of semitones and beats.
-
-    Args:
-        midi_path (str): The path to the MIDI file.
-        semitones (int): Number of semitones to transpose the MIDI file.
-        beats (int): Number of beats to shift the MIDI events.
-        total_beats (int): number of beats in the file (default 8)
-
-    Returns:
-        pretty_midi.PrettyMIDI: The modified MIDI file.
-    """
-    midi_data = pretty_midi.PrettyMIDI(midi_path)
-    tempo = int(Path(midi_path).stem.split("-")[1])
-    beats_per_second = tempo / 60.0
-    shift_seconds = 1 / beats_per_second
-    s_t_midi = pretty_midi.PrettyMIDI()
-
-    # shift
-    for instrument in midi_data.instruments:
-        new_inst = pretty_midi.Instrument(
-            program=instrument.program, is_drum=instrument.is_drum
-        )
-        for note in instrument.notes:
-            # shift the start and end times of each note
-            shifted_start = (note.start + shift_seconds * beats) % (
-                total_beats / beats_per_second
-            )
-            shifted_end = (note.end + shift_seconds * beats) % (
-                total_beats / beats_per_second
-            )
-            if shifted_end < shifted_start:  # handle wrapping around the cycle
-                shifted_end += beats / beats_per_second
-            s_t_note = pretty_midi.Note(
-                velocity=note.velocity,
-                pitch=note.pitch + semitones,  # transpose
-                start=shifted_start,
-                end=shifted_end,
-            )
-            new_inst.notes.append(s_t_note)
-        s_t_midi.instruments.append(new_inst)
-
-    return s_t_midi
-
-
 def main():
-    properties = {}
-    with open(properties_path, "r") as f:
-        properties = json.load(f)
-
-    names = list(properties.keys())
+    names = os.listdir(dataset_path)
     names.sort()
 
     num_processes = os.cpu_count()
     split_keys = np.array_split(names, num_processes)  # type: ignore
-
-    mod_table = list(range(12))  # []
-    # for s in range(8):
-    #     for t in range(12):
-    #         mod_table.append([s, t])
+    mod_table = list(product(range(num_transpositions), range(num_beats)))
 
     r = redis.Redis(host="localhost", port=6379, db=0)
 
@@ -227,24 +165,25 @@ def main():
         MofNCompleteColumn(),
         refresh_per_second=1,
     )
-    pitch_histogram_task = progress.add_task(
-        f"uploading '{metric}'", total=(len(names) * 12)
-    )
+    pitch_histogram_task = progress.add_task(f"uploading '{metric}'", total=len(names))
     with progress:
         for file in names:
             r.json().set(f"file:{file}", "$", {f"{metric}": []}, nx=True)
-            for t in mod_table:
-                s = 0  # NOTE: fix before switching to other metrics
-                pch = transpose_and_shift_midi(
-                    os.path.join(dataset_path, file), t, s
-                ).get_pitch_class_histogram(use_duration=True)
+            # for t, s in mod_table:
+            #     transformed_path = transform(os.path.join(dataset_path, file), "outputs/tmp", get_tempo(file), {"transpose": t, "shift": s})
+            file_path = os.path.join(dataset_path, file)
+            transpose = file.split('_')[-1][:-4][:3]
+            shift = file.split('_')[-1][:-4][3:]
+            pch = pretty_midi.PrettyMIDI(file_path).get_pitch_class_histogram(
+                use_duration=True
+            )
 
-                r.set(
-                    f"{metric}:{file}:{s}-{t}",
-                    ",".join(map(str, pch)),
-                    nx=True,
-                )
-                progress.advance(pitch_histogram_task)
+            r.set(
+                f"{metric}:{file[:-11]}:{transpose}-{shift}",
+                ",".join(map(str, pch)),
+                nx=True,
+            )
+            progress.advance(pitch_histogram_task)
 
     # calculate similarities
     with ProcessPoolExecutor() as executor:
