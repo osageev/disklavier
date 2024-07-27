@@ -17,6 +17,7 @@ class Seeker:
     count = 0
     transition_probability = 0. # max is 1.0
     transformation = {"transpose": 0, "shift": 0}
+    played_files = []
 
     def __init__(
         self,
@@ -66,7 +67,7 @@ class Seeker:
             console.log(f"{self.p} loading tranformation table at '{trans_table_path}'")
             with console.status("\t\t\t      loading tranformation file..."):
                 self.trans_table = pd.read_parquet(trans_table_path)
-            console.log(f"{self.p} loaded {len(self.trans_table)}*{len(self.trans_table.columns)} trans table")
+            console.log(f"{self.p} loaded {len(self.trans_table)}*{len(self.trans_table.columns)} transformation table")
         else:
             console.log(f"{self.p} error loading tranformation table, exiting...")
             exit()
@@ -89,18 +90,16 @@ class Seeker:
 
         [filename, transformations] = extract_transformations(prev_filename)
         parent_track, _ = filename.split("_")
-        console.log(f"{self.p} extracted '{prev_filename}' -> '{filename}' and {transformations}")
+        # console.log(f"{self.p} extracted '{prev_filename}' -> '{filename}' and {transformations}")
 
         change_track = self.rng.choice([True, False], p=[self.transition_probability, 1 - self.transition_probability])
-        console.log(f"{self.p} rolled {change_track} w/tprob {self.transition_probability}")
+        console.log(f"{self.p} rolled change track = {change_track} w/transition prob. {self.transition_probability:.02f}")
         sorted_row = self.sim_table.loc[filename].sort_values(key=lambda x: x.str['sim'], ascending=False)
 
         if change_track:
-            console.log(f"{self.p} got row for filename '{filename}'")
-            console.log(sorted_row.items())
             for next_filename, val in sorted_row.items():
                 next_track, _ = next_filename.split("_")
-                if next_track == parent_track or next_filename == filename:
+                if next_track == parent_track or next_filename == filename or next_filename in self.played_files:
                     console.log(f"{self.p} skipping invalid match\n\t'{next_track}' == '{parent_track}' or\n\t'{next_filename}' == '{filename}'")
                     continue
                 if next_track != parent_track and next_filename != filename:
@@ -115,19 +114,25 @@ class Seeker:
             while neighbor == None and num_tries < max_tries:
                 neighbor = self.rng.choice(self.neighbor_table.loc[filename])
                 num_tries += 1
-
             # if we couldn't find one, get most similar file
             if neighbor == None or neighbor == filename:
                 for next_filename, val in sorted_row.items():
                     next_track, _ = next_filename.split("_")
-                    if next_track == parent_track or next_filename == filename:
-                        console.log(f"{self.p} skipping invalid match\n\t'{next_track}' == '{parent_track}' or\n\t'{next_filename}' == '{filename}'")
+
+                    if next_track == parent_track or next_filename == filename or next_filename in self.played_files:
+                        # console.log(f"{self.p} skipping invalid match\n\t'{next_track}' == '{parent_track}' or\n\t'{next_filename}' == '{filename}'")
                         continue
                     if next_track != parent_track and next_filename != filename:
-                        value = val
-                        value["filename"] = next_filename
+                        value = {
+                            "filename": next_filename,
+                            'sim': val['sim'],
+                            "transformations": {
+                                "transpose": val[ "transformations"]["transpose"],
+                                "shift": val[ "transformations"]["shift"],
+                            },
+                        }
                         break
-                console.log(f"{self.p} unable to find neighbor for '{filename}', got most similar next file: '{value['filename']}'@s{value['sim']:.03f}")
+                # console.log(f"{self.p} unable to find neighbor for '{filename}', got most similar next file: '{value['filename']}'@sim {value['sim']:.03f}", value)
             else:
                 value = {
                     "filename": neighbor,
@@ -139,18 +144,19 @@ class Seeker:
                 }
 
         # track transformations
-        console.log(f"{self.p} found '{value['filename']}' with similarity {value["sim"]:.03f}", value)
-        value["transformations"]["transpose"] += self.transformation["transpose"]
-        value["transformations"]["shift"] += self.transformation["shift"]
-        console.log(f"{self.p} added transform... {self.transformation}", value)
-        self.transformation["transpose"] += value["transformations"]["transpose"]
-        self.transformation["shift"] += value["transformations"]["shift"]
-        # loop
-        if self.transformation["transpose"] >= 12:
-            self.transformation["transpose"] %= 12
-        if self.transformation["shift"] >= 8:
-            self.transformation["shift"] %= 8
-        console.log(f"{self.p} new transform", self.transformation)
+        console.log(f"{self.p} found '{value['filename']}' with similarity {value["sim"]:.03f} to '{filename}'", value)
+
+        true_transpose = (value["transformations"]["transpose"] + self.transformation["transpose"]) % 12
+        if true_transpose > 6:
+            true_transpose = -1 * true_transpose % 6
+        true_shift = 0# (value["transformations"]["shift"] + self.transformation["shift"]) % 8
+        value["transformations"]["transpose"] = true_transpose
+        value["transformations"]["shift"] = true_shift
+        self.transformation["transpose"] = true_transpose
+        self.transformation["shift"] = true_shift
+
+        # console.log(f"{self.p} added transform: {self.transformation} and returning {value}")
+        self.played_files.append(value["filename"])
 
         return value
   

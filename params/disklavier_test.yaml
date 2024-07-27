@@ -20,7 +20,7 @@ player2:
   is_recording: False
   do_tick: False
 metronome:
-  beats_per_seg: 9
+  beats_per_seg: 8
   tick_file: "data/m_kick.wav"
   do_tick: True
 seeker:

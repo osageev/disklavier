@@ -154,6 +154,7 @@ class Overseer:
         if self.random_init:
             self.recording_ready_e.set()
             self.listener.outfile = os.listdir(self.data_dir)[0]
+            console.log(f"{self.p} listener outfile set to '{self.listener.outfile}'")
         # kickstart
         if self.kickstart_file is not None:
             if self.kickstart_file == "RAND":
@@ -165,10 +166,10 @@ class Overseer:
             self.listener.outfile = self.kickstart_file
         # start listening for recording
         else:
-            listen_thread = Thread(
+            self.listen_thread = Thread(
                 target=self.listener.listen, args=(), name="listener"
             )
-            listen_thread.start()
+            self.listen_thread.start()
 
         # start up other threads
         self.controller_thread = Thread(
@@ -510,6 +511,10 @@ class Overseer:
         self.kill_player2_e.set()
         self.kill_listener_e.set()
 
+        if self.listen_thread.is_alive():
+            self.listen_thread.join()
+            console.log(f"{self.p} listener killed successfully")
+
         if self.controller_thread.is_alive():
             self.controller_thread.join()
             console.log(f"{self.p} controller killed successfully")
@@ -529,7 +534,3 @@ class Overseer:
         if self.player2_t.is_alive():
             self.player2_t.join()
             console.log(f"{self.p} player2 killed successfully")
-
-        if self.listen_thread.is_alive():
-            self.listen_thread.join()
-            console.log(f"{self.p} listener killed successfully")

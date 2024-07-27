@@ -65,7 +65,7 @@ class Player:
                     if msg.type == "set_tempo":
                         found_tempo = msg.tempo
             console.log(
-                f"{self.p} loaded '{self.playing_file}' ({file_tempo}BPM -> {round(mido.tempo2bpm(found_tempo)):01d}BPM) sim = {similarity:.03f}", transformations
+                f"{self.p} loaded '{self.playing_file}' ({file_tempo}BPM -> {round(mido.tempo2bpm(found_tempo)):01d}BPM) sim = {similarity:.03f}"
             )
 
             # play file
@@ -99,7 +99,7 @@ class Player:
                     outport.send(msg)
                 else:
                     if msg.type == "set_tempo" and not printed_speed:  # type: ignore
-                        console.log(f"{self.p} playing at {mido.tempo2bpm(msg.tempo):.01f} BPM")  # type: ignore
+                        console.log(f"{self.p} playing '{os.path.basename(midi_path)}' at {mido.tempo2bpm(msg.tempo):.01f} BPM")  # type: ignore
                         printed_speed = True
                     if msg.type == "text" and self.params.do_tick:  # type: ignore
                         beat = time.time()
@@ -114,3 +114,6 @@ class Player:
                             msg = Message("note_off", note=note, velocity=0, channel=0)
                             outport.send(msg)
                     return
+                
+        console.log(f"{self.p} finished playing '{os.path.basename(midi_path)}'s")
+
