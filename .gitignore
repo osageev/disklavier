@@ -10,6 +10,7 @@ ml/outputs/runs
 *.feather
 *.parquet
 *.zip
+outputs/*.json
 
 .DS_STORE
 
