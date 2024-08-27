@@ -1,0 +1,8 @@
+in_port: 'from Max 1'
+out_port: 'to Max 1'
+scheduler:
+  tag: "[green]schedl[/green]:"
+  n_beats_per_segment: 8
+seeker:
+  tag: "[yellow]seeker[/yellow]:"
+  seed: 0
