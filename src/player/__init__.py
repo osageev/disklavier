@@ -7,7 +7,7 @@ import heapq
 import time
 import simpleaudio as sa
 
-from utils import console, tick
+from utils import console
 
 
 class Player:

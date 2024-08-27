@@ -11,11 +11,13 @@ class MidiEvent:
     event: Message | MetaMessage = field(compare=False)
 
     def print(self):
-        return f"{self.t_start:06.02f}\t{self.midi_event}"
+        return f"{self.t_start:06.02f}\t{self.event}"
+
+
 
 
 class MidiQueue(PriorityQueue):
-    tag = "[grey60]queue[\grey60] :"
+    tag = "[grey60]queue[/grey60] :"
 
     def __init__(self, tag):
         super(PriorityQueue).__init__()
@@ -24,7 +26,7 @@ class MidiQueue(PriorityQueue):
         self.repeat_end_index = None  # End index of the repeat section
 
     def set_repeat_section(self, start_index: int, end_index: int) -> None:
-        if start_index < 0 or end_index >= len(self.qsize()) or start_index > end_index:
+        if start_index < 0 or end_index >= self.qsize() or start_index > end_index:
             raise ValueError(
                 f"Invalid repeat section indices ({start_index}, {end_index}) -> (0, {self.qsize()})"
             )
