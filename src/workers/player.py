@@ -1,4 +1,59 @@
-from datetime import datetime
+import mido
+import time
+from datetime import datetime, timedelta
+from queue import PriorityQueue
 
 from utils import console
 from .worker import Worker
+from .scheduler import N_TICKS_PER_BEAT
+
+
+class Player(Worker):
+    td_last_note: datetime
+
+    def __init__(self, params, bpm: int, t_start: datetime):
+        self.tag = params.tag
+        self.midi_port = mido.open_output(params.midi_port)  # type: ignore
+        self.bpm = bpm
+        self.tempo = mido.bpm2tempo(bpm)
+        self.td_start = t_start
+        self.td_last_note = t_start
+
+        console.log(
+            f"{self.tag} initialization complete, start time is {self.td_start.strftime('%H:%M:%S.%f')[:-3]}"
+        )
+
+    def play(self, queue: PriorityQueue):
+        # play
+        while not queue.qsize() == 0:
+            tt_abs, msg = queue.get()
+            ts_next_message = mido.tick2second(msg.time, N_TICKS_PER_BEAT, self.tempo)
+            console.log(
+                f"{self.tag} absolute time is {tt_abs} ticks (delta is {ts_next_message:.03f} seconds)"
+            )
+
+            td_now = datetime.now()
+            ts_abs_message_time = mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo)
+            console.log(f"{self.tag} \ttotal time should be {self.td_start.strftime('%H:%M:%S.%f')[:-3]} + {ts_abs_message_time:.02f} = {(self.td_start + timedelta(seconds=ts_abs_message_time)).strftime(('%H:%M:%S.%f')[:-3])}")
+
+            dt_sleep = self.td_last_note + timedelta(seconds=ts_next_message) - td_now
+            console.log(f'{self.tag} \tit is {td_now.strftime('%H:%M:%S.%f')[:-3]} and the last note was played at {self.td_last_note.strftime('%H:%M:%S.%f')[:-3]}. There is a {ts_next_message:.03f}s delay so I will sleep for {dt_sleep.total_seconds()}s')
+            self.td_last_note = self.td_last_note + timedelta(seconds=ts_next_message)
+
+            if dt_sleep.total_seconds() > 0:
+                console.log(
+                    f"{self.tag} \twaiting until {(td_now + dt_sleep).strftime("%H:%M:%S.%f")[:-3]} to play message: ({msg})"
+                )
+                time.sleep(dt_sleep.total_seconds())
+
+            console.log(f"{self.tag} \tsending ({msg})")
+            self.midi_port.send(msg)
+            queue.task_done()
+
+        # kill any remaining active notes
+        for note in range(128):
+            msg = mido.Message("note_off", note=note, velocity=0, channel=0)
+            self.midi_port.send(msg)
+
+        self.midi_port.close()
+        console.log(f"{self.tag}[green] playback finished")

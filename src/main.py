@@ -1,116 +1,143 @@
 import os
+import csv
 import time
 from datetime import datetime, timedelta
 from argparse import ArgumentParser
 from omegaconf import OmegaConf
 from queue import PriorityQueue
 import mido
+from threading import Thread
 
-from workers import Scheduler, Seeker
+from workers import Player, Scheduler, Seeker
 from utils import console
-from utils.midi import MidiEvent
 
 
 tag = "[white]main[/white]  :"
 
 
 def main(args, params):
-    s_start = datetime.now().strftime("%y%m%d-%H%M%S")
+    td_start = datetime.now() + timedelta(seconds=1)
+    ts_start = td_start.strftime("%y%m%d-%H%M%S")
 
     # filesystem setup
-    log_path = os.path.join(args.output, "logs", f"{s_start}")
+    p_log = os.path.join(args.output, "logs", f"{ts_start}")
+    pf_recording = os.path.join(p_log, f"recording_{ts_start}.mid")
+    p_playlist = os.path.join(p_log, "playlist")
+    pf_playlist = os.path.join(p_log, f"playlist_{ts_start}.csv")
 
     if not os.path.exists(args.output):
         os.makedirs(args.output)
-    if not os.path.exists(log_path):
-        console.log(f"{tag} creating new logging folder at '{log_path}'")
-        os.makedirs(log_path)
+    if not os.path.exists(p_log):
+        console.log(f"{tag} creating new logging folder at '{p_log}'")
+        os.makedirs(p_log)
+        os.makedirs(p_playlist)  # folder for copy of MIDI files
+    with open(pf_playlist, "w") as f:
+        writer = csv.writer(f)
+        writer.writerow(["number", "timestamp", "filepath"])
     console.log(f"{tag} filesystem set up complete")
 
     # worker setup
-    scheduler = Scheduler(params.scheduler, args.bpm, log_path)
+    scheduler = Scheduler(
+        params.scheduler, args.bpm, p_log, pf_recording, p_playlist, td_start
+    )
     seeker = Seeker(params.seeker, args.tables, args.dataset)
+    player = Player(params.player, args.bpm, td_start)
+
     # data setup
-    ## random init check
-    seed_path = None
-    try:
-        if args.random_init:
-            seed_path = seeker.get_random()
-            console.log(f"{tag} [cyan]RANDOM INIT[/cyan] - '{seed_path}'")
-    except AttributeError:
-        console.log(f"{tag} not randomly initializing")
-    ## kickstart check
-    try:
-        if args.kickstart:
-            seed_path = os.path.join(args.dataset, args.kickstart)
-            console.log(f"{tag} [cyan]KICKSTART[/cyan] - '{seed_path}'")
-    except AttributeError:
-        console.log(f"{tag} not kickstarting")
-    ## init recording file
-    recording_path = os.path.join(log_path, f"recording_{datetime.now().strftime("%y%m%d-%H%M")}.mid")
-    if init_outfile(recording_path, scheduler, args.bpm):
+    pf_seed = None
+    match params.initialization:
+        case "recording":  # collect user recording
+            # TODO: get recording if no seed file is specified
+            # seeker.played_files.append(recording_path)
+            raise NotImplementedError
+        case "kickstart":  # use specified file as seed
+            try:
+                if params.kickstart_path:
+                    pf_seed = os.path.join(args.dataset, params.kickstart_path)
+                    console.log(f"{tag} [cyan]KICKSTART[/cyan] - '{pf_seed}'")
+                    seeker.played_files.append(pf_seed)
+            except AttributeError:
+                console.log(f"{tag} no file specified to kickstart from")
+        case "random" | _:  # choose random file from library
+            pf_seed = seeker.get_random()
+            console.log(f"{tag} [cyan]RANDOM INIT[/cyan] - '{pf_seed}'")
+
+    if init_outfile(pf_recording, scheduler, args.bpm):
         console.log(f"{tag} successfully initialized recording")
-        mido.MidiFile(recording_path).print_tracks()
     else:
         console.log(f"{tag} [red]error initializing recording, exiting")
-        return 1 # TODO: handle this better
+        raise FileExistsError("Couldn't initialize MIDI recording file")
 
-    if seed_path is None:
-        # TODO: get recording if no seed file is specified
-        pass
-    
     # run
     q_playback = PriorityQueue()
 
-    t_run = timedelta(seconds=32) # try to keep as a multiple of the segment length
-    t_start = datetime.now()
-    t_now = datetime.now()
-    t_queue = 0
+    dt_run = timedelta(seconds=120)  # try to keep as a multiple of the segment length
+    td_start = datetime.now()
+    td_now = datetime.now()
+    ts_queue = 0
+    n_files = 0
     try:
-        while t_now - t_start < t_run:
-            t_now = datetime.now()
+        scheduler.td_start = td_start
+        ts_queue += scheduler.add_midi_to_queue(pf_seed, q_playback)  # type: ignore
+        with open(pf_playlist, "a") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [
+                    n_files,
+                    td_now.strftime("%y-%m-%d %H:%M:%S"),
+                    pf_seed,
+                ]
+            )
+
+        # start playback
+        player.td_start = td_start
+        player.td_last_note = td_start
+        thread_player = Thread(target=player.play, name="player", args=(q_playback,))
+        thread_player.start()
+        while td_now - td_start < dt_run:
+            td_now = datetime.now()
             # check whether more segments need to be added to the queue
             # start loading files into queue
-            if t_queue < params.min_queue_length:
-                next_file_path = seeker.get_random()
-                t_queue += scheduler.add_midi_to_queue(next_file_path, q_playback)
-                console.log(f"{tag} queue time is now {t_queue}")
+            if ts_queue < params.ts_min_queue_length:
+                pf_next_file = seeker.get_next()
+                ts_queue += scheduler.add_midi_to_queue(pf_next_file, q_playback)
+                console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
+                with open(pf_playlist, "a") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(
+                        [
+                            n_files,
+                            td_now.strftime("%y-%m-%d %H:%M:%S"),
+                            pf_next_file,
+                        ]
+                    )
+                n_files += 1
 
-                return
+            time.sleep(0.01)
+
+        # dump queue to stop player
+        while not q_playback.qsize() == 0:
+            try:
+                _ = q_playback.get()
+            except:
+                console.log(f"{tag} [yellow]ouch!")
+                pass
+        thread_player.join()
     except KeyboardInterrupt:
-        console.log(f"{tag} [orange]CTRL + C detected, saving and exiting...")
+        console.log(f"{tag} [yellow]CTRL + C detected, saving and exiting...")
 
     # run complete, save and exit
-    console.save_text(os.path.join(log_path, f"{s_start}.log"))
+    console.save_text(os.path.join(p_log, f"{ts_start}.log"))
     console.log(f"{tag}[green bold] session complete, exiting")
 
 
-def send_midi_from_queue(midi_queue: PriorityQueue, midi_out_port, stop_event):
-    start_time = time.time()
-
-    while not stop_event.is_set():
-        item = midi_queue.get()
-
-        if item is None:  # check for the stop signal
-            break
-
-        absolute_time, msg = item
-        sleep_time = absolute_time - (time.time() - start_time)
-
-        if sleep_time > 0:
-            time.sleep(sleep_time)
-
-        print(f"sending: {msg}")
-        midi_queue.task_done()
-
-
-def init_outfile(file_path: str, scheduler: Scheduler, bpm: int = 60) -> bool:
+def init_outfile(pf_midi: str, scheduler: Scheduler, bpm: int = 60) -> bool:
     midi = mido.MidiFile()
     tick_track = mido.MidiTrack()
 
-    # regular messages
+    # default timing messages
     tick_track.append(
-        mido.MetaMessage("track_name", name=os.path.basename(file_path), time=0)
+        mido.MetaMessage("track_name", name=os.path.basename(pf_midi), time=0)
     )
     tick_track.append(
         mido.MetaMessage(
@@ -122,21 +149,20 @@ def init_outfile(file_path: str, scheduler: Scheduler, bpm: int = 60) -> bool:
             time=0,
         )
     )
-    tick_track.append(
-        mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(bpm), time=0)
-    )
+    tick_track.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(bpm), time=0))
     tick_track.append(mido.MetaMessage("end_of_track", time=1))
 
-    t_transitions = scheduler.gen_transitions_cgpt(10, do_ticks=True)
-    for transition_msg in t_transitions:
-        tick_track.append(transition_msg)
+    # transition messages
+    mm_transitions = scheduler.gen_transitions(n_stamps=10, do_ticks=True)
+    for mm_transition in mm_transitions:
+        tick_track.append(mm_transition)
 
     midi.tracks.append(tick_track)
 
     # write to file
-    midi.save(file_path)
+    midi.save(pf_midi)
 
-    return os.path.isfile(file_path)
+    return os.path.isfile(pf_midi)
 
 
 if __name__ == "__main__":
@@ -174,7 +200,7 @@ if __name__ == "__main__":
         help="bpm to record and play at, in bpm",
     )
     parser.add_argument(
-        "-n",
+        "--num_transitions",
         type=int,
         help="number of transitions to run for",
     )
@@ -196,6 +222,6 @@ if __name__ == "__main__":
 
     if not os.path.exists(args.tables):
         console.log("[red bold]ERROR[/red bold]: table directory not found, exiting...")
-        exit() # TODO: handle this better
+        exit()  # TODO: handle this better
 
     main(args, params)

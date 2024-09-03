@@ -1,9 +1,9 @@
 #!/bin/bash
+DATASET_NAME="20240621"
 cd "$(dirname "$0")"/..
-python main.py\
-    --dataset "20240621"\
-    --data_dir "data/datasets/20240621/play"\
-    --param_file "params/disklavier.yaml"\
-    --output_dir "data/outputs"\
-    -e 8\
-    --tempo $1
+python src/main.py\
+    --dataset "data/datasets/$DATASET_NAME/play"\
+    --params "params/disklavier_sequential.yaml"\
+    --output "data/outputs"\
+    --tables "data/tables/$DATASET_NAME"\
+    --bpm $1

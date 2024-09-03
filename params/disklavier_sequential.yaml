@@ -1,0 +1,15 @@
+in_port: 'Disklavier' #'from Max 1'
+n_beats_per_segment: 8
+ts_min_queue_length: 60
+initialization: "random"
+scheduler:
+  tag: "[green]schedl[/green]:"
+  n_beats_per_segment: 8
+  lead_bar: True
+seeker:
+  tag: "[yellow]seeker[/yellow]:"
+  seed: 0
+  mode: "sequential" # "random"
+player:
+  tag: "[blue]player[/blue]:"
+  midi_port: 'Disklavier' #"to Max 1"
