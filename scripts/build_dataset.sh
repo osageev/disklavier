@@ -1,12 +1,11 @@
 #!/bin/bash
-DATASET="20240621"
+DATASET="test_micro"
 
-DATASET_NAME="test"
 cd "$(dirname "$0")"/..
 python build_dataset.py\
     --data_dir "data/datasets/$DATASET"\
     --dataset_name "$DATASET"\
-    -rt
+    -art
 
 python build_tables.py\
     --data_dir "data/datasets/$DATASET"\

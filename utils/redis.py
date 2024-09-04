@@ -68,16 +68,17 @@ def store_vector(
     track_id = get_track_id(basename)
 
     all_ids = redis_client.json().get("track_ids")
-
     if all_ids is None:
         redis_client.json().set("track_ids", "$", {})
         all_ids = redis_client.json().get("track_ids")
 
-    if track_id not in all_ids.values():  # type: ignore
+    if track_id not in all_ids.values():
         redis_client.json().set("track_ids", f"$.{basename}", track_id)
 
     # store the vector in the hash
-    redis_client.hset(f"file:{track_id}:{metric}", f"{transpose}{shift}", vector.tobytes())  # type: ignore
+    redis_client.hset(
+        f"file:{track_id}:{metric}", f"{transpose}{shift}", vector.tobytes()
+    )
 
 
 def load_vector(
@@ -269,7 +270,7 @@ def build_transformation_table(
     all_files: List[str], output_path: str, metric: str = "pitch_histogram"
 ) -> None:
     r = redis.Redis(host="localhost", port=6379, db=0)
-    column_names = [f"{t:03d}{s:02d}" for t, s in product(range(12), range(8))]
+    column_names = [f"{t:02d}{s:02d}" for t, s in product(range(12), range(8))]
     t_table = pd.DataFrame(index=all_files, columns=column_names)
 
     progress = Progress(

@@ -79,7 +79,6 @@ def main(args):
 
                 p.update(task_s, advance=1)
 
-    # CHATGPT UNTESTESTED
     zip_path = os.path.join("data", "datasets", f"{args.dataset_name}_segmented.zip")
     print(f"compressing to zipfile '{zip_path}'")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -118,19 +117,18 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-s",
-        "--do_shift",
-        type=int,
-        default=12,
+        "--segment",
+        action="store_true",
         help="generate a segment for a number of semitone shifts",
     )
     parser.add_argument(
         "-a",
         "--augment",
         action="store_true",
-        default=True,
         help="augment dataset and store files",
     )
     parser.add_argument(
+        "-l",
         "--limit",
         type=int,
         default=None,
