@@ -71,7 +71,7 @@ class Scheduler(Worker):
                             "text",
                             text=f"tick {i}-{beat + 1} ({tick_time:.02f}s)",
                             time=mido.second2tick(
-                                tick_time, N_TICKS_PER_BEAT, self.tempo
+                                ts_beat_length, N_TICKS_PER_BEAT, self.tempo
                             ),
                         )
                     )
