@@ -7,8 +7,8 @@ scheduler:
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
-  seed: 0
-  mode: "repeat" #"sequential" # "random"
+  seed: 108
+  mode: "sequential" # "repeat" # "random"
 player:
   tag: "[blue]player[/blue]:"
   midi_port: 'Disklavier'

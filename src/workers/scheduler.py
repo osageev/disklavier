@@ -7,7 +7,7 @@ from queue import PriorityQueue
 from utils import console
 from .worker import Worker
 
-N_TICKS_PER_BEAT: int = 96  # standard
+N_TICKS_PER_BEAT: int = 220  # standard
 
 
 class Scheduler(Worker):
@@ -15,7 +15,7 @@ class Scheduler(Worker):
     tt_offset: int = 0
     ts_transitions: list[float] = []
     tt_all_messages: list[int] = []
-    n_files_played: int = 0
+    n_files_queued: int = 0
     n_beats_per_segment: int = 8
 
     def __init__(
@@ -26,6 +26,7 @@ class Scheduler(Worker):
         recording_file_path: str,
         playlist_path: str,
         t_start: datetime,
+        verbose: bool = False,
     ):
         self.tag = params.tag
         self.lead_bar = params.lead_bar
@@ -36,19 +37,142 @@ class Scheduler(Worker):
         self.pf_midi_recording = recording_file_path
         self.p_playlist = playlist_path
         self.td_start = t_start
-
+        self.verbose = verbose
         console.log(f"{self.tag} initialization complete")
 
-    def gen_transitions(
-        self, ts_offset: float = 0, n_stamps: int = 100, do_ticks: bool = False
+    def enqueue_midi(self, pf_midi: str, q_midi: PriorityQueue) -> float:
+        midi_in = mido.MidiFile(pf_midi)
+        midi_out = mido.MidiFile(self.pf_midi_recording)
+        # number of seconds/ticks from the start of playback to start playing the file
+        ts_offset, tt_offset = self._get_next_transition()
+        tt_abs: int = tt_offset  # track the absolute time since system start
+        tt_sum: int = 0  # track the sum of all notes in the segment
+
+        if tt_offset == 0:
+            tt_abs = -N_TICKS_PER_BEAT
+
+        console.log(
+            f"{self.tag} adding file {self.n_files_queued}/100 to queue '{pf_midi}' with offset {tt_offset} ({ts_offset}s)"
+        )
+
+        play_track = None
+        for track in midi_out.tracks:
+            if track.name == "playback":
+                play_track = track
+                break
+
+        if play_track is None:
+            play_track = midi_out.add_track("playback")
+
+        # add messages to queue first so that the player has access ASAP
+        for track in midi_in.tracks:
+            for msg in track:
+                if msg.type == "note_on" or msg.type == "note_off":
+                    tt_abs += msg.time
+                    tt_sum += msg.time
+                    # occasionally need to shift the message to avoid priority conflicts
+                    if tt_abs in self.tt_all_messages:
+                        # find the nearest integer that doesn't exist in tt_all_messages
+                        tt_lower_bound = tt_abs - 1
+                        tt_upper_bound = tt_abs + 1
+                        while (
+                            tt_lower_bound in self.tt_all_messages
+                            or tt_upper_bound in self.tt_all_messages
+                        ):
+                            tt_lower_bound -= 1
+                            tt_upper_bound += 1
+
+                        # select the nearest available integer
+                        if tt_lower_bound not in self.tt_all_messages:
+                            tt_abs = tt_lower_bound
+                        else:
+                            tt_abs = tt_upper_bound
+                    self.tt_all_messages.append(tt_abs)
+                    if self.verbose:
+                        console.log(
+                            f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
+                        )
+                    q_midi.put((tt_abs, msg))
+
+        # update midi log file
+        if (
+            mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo)
+            > self.ts_transitions[-1]
+        ):
+
+            transitions = self._gen_transitions(self.ts_transitions[-1], n_stamps=1)
+        # os.remove(self.pf_midi_recording)
+        # midi_out.save(self.pf_midi_recording)
+
+        # copy source file
+        copy2(
+            pf_midi,
+            os.path.join(
+                self.p_playlist,
+                f"{self.n_files_queued:02d} {os.path.basename(pf_midi)}",
+            ),
+        )
+        # if self._log_midi(pf_midi):
+        #     console.log(f"{self.tag} successfully updated recording file")
+        # else:
+        #     console.log(f"{self.tag} [orange]error updating recording file")
+
+        self.n_files_queued += 1
+
+        console.log(
+            f"{self.tag} added {mido.tick2second(tt_sum, N_TICKS_PER_BEAT, self.tempo):.03f} seconds of music to queue"
+        )
+
+        return mido.tick2second(tt_sum, N_TICKS_PER_BEAT, self.tempo)
+
+    def init_outfile(self, pf_midi: str, bpm: int = 60) -> bool:
+        midi = mido.MidiFile()
+        tick_track = mido.MidiTrack()
+
+        # default timing messages
+        tick_track.append(
+            mido.MetaMessage("track_name", name=os.path.basename(pf_midi), time=0)
+        )
+        tick_track.append(
+            mido.MetaMessage(
+                "time_signature",
+                numerator=4,
+                denominator=4,
+                clocks_per_click=36,
+                notated_32nd_notes_per_beat=8,
+                time=0,
+            )
+        )
+        tick_track.append(
+            mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(bpm), time=0)
+        )
+
+        # transition messages
+        mm_transitions = self._gen_transitions(n_stamps=10)
+        for mm_transition in mm_transitions:
+            tick_track.append(mm_transition)
+        tick_track.append(mido.MetaMessage("end_of_track", time=1))
+
+        midi.tracks.append(tick_track)
+
+        # write to file
+        midi.save(pf_midi)
+
+        return os.path.isfile(pf_midi)
+
+    def _gen_transitions(
+        self, ts_offset: float = 0, n_stamps: int = 100, do_ticks: bool = True
     ) -> list[mido.MetaMessage]:
         self.tt_offset = mido.second2tick(ts_offset, N_TICKS_PER_BEAT, self.tempo)
-        # TODO: ts_offset will be used to have timing start from the end of the recording
         ts_interval = self.n_beats_per_segment * 60 / self.bpm
         ts_beat_length = 60 / self.bpm  # time interval for each beat
-        self.ts_transitions = [ts_offset + i * ts_interval for i in range(n_stamps)]
+        self.ts_transitions.extend(
+            [ts_offset + i * ts_interval for i in range(1, n_stamps + 1)]
+        )
+        # if self.verbose:
         console.log(
-            f"{self.tag} segment interval is {ts_interval} seconds", self.ts_transitions
+            f"{self.tag} segment interval is {ts_interval} seconds",
+            self.ts_transitions,
         )
 
         transitions = []
@@ -78,91 +202,8 @@ class Scheduler(Worker):
 
         return transitions
 
-    def add_midi_to_queue(self, pf_midi: str, q_midi: PriorityQueue) -> float:
-        midi_in = mido.MidiFile(pf_midi)
-        midi_out = mido.MidiFile(self.pf_midi_recording)
-        # number of seconds/ticks from the start of playback to start playing the file
-        ts_offset, tt_offset = self._get_next_transition()
-        tt_abs: int = tt_offset  # track the absolute time since system start
-
-        if tt_offset == 0:
-            tt_abs = -N_TICKS_PER_BEAT
-
-        console.log(
-            f"{self.tag} adding file to queue '{pf_midi}' with offset {tt_offset} ({ts_offset}s)"
-        )
-
-        play_track = None
-        for track in midi_out.tracks:
-            if track.name == "playback":
-                play_track = track
-                break
-
-        if play_track is None:
-            play_track = midi_out.add_track("playback")
-
-        # add messages to queue first so that the player has access ASAP
-        for track in midi_in.tracks:
-            for msg in track:
-                if msg.type == "note_on" or msg.type == "note_off":
-                    tt_abs += msg.time
-                    if tt_abs in self.tt_all_messages:
-                        # find the nearest integer that doesn't exist in tt_all_messages
-                        lower_bound = tt_abs - 1
-                        upper_bound = tt_abs + 1
-                        while (
-                            lower_bound in self.tt_all_messages
-                            or upper_bound in self.tt_all_messages
-                        ):
-                            lower_bound -= 1
-                            upper_bound += 1
-
-                        # select the nearest available integer
-                        if lower_bound not in self.tt_all_messages:
-                            tt_abs = lower_bound
-                        else:
-                            tt_abs = upper_bound
-                    self.tt_all_messages.append(tt_abs)
-                    # msg.time += tt_offset
-                    console.log(
-                        f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
-                    )
-                    q_midi.put((tt_abs, msg))
-                    # # Calculate the time difference between this message and the previous one
-                    # time_diff = tt_abs - (
-                    #     tt_offset + sum(m.time for m in play_track if not m.is_meta)
-                    # )
-                    # # Create a new message with the adjusted time
-                    # adjusted_msg = msg.copy(time=time_diff)
-                    # play_track.append(adjusted_msg)
-
-        # update midi log file
-        # os.remove(self.pf_midi_recording)
-        # midi_out.save(self.pf_midi_recording)
-
-        # copy source file
-        copy2(
-            pf_midi,
-            os.path.join(
-                self.p_playlist,
-                f"{self.n_files_played:02d} {os.path.basename(pf_midi)}",
-            ),
-        )
-        # if self._log_midi(pf_midi):
-        #     console.log(f"{self.tag} successfully updated recording file")
-        # else:
-        #     console.log(f"{self.tag} [orange]error updating recording file")
-
-        self.n_files_played += 1
-
-        console.log(
-            f"{self.tag} added {mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo):.03f} seconds of music to queue"
-        )
-
-        return mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo)
-
     def _get_next_transition(self) -> tuple[float, int]:
-        ts_offset = self.ts_transitions[self.n_files_played]
+        ts_offset = self.ts_transitions[self.n_files_queued]
         if self.lead_bar:
             ts_offset -= 60 / self.bpm
             ts_offset = (
@@ -204,7 +245,7 @@ class Scheduler(Worker):
             pf_midi,
             os.path.join(
                 self.p_playlist,
-                f"{self.n_files_played:02d} {os.path.basename(pf_midi)}",
+                f"{self.n_files_queued:02d} {os.path.basename(pf_midi)}",
             ),
         )
 

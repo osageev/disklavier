@@ -1,8 +1,11 @@
 import time
-from datetime import datetime, timedelta
 import pygame
+from datetime import datetime, timedelta
+
 from .worker import Worker
 from utils import console
+
+TS_DELAY_COMPENSATION = 0.1
 
 
 class Metronome(Worker):
@@ -17,7 +20,7 @@ class Metronome(Worker):
 
     def tick(self):
         pygame.mixer.init()
-        next_tick = self.td_start
+        next_tick = self.td_start #+ timedelta(seconds=TS_DELAY_COMPENSATION)
         while True:
             now = datetime.now()
             if now >= next_tick:
@@ -34,4 +37,4 @@ class Metronome(Worker):
                     self.tick_sound = pygame.mixer.Sound(self.wav_file_2)
                 self.tick_sound.play()
                 next_tick += timedelta(seconds=self.beat_interval)
-            time.sleep(0.001)  # Small sleep to prevent busy-waiting
+            time.sleep(0.01)  # Small sleep to prevent busy-waiting

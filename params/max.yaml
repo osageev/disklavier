@@ -7,7 +7,7 @@ scheduler:
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
-  seed: 0
+  seed: 108
   mode: "repeat" #"sequential" # "random"
 player:
   tag: "[blue]player[/blue]:"

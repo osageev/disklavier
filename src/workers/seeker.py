@@ -17,7 +17,9 @@ class Seeker(Worker):
     transition_probability = 0.0
     transformation = {"transpose": 0, "shift": 0}
 
-    def __init__(self, params, table_path: str, dataset_path: str):
+    def __init__(
+        self, params, table_path: str, dataset_path: str, verbose: bool = False
+    ):
         # load state
         self.tag = params.tag
         self.params = params
@@ -25,6 +27,7 @@ class Seeker(Worker):
         self.p_table = table_path
         self.p_dataset = dataset_path
         self.rng = np.random.default_rng(self.params.seed)
+        self.verbose = verbose
 
         # load similarity table
         pf_sim_table = os.path.join(self.p_table, "sim.parquet")
@@ -96,9 +99,10 @@ class Seeker(Worker):
 
             # found a neighbor
             if neighbor != None:
-                console.log(
-                    f"{self.tag} found neighboring file '{neighbor}' at position '{col_name}'"
-                )
+                if self.verbose:
+                    console.log(
+                        f"{self.tag} found neighboring file '{neighbor}' at position '{col_name}'"
+                    )
                 return f"{neighbor}"
 
         console.log(
@@ -115,6 +119,8 @@ class Seeker(Worker):
         return os.path.join(self.p_dataset, random_file)
 
     def _get_random(self) -> str:
+        if self.verbose:
+            console.log(f"{self.tag} choosing random file")
         random_file = self.rng.choice(
             [m for m in os.listdir(self.p_dataset) if m.endswith(".mid")]
         )
