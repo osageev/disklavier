@@ -7,7 +7,7 @@ from queue import PriorityQueue
 from utils import console
 from .worker import Worker
 
-N_TICKS_PER_BEAT: int = 220  # standard
+N_TICKS_PER_BEAT: int = 96  # standard
 
 
 class Scheduler(Worker):
@@ -42,7 +42,6 @@ class Scheduler(Worker):
 
     def enqueue_midi(self, pf_midi: str, q_midi: PriorityQueue) -> float:
         midi_in = mido.MidiFile(pf_midi)
-        midi_out = mido.MidiFile(self.pf_midi_recording)
         # number of seconds/ticks from the start of playback to start playing the file
         ts_offset, tt_offset = self._get_next_transition()
         tt_abs: int = tt_offset  # track the absolute time since system start
@@ -52,17 +51,8 @@ class Scheduler(Worker):
             tt_abs = -N_TICKS_PER_BEAT
 
         console.log(
-            f"{self.tag} adding file {self.n_files_queued}/100 to queue '{pf_midi}' with offset {tt_offset} ({ts_offset}s)"
+            f"{self.tag} adding file {self.n_files_queued}/100 to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s)"
         )
-
-        play_track = None
-        for track in midi_out.tracks:
-            if track.name == "playback":
-                play_track = track
-                break
-
-        if play_track is None:
-            play_track = midi_out.add_track("playback")
 
         # add messages to queue first so that the player has access ASAP
         for track in midi_in.tracks:
@@ -100,22 +90,11 @@ class Scheduler(Worker):
             > self.ts_transitions[-1]
         ):
 
-            transitions = self._gen_transitions(self.ts_transitions[-1], n_stamps=1)
-        # os.remove(self.pf_midi_recording)
-        # midi_out.save(self.pf_midi_recording)
-
-        # copy source file
-        copy2(
-            pf_midi,
-            os.path.join(
-                self.p_playlist,
-                f"{self.n_files_queued:02d} {os.path.basename(pf_midi)}",
-            ),
-        )
-        # if self._log_midi(pf_midi):
-        #     console.log(f"{self.tag} successfully updated recording file")
-        # else:
-        #     console.log(f"{self.tag} [orange]error updating recording file")
+            _ = self._gen_transitions(self.ts_transitions[-1], n_stamps=1)
+        if self._log_midi(pf_midi):
+            console.log(f"{self.tag} successfully updated recording file")
+        else:
+            console.log(f"{self.tag} [orange]error updating recording file")
 
         self.n_files_queued += 1
 
@@ -125,7 +104,7 @@ class Scheduler(Worker):
 
         return mido.tick2second(tt_sum, N_TICKS_PER_BEAT, self.tempo)
 
-    def init_outfile(self, pf_midi: str, bpm: int = 60) -> bool:
+    def init_outfile(self, pf_midi: str) -> bool:
         midi = mido.MidiFile()
         tick_track = mido.MidiTrack()
 
@@ -143,9 +122,7 @@ class Scheduler(Worker):
                 time=0,
             )
         )
-        tick_track.append(
-            mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(bpm), time=0)
-        )
+        tick_track.append(mido.MetaMessage("set_tempo", tempo=self.tempo, time=0))
 
         # transition messages
         mm_transitions = self._gen_transitions(n_stamps=10)
@@ -169,11 +146,11 @@ class Scheduler(Worker):
         self.ts_transitions.extend(
             [ts_offset + i * ts_interval for i in range(1, n_stamps + 1)]
         )
-        # if self.verbose:
-        console.log(
-            f"{self.tag} segment interval is {ts_interval} seconds",
-            self.ts_transitions,
-        )
+        if self.verbose:
+            console.log(
+                f"{self.tag} segment interval is {ts_interval} seconds",
+                self.ts_transitions,
+            )
 
         transitions = []
 
@@ -215,7 +192,7 @@ class Scheduler(Worker):
     def _log_midi(self, pf_midi: str) -> bool:
         midi_in = mido.MidiFile(pf_midi)
         midi_out = mido.MidiFile(self.pf_midi_recording)
-        _, tt_offset = self._get_next_transition()
+        ts_offset, _ = self._get_next_transition()
 
         # create playback track if it doesn't already exist
         play_track = None
@@ -229,9 +206,16 @@ class Scheduler(Worker):
 
         # copy over midi to track
         for track in midi_in.tracks:
-            for msg in track:
+            for i, msg in enumerate(track):
+                # reset first message time to account for offset
+                if i == 0:
+                    if len(track) > 0:
+                        msg.time += mido.second2tick(
+                            ts_offset - midi_out.length, N_TICKS_PER_BEAT, self.tempo
+                        )
+                    else:
+                        msg.time -= N_TICKS_PER_BEAT
                 if msg.type == "note_on" or msg.type == "note_off":
-                    msg.time += tt_offset
                     play_track.append(msg)
 
         # clear out old MIDI file and rewrite (TODO: risky? what if recorder writes at same time?)
@@ -240,7 +224,7 @@ class Scheduler(Worker):
         os.remove(self.pf_midi_recording)
         midi_out.save(self.pf_midi_recording)
 
-        # copy source file
+        # copy source file to playlist folder
         copy2(
             pf_midi,
             os.path.join(

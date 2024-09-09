@@ -1,5 +1,6 @@
 in_port: 'Disklavier'
 n_beats_per_segment: 8
+n_transitions: 100
 ts_min_queue_length: 60
 initialization: "random"
 scheduler:
@@ -7,8 +8,8 @@ scheduler:
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
-  seed: 108
-  mode: "sequential" # "repeat" # "random"
+  seed: 0
+  mode: "repeat" #"random" #"sequential"
 player:
   tag: "[blue]player[/blue]:"
   midi_port: 'Disklavier'

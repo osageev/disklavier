@@ -73,7 +73,7 @@ def main(args, params):
             pf_seed = seeker.get_random()
             console.log(f"{tag} [cyan]RANDOM INIT[/cyan] - '{pf_seed}'")
 
-    if scheduler.init_outfile(pf_recording, args.bpm):
+    if scheduler.init_outfile(pf_recording):
         console.log(f"{tag} successfully initialized recording")
     else:
         console.log(f"{tag} [red]error initializing recording, exiting")
@@ -106,7 +106,7 @@ def main(args, params):
         process_metronome.start()
         thread_player = Thread(target=player.play, name="player", args=(q_playback,))
         thread_player.start()
-        while n_files < args.num_transitions:
+        while n_files < params.n_transitions:
             if ts_queue < params.ts_min_queue_length:
                 pf_next_file = seeker.get_next()
                 ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
@@ -125,15 +125,10 @@ def main(args, params):
             time.sleep(0.1)
             ts_queue -= 0.1
 
-        # dump queue to stop player
-        console.log(f"{tag} ending playback")
+        # all necessary files queued, wait for playback to finish
+        console.log(f"{tag} waiting for playback to finish...")
         while q_playback.qsize() > 0:
-            try:
-                _ = q_playback.get()
-            except:
-                if args.verbose:
-                    console.log(f"{tag} [yellow]ouch!")
-                pass
+            time.sleep(0.1)
         thread_player.join(timeout=0.1)
     except KeyboardInterrupt:
         console.log(f"{tag}[yellow] CTRL + C detected, saving and exiting...")
@@ -185,6 +180,7 @@ if __name__ == "__main__":
         help="directory in which precomputed tables are stored",
     )
     parser.add_argument(
+        "-t",
         "--tick",
         action="store_true",
         help="play metronome during playback",
