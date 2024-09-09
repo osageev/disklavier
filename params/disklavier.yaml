@@ -1,0 +1,18 @@
+in_port: 'Disklavier'
+n_beats_per_segment: 8
+ts_min_queue_length: 60
+initialization: "random"
+scheduler:
+  tag: "[green]schedl[/green]:"
+  lead_bar: True
+seeker:
+  tag: "[yellow]seeker[/yellow]:"
+  seed: 0
+  mode: "repeat" #"sequential" # "random"
+player:
+  tag: "[blue]player[/blue]:"
+  midi_port: 'Disklavier'
+metronome:
+  tag: "[magenta]metro[/magenta] :"
+  tick_1: "data/m_hat.wav"
+  tick_2: "data/m_tick.wav"

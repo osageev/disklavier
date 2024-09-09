@@ -79,17 +79,30 @@ class Scheduler(Worker):
         return transitions
 
     def add_midi_to_queue(self, pf_midi: str, q_midi: PriorityQueue) -> float:
-        midi_file = mido.MidiFile(pf_midi)
+        midi_in = mido.MidiFile(pf_midi)
+        midi_out = mido.MidiFile(self.pf_midi_recording)
         # number of seconds/ticks from the start of playback to start playing the file
         ts_offset, tt_offset = self._get_next_transition()
         tt_abs: int = tt_offset  # track the absolute time since system start
+
+        if tt_offset == 0:
+            tt_abs = -N_TICKS_PER_BEAT
 
         console.log(
             f"{self.tag} adding file to queue '{pf_midi}' with offset {tt_offset} ({ts_offset}s)"
         )
 
+        play_track = None
+        for track in midi_out.tracks:
+            if track.name == "playback":
+                play_track = track
+                break
+
+        if play_track is None:
+            play_track = midi_out.add_track("playback")
+
         # add messages to queue first so that the player has access ASAP
-        for track in midi_file.tracks:
+        for track in midi_in.tracks:
             for msg in track:
                 if msg.type == "note_on" or msg.type == "note_off":
                     tt_abs += msg.time
@@ -115,12 +128,30 @@ class Scheduler(Worker):
                         f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
                     )
                     q_midi.put((tt_abs, msg))
+                    # # Calculate the time difference between this message and the previous one
+                    # time_diff = tt_abs - (
+                    #     tt_offset + sum(m.time for m in play_track if not m.is_meta)
+                    # )
+                    # # Create a new message with the adjusted time
+                    # adjusted_msg = msg.copy(time=time_diff)
+                    # play_track.append(adjusted_msg)
 
         # update midi log file
-        if self._log_midi(pf_midi):
-            console.log(f"{self.tag} successfully updated recording file")
-        else:
-            console.log(f"{self.tag} [orange]error updating recording file")
+        # os.remove(self.pf_midi_recording)
+        # midi_out.save(self.pf_midi_recording)
+
+        # copy source file
+        copy2(
+            pf_midi,
+            os.path.join(
+                self.p_playlist,
+                f"{self.n_files_played:02d} {os.path.basename(pf_midi)}",
+            ),
+        )
+        # if self._log_midi(pf_midi):
+        #     console.log(f"{self.tag} successfully updated recording file")
+        # else:
+        #     console.log(f"{self.tag} [orange]error updating recording file")
 
         self.n_files_played += 1
 

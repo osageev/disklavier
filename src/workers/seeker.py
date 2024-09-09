@@ -75,6 +75,8 @@ class Seeker(Worker):
         match self.mode:
             case "sequential":
                 next_file = self._get_neighbor(self.played_files[-1])
+            case "repeat":
+                next_file = self.played_files[0]
             case "random" | "shuffle" | _:
                 next_file = self._get_random()
 

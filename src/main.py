@@ -1,14 +1,15 @@
 import os
 import csv
 import time
+import pygame
 from datetime import datetime, timedelta
 from argparse import ArgumentParser
 from omegaconf import OmegaConf
 from queue import PriorityQueue
 import mido
 from threading import Thread
-
-from workers import Player, Scheduler, Seeker
+from multiprocessing import Process
+from workers import Metronome, Player, Scheduler, Seeker
 from utils import console
 
 
@@ -71,7 +72,7 @@ def main(args, params):
     # run
     q_playback = PriorityQueue()
 
-    dt_run = timedelta(seconds=120)  # try to keep as a multiple of the segment length
+    dt_run = timedelta(seconds=40)  # try to keep as a multiple of the segment length
     td_start = datetime.now()
     td_now = datetime.now()
     ts_queue = 0
@@ -94,6 +95,9 @@ def main(args, params):
         player.td_last_note = td_start
         thread_player = Thread(target=player.play, name="player", args=(q_playback,))
         thread_player.start()
+        metronome = Metronome(params.metronome, args.bpm, td_start)
+        process_metronome = Process(target=metronome.tick, name="metronome")
+        process_metronome.start()
         while td_now - td_start < dt_run:
             td_now = datetime.now()
             # check whether more segments need to be added to the queue
@@ -116,15 +120,34 @@ def main(args, params):
             time.sleep(0.01)
 
         # dump queue to stop player
-        while not q_playback.qsize() == 0:
+        while q_playback.qsize() > 0:
             try:
                 _ = q_playback.get()
             except:
                 console.log(f"{tag} [yellow]ouch!")
                 pass
-        thread_player.join()
+        thread_player.join(timeout=0.1)
     except KeyboardInterrupt:
-        console.log(f"{tag} [yellow]CTRL + C detected, saving and exiting...")
+        console.log(f"{tag}[yellow] CTRL + C detected, saving and exiting...")
+        # dump queue to stop player
+        while q_playback.qsize() > 0:
+            try:
+                _ = q_playback.get()
+            except:
+                console.log(f"{tag} [yellow]ouch!")
+                pass
+        thread_player.join(timeout=0.1)
+
+    console.log(f"{tag} stopping metronome")
+    process_metronome.terminate()
+    process_metronome.join(timeout=0.1)
+    if process_metronome.is_alive():
+        console.log(
+            f"{tag}[yellow] metronome process did not terminate, forcefully killing..."
+        )
+        process_metronome.kill()
+        process_metronome.join(timeout=0.5)
+    pygame.mixer.quit()
 
     # run complete, save and exit
     console.save_text(os.path.join(p_log, f"{ts_start}.log"))
@@ -216,6 +239,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     params = OmegaConf.load(args.params)
+
+    # copy these so that they only have to be specified once
+    params.scheduler.n_beats_per_segment = params.n_beats_per_segment
+    params.metronome.n_beats_per_segment = params.n_beats_per_segment
 
     console.log(f"{tag} loading with args:\n\t{args}")
     console.log(f"{tag} loading with params:\n\t{params}")

@@ -24,21 +24,20 @@ class Player(Worker):
         )
 
     def play(self, queue: PriorityQueue):
-        # play
-        while not queue.qsize() == 0:
+        while queue.qsize() > 0:
             tt_abs, msg = queue.get()
-            ts_next_message = mido.tick2second(msg.time, N_TICKS_PER_BEAT, self.tempo)
+            ts_abs = mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo)
             console.log(
-                f"{self.tag} absolute time is {tt_abs} ticks (delta is {ts_next_message:.03f} seconds)"
+                f"{self.tag} absolute time is {tt_abs} ticks (delta is {ts_abs:.03f} seconds)"
             )
 
-            td_now = datetime.now()
             ts_abs_message_time = mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo)
-            console.log(f"{self.tag} \ttotal time should be {self.td_start.strftime('%H:%M:%S.%f')[:-3]} + {ts_abs_message_time:.02f} = {(self.td_start + timedelta(seconds=ts_abs_message_time)).strftime(('%H:%M:%S.%f')[:-3])}")
+            console.log(f"{self.tag} \ttotal time should be {self.td_start.strftime('%H:%M:%S.%f')} + {ts_abs_message_time:.02f} = {(self.td_start + timedelta(seconds=ts_abs_message_time)).strftime(('%H:%M:%S.%f'))}")
 
-            dt_sleep = self.td_last_note + timedelta(seconds=ts_next_message) - td_now
-            console.log(f'{self.tag} \tit is {td_now.strftime('%H:%M:%S.%f')[:-3]} and the last note was played at {self.td_last_note.strftime('%H:%M:%S.%f')[:-3]}. There is a {ts_next_message:.03f}s delay so I will sleep for {dt_sleep.total_seconds()}s')
-            self.td_last_note = self.td_last_note + timedelta(seconds=ts_next_message)
+            td_now = datetime.now()
+            dt_sleep = self.td_start + timedelta(seconds=ts_abs) - td_now
+            console.log(f'{self.tag} \tit is {td_now.strftime('%H:%M:%S.%f')[:-3]} and the last note was played at {self.td_last_note.strftime('%H:%M:%S.%f')[:-3]}. I will sleep for {dt_sleep.total_seconds()}s')
+            self.td_last_note = self.td_last_note + timedelta(seconds=ts_abs)
 
             if dt_sleep.total_seconds() > 0:
                 console.log(
