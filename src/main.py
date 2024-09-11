@@ -99,15 +99,16 @@ def main(args, params):
             )
 
         # start playback
-        metronome = Metronome(params.metronome, args.bpm, td_start)
-        process_metronome = Process(target=metronome.tick, name="metronome")
         player.td_start = td_start
         player.td_last_note = td_start
-        process_metronome.start()
         thread_player = Thread(target=player.play, name="player", args=(q_playback,))
         thread_player.start()
+        metronome = Metronome(params.metronome, args.bpm, td_start)
+        process_metronome = Process(target=metronome.tick, name="metronome")
+        process_metronome.start()
         while n_files < params.n_transitions:
-            if ts_queue < params.ts_min_queue_length:
+            if q_playback.qsize() < 50:
+                # if ts_queue < params.ts_min_queue_length:
                 pf_next_file = seeker.get_next()
                 ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
                 console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
