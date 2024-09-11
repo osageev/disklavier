@@ -2,7 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from utils import console
+from utils import console, extract_transformations
 from .worker import Worker
 
 NEIGHBOR_COL_PRIORITIES = ["next", "next_2", "prev", "prev_2"]
@@ -12,9 +12,9 @@ class Seeker(Worker):
     sim_table: pd.DataFrame
     neighbor_table: pd.DataFrame
     trans_table: pd.DataFrame
+    n_track_repeats: int = 0
     played_files: list[str] = []
     allow_multiple_plays = False
-    transition_probability = 0.0
     transformation = {"transpose": 0, "shift": 0}
 
     def __init__(
@@ -76,8 +76,12 @@ class Seeker(Worker):
 
     def get_next(self) -> str:
         match self.mode:
+            case "best":
+                next_file = self._get_next()
+            case "easy":
+                next_file = self._get_easy()
             case "sequential":
-                next_file = self._get_neighbor(self.played_files[-1])
+                next_file = self._get_neighbor()
             case "repeat":
                 next_file = self.played_files[0]
             case "random" | "shuffle" | _:
@@ -87,8 +91,45 @@ class Seeker(Worker):
 
         return os.path.join(self.p_dataset, next_file)
 
-    def _get_neighbor(self, current_file_path: str) -> str:
-        current_file = os.path.basename(current_file_path)
+    def get_random(self) -> str:
+        """returns a random file from the dataset"""
+        random_file = self._get_random()
+        self.played_files.append(random_file)
+
+        return os.path.join(self.p_dataset, random_file)
+
+    def _get_next(self) -> str:
+        if self.verbose:
+            console.log(
+                f"{self.tag} finding most similar file to '{self.played_files[-1]}'"
+            )
+
+        [filename, transformations] = extract_transformations(self.played_files[-1])
+        parent_track, _ = filename.split("_")
+        console.log(
+            f"{self.tag} extracted '{self.played_files[-1]}' -> '{filename}' and {transformations}"
+        )
+        sorted_row = self.sim_table.loc[filename].sort_values(
+            ascending=False, key=lambda x: x.str["sim"]
+        )
+
+        return self._get_random()
+
+    def _get_easy(self) -> str:
+        if self.verbose:
+            console.log(f"{self.tag} played files: {self.played_files}")
+            console.log(f"{self.tag} num_repeats: {self.n_track_repeats}")
+        if self.n_track_repeats < 8:
+            console.log(f"{self.tag} transitioning to next segment")
+            self.n_track_repeats += 1
+            return self._get_neighbor()
+        else:
+            console.log(f"{self.tag} transitioning to next track")
+            self.n_track_repeats = 0
+            return self._get_random()
+
+    def _get_neighbor(self) -> str:
+        current_file = os.path.basename(self.played_files[-1])
 
         for col_name in NEIGHBOR_COL_PRIORITIES:
             neighbor = self.neighbor_table.loc[current_file, col_name]
@@ -103,20 +144,13 @@ class Seeker(Worker):
                     console.log(
                         f"{self.tag} found neighboring file '{neighbor}' at position '{col_name}'"
                     )
-                return f"{neighbor}"
+                return str(neighbor)
 
         console.log(
             f"{self.tag} unable to find neighbor for '{current_file}', choosing randomly"
         )
 
         return self._get_random()
-
-    def get_random(self) -> str:
-        """returns a random file from the dataset"""
-        random_file = self._get_random()
-        self.played_files.append(random_file)
-
-        return os.path.join(self.p_dataset, random_file)
 
     def _get_random(self) -> str:
         if self.verbose:
@@ -132,4 +166,4 @@ class Seeker(Worker):
                     [m for m in os.listdir(self.p_dataset) if m.endswith(".mid")]
                 )
 
-        return random_file
+        return str(random_file)

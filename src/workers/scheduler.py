@@ -7,7 +7,7 @@ from queue import PriorityQueue
 from utils import console
 from .worker import Worker
 
-N_TICKS_PER_BEAT: int = 96  # standard
+N_TICKS_PER_BEAT: int = 220
 
 
 class Scheduler(Worker):
