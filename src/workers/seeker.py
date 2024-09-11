@@ -20,9 +20,7 @@ class Seeker(Worker):
     def __init__(
         self, params, table_path: str, dataset_path: str, verbose: bool = False
     ):
-        # load state
-        self.tag = params.tag
-        self.params = params
+        super().__init__(params)
         self.mode = params.mode
         self.p_table = table_path
         self.p_dataset = dataset_path
@@ -109,9 +107,9 @@ class Seeker(Worker):
         console.log(
             f"{self.tag} extracted '{self.played_files[-1]}' -> '{filename}' and {transformations}"
         )
-        sorted_row = self.sim_table.loc[filename].sort_values(
-            ascending=False, key=lambda x: x.str["sim"]
-        )
+        # sorted_row = self.sim_table.loc[filename].sort_values(
+        #     ascending=False, key=lambda x: x.str["sim"]
+        # )
 
         return self._get_random()
 

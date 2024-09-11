@@ -12,7 +12,7 @@ class Player(Worker):
     td_last_note: datetime
 
     def __init__(self, params, bpm: int, t_start: datetime, verbose: bool = False):
-        self.tag = params.tag
+        super().__init__(params)
         self.midi_port = mido.open_output(params.midi_port)  # type: ignore
         self.bpm = bpm
         self.tempo = mido.bpm2tempo(bpm)

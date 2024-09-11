@@ -28,7 +28,7 @@ class Scheduler(Worker):
         t_start: datetime,
         verbose: bool = False,
     ):
-        self.tag = params.tag
+        super().__init__(params)
         self.lead_bar = params.lead_bar
         self.bpm = bpm
         self.tempo = mido.bpm2tempo(self.bpm)
