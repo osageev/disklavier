@@ -28,7 +28,7 @@ class Scheduler(Worker):
         t_start: datetime,
         verbose: bool = False,
     ):
-        super().__init__(params)
+        super().__init__(params, verbose=verbose)
         self.lead_bar = params.lead_bar
         self.bpm = bpm
         self.tempo = mido.bpm2tempo(self.bpm)
@@ -37,7 +37,6 @@ class Scheduler(Worker):
         self.pf_midi_recording = recording_file_path
         self.p_playlist = playlist_path
         self.td_start = t_start
-        self.verbose = verbose
         console.log(f"{self.tag} initialization complete")
 
     def enqueue_midi(self, pf_midi: str, q_midi: PriorityQueue) -> float:

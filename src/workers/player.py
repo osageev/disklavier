@@ -12,13 +12,12 @@ class Player(Worker):
     td_last_note: datetime
 
     def __init__(self, params, bpm: int, t_start: datetime, verbose: bool = False):
-        super().__init__(params)
+        super().__init__(params, verbose=verbose)
         self.midi_port = mido.open_output(params.midi_port)  # type: ignore
         self.bpm = bpm
         self.tempo = mido.bpm2tempo(bpm)
         self.td_start = t_start
         self.td_last_note = t_start
-        self.verbose = verbose
         console.log(
             f"{self.tag} initialization complete, start time is {self.td_start.strftime('%H:%M:%S.%f')[:-3]}"
         )

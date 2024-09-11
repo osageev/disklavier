@@ -1,8 +1,32 @@
 import re
 from rich.console import Console
-
+from threading import Event
+import time
+import pygame
 
 console = Console(record=True, log_time_format="%m-%d %H:%M:%S.%f")
+
+
+def tick(
+    bpm: int, stop_event: Event, p: str = "[cyan]metro[/cyan] : ", do_print: bool = True
+):
+    pygame.mixer.init()
+    tick_sound = pygame.mixer.Sound("data/m_tick.wav")
+    start_time = time.time()
+    last_beat = start_time
+
+    while not stop_event.is_set():
+        beat = time.time()
+        if beat - last_beat >= 60.0 / bpm:
+            if do_print:
+                console.log(
+                    f"{p} [grey50]tick! [bright_black]({beat - last_beat:.02f}s)"
+                )
+            tick_sound.play()
+            last_beat = beat
+
+        time.sleep(0.01)
+    return
 
 
 def extract_transformations(filename: str) -> tuple[str, dict[str, int]]:
