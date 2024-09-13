@@ -67,8 +67,8 @@ def main(args, params):
     pf_seed = None
     match params.initialization:
         case "recording":  # collect user recording
-            # TODO: get recording if no seed file is specified
-            # seeker.played_files.append(recording_path)
+            recorder.run()
+            seeker.played_files.append(pf_player_recording)
             raise NotImplementedError
         case "kickstart":  # use specified file as seed
             try:
