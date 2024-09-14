@@ -1,7 +1,6 @@
 import os
 import csv
 import time
-import mido
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 import pygame
@@ -12,7 +11,7 @@ from argparse import ArgumentParser
 from multiprocessing import Process
 from datetime import datetime, timedelta
 
-from workers import Metronome, Player, Scheduler, Seeker
+import workers
 from utils import console
 
 
@@ -25,7 +24,8 @@ def main(args, params):
 
     # filesystem setup
     p_log = os.path.join(args.output, "logs", f"{ts_start}")
-    pf_recording = os.path.join(p_log, f"recording_{ts_start}.mid")
+    pf_player_recording = os.path.join(p_log, f"player_recording_{ts_start}.mid")
+    pf_master_recording = os.path.join(p_log, f"master_recording_{ts_start}.mid")
     p_playlist = os.path.join(p_log, "playlist")
     pf_playlist = os.path.join(p_log, f"playlist_{ts_start}.csv")
 
@@ -42,25 +42,32 @@ def main(args, params):
     console.log(f"{tag} filesystem set up complete")
 
     # worker setup
-    scheduler = Scheduler(
+    scheduler = workers.Scheduler(
         params.scheduler,
         args.bpm,
         p_log,
-        pf_recording,
+        pf_master_recording,
         p_playlist,
         td_start,
         verbose=args.verbose,
     )
-    seeker = Seeker(params.seeker, args.tables, args.dataset, verbose=args.verbose)
-    player = Player(params.player, args.bpm, td_start, verbose=args.verbose)
-
+    seeker = workers.Seeker(
+        params.seeker, args.tables, args.dataset, verbose=args.verbose
+    )
+    player = workers.Player(params.player, args.bpm, td_start, verbose=args.verbose)
+    recorder = workers.Recorder(
+        params.recorder,
+        args.bpm,
+        pf_player_recording,
+        verbose=args.verbose,
+    )
     # data setup
     pf_seed = None
     match params.initialization:
         case "recording":  # collect user recording
-            # TODO: get recording if no seed file is specified
-            # seeker.played_files.append(recording_path)
-            raise NotImplementedError
+            recorder.run()
+            pf_seed = pf_player_recording
+            seeker.played_files.append(pf_player_recording)
         case "kickstart":  # use specified file as seed
             try:
                 if params.kickstart_path:
@@ -73,7 +80,7 @@ def main(args, params):
             pf_seed = seeker.get_random()
             console.log(f"{tag} [cyan]RANDOM INIT[/cyan] - '{pf_seed}'")
 
-    if scheduler.init_outfile(pf_recording):
+    if scheduler.init_outfile(pf_master_recording):
         console.log(f"{tag} successfully initialized recording")
     else:
         console.log(f"{tag} [red]error initializing recording, exiting")
@@ -103,7 +110,7 @@ def main(args, params):
         player.td_last_note = td_start
         thread_player = Thread(target=player.play, name="player", args=(q_playback,))
         thread_player.start()
-        metronome = Metronome(params.metronome, args.bpm, td_start)
+        metronome = workers.Metronome(params.metronome, args.bpm, td_start)
         process_metronome = Process(target=metronome.tick, name="metronome")
         process_metronome.start()
         while n_files < params.n_transitions:
