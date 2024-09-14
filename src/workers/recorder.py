@@ -6,6 +6,7 @@ from threading import Thread, Event
 
 from .worker import Worker
 from utils import console, tick
+from .scheduler import N_TICKS_PER_BEAT
 
 from typing import List
 
@@ -55,7 +56,6 @@ class Recorder(Worker):
                             f"{self.tag} recorded {(end_time - start_time).total_seconds():.02f} s"
                         )
                         self.is_recording = False
-
                         self.stop_tick_event.set()
                         self.metro_thread.join()
 
@@ -65,7 +65,9 @@ class Recorder(Worker):
                                 f"{self.tag} saving recording '{os.path.basename(self.pf_midi_recording)}'"
                             )
 
-                            self.save_midi()
+                            # write out recording
+                            midi.tracks.append(track)
+                            midi.save(self.pf_midi_recording)
                             break
                         else:
                             # return to waiting for pedal press state
@@ -98,12 +100,11 @@ class Recorder(Worker):
                     else:
                         msg.time = int(
                             (current_time - last_note_time).total_seconds()
-                            * midi.ticks_per_beat
+                            * N_TICKS_PER_BEAT
                             * self.tempo
                             / 60
                         )
                     self.recorded_notes.append(msg)
-                    track.append(msg)
                     console.log(f"{self.tag} \t{msg}")
                     last_note_time = current_time
 

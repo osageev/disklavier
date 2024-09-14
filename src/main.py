@@ -61,15 +61,13 @@ def main(args, params):
         pf_player_recording,
         verbose=args.verbose,
     )
-    recorder.run()
-
     # data setup
     pf_seed = None
     match params.initialization:
         case "recording":  # collect user recording
             recorder.run()
+            pf_seed = pf_player_recording
             seeker.played_files.append(pf_player_recording)
-            raise NotImplementedError
         case "kickstart":  # use specified file as seed
             try:
                 if params.kickstart_path:
