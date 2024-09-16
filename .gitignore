@@ -11,6 +11,7 @@ ml/outputs/runs
 *.parquet
 *.zip
 *.json
+*.bin
 
 .DS_STORE
 

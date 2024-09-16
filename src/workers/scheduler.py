@@ -1,6 +1,5 @@
 import os
 import mido
-from shutil import copy2
 from datetime import datetime
 from queue import PriorityQueue
 
@@ -222,14 +221,5 @@ class Scheduler(Worker):
         # midi_out.print_tracks()
         os.remove(self.pf_midi_recording)
         midi_out.save(self.pf_midi_recording)
-
-        # copy source file to playlist folder
-        copy2(
-            pf_midi,
-            os.path.join(
-                self.p_playlist,
-                f"{self.n_files_queued:02d} {os.path.basename(pf_midi)}",
-            ),
-        )
 
         return os.path.isfile(self.pf_midi_recording)
