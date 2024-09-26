@@ -1,7 +1,7 @@
 #!/bin/bash
 DATASET="test_micro"
 
-cd "$(dirname "$0")"/..
+cd "$(dirname "$0")"/.. || exit
 python build_dataset.py\
     --data_dir "data/datasets/$DATASET"\
     --dataset_name "$DATASET"\

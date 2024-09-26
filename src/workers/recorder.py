@@ -1,6 +1,6 @@
 import os
 import mido
-from datetime import datetime
+from datetime import datetime, timedelta
 import mido
 from threading import Thread, Event
 
@@ -27,7 +27,7 @@ class Recorder(Worker):
         self.tempo = mido.bpm2tempo(self.bpm)
         self.pf_midi_recording = recording_file_path
 
-    def run(self):
+    def run(self) -> float:
         start_time = datetime.now()
         end_time = 0
         last_note_time = start_time
@@ -68,7 +68,13 @@ class Recorder(Worker):
                             # write out recording
                             midi.tracks.append(track)
                             midi.save(self.pf_midi_recording)
-                            break
+
+                            console.log(
+                                f"{self.tag} saved recording '{self.pf_midi_recording}':"
+                            )
+                            mid = mido.MidiFile(self.pf_midi_recording)
+                            mid.print_tracks()
+                            return (end_time - start_time).total_seconds()
                         else:
                             # return to waiting for pedal press state
                             console.log(f"{self.tag} no notes recorded")
@@ -101,12 +107,14 @@ class Recorder(Worker):
                         msg.time = int(
                             (current_time - last_note_time).total_seconds()
                             * N_TICKS_PER_BEAT
-                            * self.tempo
+                            * self.bpm
                             / 60
                         )
+                    track.append(msg)
                     self.recorded_notes.append(msg)
                     console.log(f"{self.tag} \t{msg}")
                     last_note_time = current_time
+        return -1.0
 
     def save_midi(self) -> None:
         """Saves the recorded notes to a MIDI file."""
