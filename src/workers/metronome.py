@@ -12,7 +12,7 @@ class Metronome(Worker):
     def __init__(self, params, bpm: int, t_start: datetime):
         super().__init__(params)
         self.bpm = bpm
-        self.do_tick = params.do_tick
+        self.do_tick = params.do_tick if hasattr(params, "do_tick") else False
         self.wav_file_1 = params.tick_1
         self.wav_file_2 = params.tick_2
         self.td_start = t_start

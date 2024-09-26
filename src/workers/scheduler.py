@@ -7,6 +7,7 @@ from utils import console
 from .worker import Worker
 
 N_TICKS_PER_BEAT: int = 220
+N_TRANSITIONS_INIT: int = 10
 
 
 class Scheduler(Worker):
@@ -89,10 +90,10 @@ class Scheduler(Worker):
         ):
 
             _ = self._gen_transitions(self.ts_transitions[-1], n_stamps=1)
-        if self._log_midi(pf_midi):
-            console.log(f"{self.tag} successfully updated recording file")
-        else:
-            console.log(f"{self.tag} [orange]error updating recording file")
+        # if self._log_midi(pf_midi):
+        #     console.log(f"{self.tag} successfully updated recording file")
+        # else:
+        #     console.log(f"{self.tag} [orange]error updating recording file")
 
         self.n_files_queued += 1
 
@@ -102,7 +103,7 @@ class Scheduler(Worker):
 
         return mido.tick2second(tt_sum, N_TICKS_PER_BEAT, self.tempo)
 
-    def init_outfile(self, pf_midi: str) -> bool:
+    def init_outfile(self, pf_midi: str, offset: float = 0) -> bool:
         midi = mido.MidiFile()
         tick_track = mido.MidiTrack()
 
@@ -123,7 +124,9 @@ class Scheduler(Worker):
         tick_track.append(mido.MetaMessage("set_tempo", tempo=self.tempo, time=0))
 
         # transition messages
-        mm_transitions = self._gen_transitions(n_stamps=10)
+        mm_transitions = self._gen_transitions(
+            ts_offset=offset, n_stamps=N_TRANSITIONS_INIT
+        )
         for mm_transition in mm_transitions:
             tick_track.append(mm_transition)
         tick_track.append(mido.MetaMessage("end_of_track", time=1))

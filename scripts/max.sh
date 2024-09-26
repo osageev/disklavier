@@ -6,4 +6,4 @@ python src/main.py\
     --params "params/max.yaml"\
     --output "data/outputs"\
     --tables "data/tables/$DATASET_NAME"\
-    --bpm $1
+    --verbose --bpm $1

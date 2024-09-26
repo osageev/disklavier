@@ -67,7 +67,7 @@ def main(args, params):
     # data setup
     match params.initialization:
         case "recording":  # collect user recording
-            dt_recording_len = recorder.run()
+            ts_recording_len = recorder.run()
             pf_seed = pf_player_recording
         case "kickstart":  # use specified file as seed
             try:
@@ -85,7 +85,11 @@ def main(args, params):
             console.log(f"{tag} [cyan]RANDOM INIT[/cyan] - '{pf_seed}'")
     seeker.played_files.append(os.path.basename(pf_seed))
 
-    if scheduler.init_outfile(pf_master_recording):
+    # offset by recording length if necessary
+    if scheduler.init_outfile(
+        pf_master_recording,
+        ts_recording_len if params.initialization == "recording" else 0,
+    ):
         console.log(f"{tag} successfully initialized recording")
     else:
         console.log(f"{tag} [red]error initializing recording, exiting")
@@ -94,9 +98,6 @@ def main(args, params):
     # run
     q_playback = PriorityQueue()
     td_start = datetime.now()
-    if params.initialization == "recording":
-        console.log(f"{tag} adding {dt_recording_len.total_seconds} to start time {td_start}")  # type: ignore
-        td_start += dt_recording_len.total_seconds  # type: ignore
     ts_queue = 0
     n_files = 0
     try:

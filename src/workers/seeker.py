@@ -6,6 +6,7 @@ from pretty_midi import PrettyMIDI
 from mido import bpm2tempo
 import redis
 from redis.commands.search.query import Query
+from scipy.spatial.distance import cosine
 
 from .worker import Worker
 from utils import console
@@ -158,7 +159,7 @@ class Seeker(Worker):
                         self.model, self.played_files[-1]
                     )[0]
                     console.log(
-                        f"{self.tag} got clamp embedding {query_embedding.shape()}"
+                        f"{self.tag} got clamp embedding {query_embedding.shape}"
                     )
                 case _:
                     if self.verbose:
@@ -170,19 +171,24 @@ class Seeker(Worker):
                     )
             if self.verbose:
                 console.log(
-                    f"{self.tag} calculated embedding for recording: {query_embedding}"
+                    f"{self.tag} calculated embedding for recording: {query_embedding.shape}"
                 )
         else:
             q_k = f"files:{track}_{segment}_{current_transformation}"
-            query_embedding = self.redis_client.json().get(q_k, f"$.{self.metric}")
+            console.log(f"{self.tag} querying with key '{q_k}'")
+            query_embedding = self.redis_client.json().get(q_k, f"$.{self.metric}")[0]
             if self.verbose:
-                console.log(f"{self.tag} got embedding for '{q_k}': {query_embedding}")
-        console.log(query_embedding)
-        played_files = "|".join(self.construct_keys())
+                console.log(
+                    f"{self.tag} got embedding for '{q_k}': {len(query_embedding)}"
+                )
+        played_keys = [k.split(":")[-1] for k in self.construct_keys()]
+        played_files = "|".join(played_keys)
+        q = f"(-@files:{{{played_files}}})=>[KNN 10 @{self.metric} $query_vector AS vector_score]" 
+        console.log(f"{self.tag} trying query:\n'{q}'")
         nearest_neighbors = (
             self.redis_client.ft(f"idx:files_{self.metric}_vss")
             .search(
-                Query(f"(*)=>[KNN 20 @{self.metric} $query_vector AS vector_score]")
+                Query(q)
                 .sort_by("vector_score")
                 .return_fields("vector_score", "id")
                 .dialect(4),
@@ -193,12 +199,18 @@ class Seeker(Worker):
 
         console.log(f"{self.tag} got nearest neighbors:", nearest_neighbors)
 
+        next_file = self._get_random()
         for neighbor in nearest_neighbors:
             filename = neighbor["id"].split(":")[-1]
             # if not self.allow_multiple_plays:
             if self.base_file(filename) not in self.played_files:
                 next_file = f"{filename}.mid"
                 break
+
+        best_shift = self.match_pitch(next_file, current_transformation)
+        console.log(
+            f"{self.tag} best shift for '{os.path.basename(next_file)}' is actually {best_shift}"
+        )
 
         return os.path.join(os.path.dirname(self.p_dataset), "train", next_file)
 
@@ -296,7 +308,45 @@ class Seeker(Worker):
                     console.log(f"No GPU available, using the CPU instead.")
                     device = torch.device("cpu")
                 self.model = clamp.CLaMP.from_pretrained(clamp.CLAMP_MODEL_NAME)
-                console.log(f"{self.tag} loaded model:\n{self.model.eval}")
+                if self.verbose:
+                    console.log(f"{self.tag} loaded model:\n{self.model.eval}")
                 self.model = self.model.to(device)
             case _:
                 raise TypeError(f"Unsupported model specified: {self.metric}")
+
+    def match_pitch(self, midi_file: str, transform: str) -> int:
+
+        original_midi = PrettyMIDI(
+            os.path.join(
+                os.path.dirname(self.p_dataset),
+                "train",
+                f"{self.played_files[-1][:-4]}_{transform}.mid",
+            )
+        )
+        original_pitch_class_histogram = original_midi.get_pitch_class_histogram(
+            use_duration=True, use_velocity=True, normalize=True
+        )
+
+        best_shift = 0
+        best_similarity = float("-inf")
+
+        for shift in range(-12, 13):
+            shifted_midi = PrettyMIDI(
+                os.path.join(os.path.dirname(self.p_dataset), "train", midi_file)
+            )
+            for instrument in shifted_midi.instruments:
+                for note in instrument.notes:
+                    note.pitch += shift
+            shifted_pitch_class_histogram = shifted_midi.get_pitch_class_histogram(
+                use_duration=True, use_velocity=True, normalize=True
+            )
+
+            similarity = 1 - cosine(
+                original_pitch_class_histogram, shifted_pitch_class_histogram
+            )
+
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_shift = shift
+
+        return best_shift
