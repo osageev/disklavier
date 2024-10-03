@@ -1,17 +1,20 @@
-in_port: 'Disklavier'
 n_beats_per_segment: 8
-n_transitions: 100
+n_transitions: 10
 ts_min_queue_length: 12
-initialization: "kickstart"
-"kickstart_path": "20240213-100-06_0283-0287.mid"
+initialization: "kickstart" # kickstart random recording
+kickstart_path: "c4v100-060-03_0000-0005.mid"
 scheduler:
   tag: "[green]schedl[/green]:"
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
-  seed: 999
-  mode: "sequential" # best easy repeat random sequential
-  metric: "pitch_histogram"
+  seed: 108
+  mode: "best" # best easy repeat random sequential
+  metric: "clamp"
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
 player:
   tag: "[blue]player[/blue]:"
   midi_port: 'Disklavier'
@@ -19,3 +22,7 @@ metronome:
   tag: "[magenta]metro[/magenta] :"
   tick_1: "data/m_hat.wav"
   tick_2: "data/m_tick.wav"
+recorder:
+  tag: "[red]record[/red]:"
+  midi_port: 'Disklavier'
+  record: 67 # left pedal

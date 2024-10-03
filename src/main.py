@@ -1,7 +1,6 @@
 import os
 import csv
 import time
-import mido
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 import pygame
@@ -12,7 +11,7 @@ from argparse import ArgumentParser
 from multiprocessing import Process
 from datetime import datetime, timedelta
 
-from workers import Metronome, Player, Scheduler, Seeker
+import workers
 from utils import console
 
 
@@ -25,7 +24,8 @@ def main(args, params):
 
     # filesystem setup
     p_log = os.path.join(args.output, "logs", f"{ts_start}")
-    pf_recording = os.path.join(p_log, f"recording_{ts_start}.mid")
+    pf_player_recording = os.path.join(p_log, f"player_recording_{ts_start}.mid")
+    pf_master_recording = os.path.join(p_log, f"master_recording_{ts_start}.mid")
     p_playlist = os.path.join(p_log, "playlist")
     pf_playlist = os.path.join(p_log, f"playlist_{ts_start}.csv")
 
@@ -36,44 +36,60 @@ def main(args, params):
             console.log(f"{tag} creating new logging folder at '{p_log}'")
         os.makedirs(p_log)
         os.makedirs(p_playlist)  # folder for copy of MIDI files
-    with open(pf_playlist, "w") as f:
-        writer = csv.writer(f)
-        writer.writerow(["number", "timestamp", "filepath"])
+    write_log(pf_playlist, "number", "timestamp", "filepath")
     console.log(f"{tag} filesystem set up complete")
 
     # worker setup
-    scheduler = Scheduler(
+    scheduler = workers.Scheduler(
         params.scheduler,
         args.bpm,
         p_log,
-        pf_recording,
+        pf_master_recording,
         p_playlist,
         td_start,
         verbose=args.verbose,
     )
-    seeker = Seeker(params.seeker, args.tables, args.dataset, verbose=args.verbose)
-    player = Player(params.player, args.bpm, td_start, verbose=args.verbose)
-
+    seeker = workers.Seeker(
+        params.seeker,
+        args.tables,
+        args.dataset,
+        p_playlist,
+        args.bpm,
+        verbose=args.verbose,
+    )
+    player = workers.Player(params.player, args.bpm, td_start, verbose=args.verbose)
+    recorder = workers.Recorder(
+        params.recorder,
+        args.bpm,
+        pf_player_recording,
+        verbose=args.verbose,
+    )
     # data setup
-    pf_seed = None
     match params.initialization:
         case "recording":  # collect user recording
-            # TODO: get recording if no seed file is specified
-            # seeker.played_files.append(recording_path)
-            raise NotImplementedError
+            ts_recording_len = recorder.run()
+            pf_seed = pf_player_recording
         case "kickstart":  # use specified file as seed
             try:
                 if params.kickstart_path:
                     pf_seed = os.path.join(args.dataset, params.kickstart_path)
                     console.log(f"{tag} [cyan]KICKSTART[/cyan] - '{pf_seed}'")
-                    seeker.played_files.append(pf_seed)
             except AttributeError:
-                console.log(f"{tag} no file specified to kickstart from")
+                console.log(
+                    f"{tag} no file specified to kickstart from, choosing randomly"
+                )
+                pf_seed = seeker.get_random()
+                console.log(f"{tag} [cyan]RANDOM INIT[/cyan] - '{pf_seed}'")
         case "random" | _:  # choose random file from library
             pf_seed = seeker.get_random()
             console.log(f"{tag} [cyan]RANDOM INIT[/cyan] - '{pf_seed}'")
+    seeker.played_files.append(os.path.basename(pf_seed))
 
-    if scheduler.init_outfile(pf_recording):
+    # offset by recording length if necessary
+    if scheduler.init_outfile(
+        pf_master_recording,
+        ts_recording_len if params.initialization == "recording" else 0,
+    ):
         console.log(f"{tag} successfully initialized recording")
     else:
         console.log(f"{tag} [red]error initializing recording, exiting")
@@ -82,28 +98,24 @@ def main(args, params):
     # run
     q_playback = PriorityQueue()
     td_start = datetime.now()
-    td_now = datetime.now()
     ts_queue = 0
     n_files = 0
     try:
         scheduler.td_start = td_start
         ts_queue += scheduler.enqueue_midi(pf_seed, q_playback)  # type: ignore
-        with open(pf_playlist, "a") as f:
-            writer = csv.writer(f)
-            writer.writerow(
-                [
-                    n_files,
-                    td_now.strftime("%y-%m-%d %H:%M:%S"),
-                    pf_seed,
-                ]
-            )
+        write_log(
+            pf_playlist,
+            n_files,
+            datetime.now().strftime("%y-%m-%d %H:%M:%S"),
+            pf_seed,
+        )
 
         # start playback
         player.td_start = td_start
         player.td_last_note = td_start
         thread_player = Thread(target=player.play, name="player", args=(q_playback,))
         thread_player.start()
-        metronome = Metronome(params.metronome, args.bpm, td_start)
+        metronome = workers.Metronome(params.metronome, args.bpm, td_start)
         process_metronome = Process(target=metronome.tick, name="metronome")
         process_metronome.start()
         while n_files < params.n_transitions:
@@ -112,15 +124,12 @@ def main(args, params):
                 pf_next_file = seeker.get_next()
                 ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
                 console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
-                with open(pf_playlist, "a") as f:
-                    writer = csv.writer(f)
-                    writer.writerow(
-                        [
-                            n_files,
-                            datetime.now().strftime("%y-%m-%d %H:%M:%S"),
-                            pf_next_file,
-                        ]
-                    )
+                write_log(
+                    pf_playlist,
+                    n_files,
+                    datetime.now().strftime("%y-%m-%d %H:%M:%S"),
+                    pf_next_file,
+                )
                 n_files += 1
 
             time.sleep(0.1)
@@ -159,6 +168,13 @@ def main(args, params):
     # run complete, save and exit
     console.save_text(os.path.join(p_log, f"{ts_start}.log"))
     console.log(f"{tag}[green bold] session complete, exiting")
+
+
+def write_log(filename: str, *args):
+    """Write the provided arguments as a row to the specified CSV file."""
+    with open(filename, mode="a", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(args)
 
 
 if __name__ == "__main__":

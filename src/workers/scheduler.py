@@ -1,6 +1,5 @@
 import os
 import mido
-from shutil import copy2
 from datetime import datetime
 from queue import PriorityQueue
 
@@ -8,6 +7,7 @@ from utils import console
 from .worker import Worker
 
 N_TICKS_PER_BEAT: int = 220
+N_TRANSITIONS_INIT: int = 10
 
 
 class Scheduler(Worker):
@@ -28,7 +28,7 @@ class Scheduler(Worker):
         t_start: datetime,
         verbose: bool = False,
     ):
-        self.tag = params.tag
+        super().__init__(params, verbose=verbose)
         self.lead_bar = params.lead_bar
         self.bpm = bpm
         self.tempo = mido.bpm2tempo(self.bpm)
@@ -37,7 +37,6 @@ class Scheduler(Worker):
         self.pf_midi_recording = recording_file_path
         self.p_playlist = playlist_path
         self.td_start = t_start
-        self.verbose = verbose
         console.log(f"{self.tag} initialization complete")
 
     def enqueue_midi(self, pf_midi: str, q_midi: PriorityQueue) -> float:
@@ -91,10 +90,10 @@ class Scheduler(Worker):
         ):
 
             _ = self._gen_transitions(self.ts_transitions[-1], n_stamps=1)
-        if self._log_midi(pf_midi):
-            console.log(f"{self.tag} successfully updated recording file")
-        else:
-            console.log(f"{self.tag} [orange]error updating recording file")
+        # if self._log_midi(pf_midi):
+        #     console.log(f"{self.tag} successfully updated recording file")
+        # else:
+        #     console.log(f"{self.tag} [orange]error updating recording file")
 
         self.n_files_queued += 1
 
@@ -104,7 +103,7 @@ class Scheduler(Worker):
 
         return mido.tick2second(tt_sum, N_TICKS_PER_BEAT, self.tempo)
 
-    def init_outfile(self, pf_midi: str) -> bool:
+    def init_outfile(self, pf_midi: str, offset: float = 0) -> bool:
         midi = mido.MidiFile()
         tick_track = mido.MidiTrack()
 
@@ -125,7 +124,9 @@ class Scheduler(Worker):
         tick_track.append(mido.MetaMessage("set_tempo", tempo=self.tempo, time=0))
 
         # transition messages
-        mm_transitions = self._gen_transitions(n_stamps=10)
+        mm_transitions = self._gen_transitions(
+            ts_offset=offset, n_stamps=N_TRANSITIONS_INIT
+        )
         for mm_transition in mm_transitions:
             tick_track.append(mm_transition)
         tick_track.append(mido.MetaMessage("end_of_track", time=1))
@@ -223,14 +224,5 @@ class Scheduler(Worker):
         # midi_out.print_tracks()
         os.remove(self.pf_midi_recording)
         midi_out.save(self.pf_midi_recording)
-
-        # copy source file to playlist folder
-        copy2(
-            pf_midi,
-            os.path.join(
-                self.p_playlist,
-                f"{self.n_files_queued:02d} {os.path.basename(pf_midi)}",
-            ),
-        )
 
         return os.path.isfile(self.pf_midi_recording)
