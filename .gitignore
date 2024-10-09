@@ -4,14 +4,15 @@ data/outputs
 data/ableton
 notebooks/tmp
 inputs/*
-ml/outputs/checkpoints
-ml/outputs/runs
+src/ml/outputs/checkpoints
+src/ml/outputs/runs
 *.tar.gz
 *.feather
 *.parquet
 *.zip
 *.json
 *.bin
+*.h5
 
 .DS_STORE
 

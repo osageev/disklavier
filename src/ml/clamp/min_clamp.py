@@ -157,7 +157,7 @@ def main():
     key_filenames = []
 
     # load filenames
-    for root, dirs, files in os.walk("inference/20240621"):
+    for root, dirs, files in os.walk("../../inference/20240621"):
         for file in files:
             filename = root + "/" + file
             if filename.endswith(".abc"):
@@ -167,21 +167,7 @@ def main():
     # convert to abc
     for filename in progress.track(key_filenames):
         print(f"loading '{filename}'")
-        key = filename  # key = unidecode(load_music(filename))
-        keys.append(key)
-
-    # non_empty_keys = []
-    # non_empty_filenames = []
-    # for key, filename in zip(keys, key_filenames):
-    #     if key.strip() != "":
-    #         non_empty_keys.append(key)
-    #         non_empty_filenames.append(filename)
-    #     else:
-    #         print(f"File '{filename}' not successfully loaded")
-
-    # keys = non_empty_keys
-    # key_filenames = non_empty_filenames
-
+        keys.append(filename)
     # encode keys
     key_features = []
     if len(keys) > 0:

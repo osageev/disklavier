@@ -7,7 +7,6 @@ from utils import CLaMP, MusicPatchilizer
 from transformers import AutoTokenizer
 from rich.progress import track
 from rich.console import Console
-from music21 import converter
 
 CLAMP_MODEL_NAME = "sander-wood/clamp-small-1024"
 TEXT_MODEL_NAME = "distilroberta-base"
@@ -17,7 +16,7 @@ SKIP_MXL = True
 
 console = Console(log_time_format="%m-%d %H:%M:%S.%f")
 dataset = "test"
-p_in = os.path.join("..", "..", "disklavier", "data", "datasets", dataset, "synthetic")
+p_in = os.path.join("data", "datasets", dataset, "synthetic")
 p_out = os.path.join("inference", dataset)
 
 # init torch device
@@ -113,7 +112,7 @@ def load_music(pf_file: str) -> str:
     # console.log(f"converting '{pf_file}'")
     if SKIP_MXL:
         # console.log("skipping intermediate musicxml conversion")
-        args = ["./midi2abc", pf_file]
+        args = ["ml/clamp/midi2abc", pf_file]
     else:
         path = mid2mxl(pf_file)
         args = (
