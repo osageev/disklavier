@@ -1,7 +1,11 @@
+import os
 import re
-from rich.console import Console
-from threading import Event
+import json
 import time
+from threading import Event
+from rich.console import Console
+
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 import pygame
 
 console = Console(record=True, log_time_format="%m-%d %H:%M:%S.%f")

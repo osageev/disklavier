@@ -8,17 +8,18 @@ from transformers import AutoTokenizer
 from .utils import CLaMP, MusicPatchilizer
 
 console = Console(log_time_format="%m-%d %H:%M:%S.%f")
-MIDI2ABC = "src/ml/clamp/midi2abc"
+MIDI2ABC = "files/midi2abc"
+
 
 class Clamp:
-    def __init__(self, verbose:bool=False):
+    def __init__(self, verbose: bool = False):
         self.verbose = verbose
-        # if torch.cuda.is_available():
-        #     self.device = torch.device("cuda")
-        #     console.log(f"Using GPU: {torch.cuda.get_device_name(0)}")
-        # else:
-        #     console.log("No GPU available, using the CPU instead.")
-        self.device = torch.device("cpu")
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            console.log(f"Using GPU: {torch.cuda.get_device_name(0)}")
+        else:
+            console.log("No GPU available, using the CPU instead.")
+            self.device = torch.device("cpu")
 
         self.clamp_model_name = "sander-wood/clamp-small-1024"
         self.text_model_name = "distilroberta-base"
@@ -28,7 +29,7 @@ class Clamp:
         # Load CLaMP model
         self.model = CLaMP.from_pretrained(self.clamp_model_name)
         self.music_length = self.model.config.max_length
-        self.model = self.model.to(self.device) # type: ignore
+        self.model = self.model.to(self.device)  # type: ignore
         self.model.eval()
 
         # Initialize patchilizer and tokenizer
@@ -52,10 +53,28 @@ class Clamp:
         music = ""
         for line in lines:
             if (
-                line[:2] in [
-                    "A:", "B:", "C:", "D:", "F:", "G", "H:", "N:", "O:",
-                    "R:", "r:", "S:", "T:", "W:", "w:", "X:", "Z:",
-                ] or line == "\n" or (line.startswith("%") and not line.startswith("%%score"))
+                line[:2]
+                in [
+                    "A:",
+                    "B:",
+                    "C:",
+                    "D:",
+                    "F:",
+                    "G",
+                    "H:",
+                    "N:",
+                    "O:",
+                    "R:",
+                    "r:",
+                    "S:",
+                    "T:",
+                    "W:",
+                    "w:",
+                    "X:",
+                    "Z:",
+                ]
+                or line == "\n"
+                or (line.startswith("%") and not line.startswith("%%score"))
             ):
                 continue
             else:
@@ -65,7 +84,7 @@ class Clamp:
                 else:
                     music += line + "\n"
         return unidecode(music)
-    
+
     def load_music(self, file_path: str) -> str:
         """
         Load music data from a file.
@@ -76,12 +95,14 @@ class Clamp:
         Returns:
             lines (list): List of lines from the music file.
         """
+        p = subprocess.Popen(["pwd"], stdout=subprocess.PIPE)
+        print(f"pwd result: '{p.communicate()[0].decode('utf-8')}'")
         p = subprocess.Popen([MIDI2ABC, file_path], stdout=subprocess.PIPE)
         result = p.communicate()
         output = result[0].decode("utf-8").replace("\r", "")
         lines = unidecode(output).split("\n")
         return self.abc_filter(lines)
-        
+
     def encode(self, music: list[str]) -> list[torch.Tensor]:
         """
         Encode the music string into tensor format.
@@ -100,7 +121,7 @@ class Clamp:
             ids_list.append(torch.tensor(patches).reshape(-1))
 
         return ids_list
-    
+
     def get_features(self, ids_list: list[torch.Tensor]) -> torch.Tensor:
         """
         Get the features from the CLaMP model.
@@ -115,14 +136,16 @@ class Clamp:
         with torch.no_grad():
             for ids in ids_list:
                 ids = ids.unsqueeze(0)
-                masks = torch.tensor([1] * (int(len(ids[0]) / self.patch_length))).unsqueeze(0)
+                masks = torch.tensor(
+                    [1] * (int(len(ids[0]) / self.patch_length))
+                ).unsqueeze(0)
                 features = self.model.music_enc(ids, masks)["last_hidden_state"]
                 features = self.model.avg_pooling(features, masks)
                 features = self.model.music_proj(features)
 
                 features_list.append(features[0])
         return torch.stack(features_list).cpu()
-    
+
     def run(self, files: list[str]) -> torch.Tensor:
         """
         Run the complete process of loading music, filtering, encoding, and extracting features.
@@ -147,10 +170,15 @@ class Clamp:
 
         encoded_music = self.encode(non_empty_keys)
         features = self.get_features(encoded_music)
-        
+
         return features
-    
-if __name__=="__main__":
-    filenames = [f[:-4] for f in os.listdir("data/datasets/test/dataset samples") if f.endswith(".mid")]
+
+
+if __name__ == "__main__":
+    filenames = [
+        f[:-4]
+        for f in os.listdir("data/datasets/test/dataset samples")
+        if f.endswith(".mid")
+    ]
     model = Clamp()
     model.run(filenames)

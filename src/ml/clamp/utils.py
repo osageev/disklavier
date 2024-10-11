@@ -383,7 +383,10 @@ class CLaMP(PreTrainedModel):
         )
         model = cls(config)
         model.load_state_dict(
-            torch.load(pretrained_model_name_or_path + str("/pytorch_model.bin")),
+            torch.load(
+                pretrained_model_name_or_path + str("/pytorch_model.bin"),
+                weights_only=True,
+            ),
             strict=False,
         )
 

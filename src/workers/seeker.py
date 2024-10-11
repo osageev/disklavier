@@ -2,8 +2,8 @@ import os
 import numpy as np
 import pandas as pd
 from shutil import copy2
-from pretty_midi import PrettyMIDI
 from mido import bpm2tempo
+from pretty_midi import PrettyMIDI
 import redis
 from redis.commands.search.query import Query
 from scipy.spatial.distance import cosine
@@ -11,8 +11,6 @@ from scipy.spatial.distance import cosine
 from .worker import Worker
 from utils import console
 from models import model_list, clamp
-
-NEIGHBOR_COL_PRIORITIES = ["next", "next_2", "prev", "prev_2"]
 
 
 class Seeker(Worker):
@@ -23,6 +21,10 @@ class Seeker(Worker):
     played_files: list[str] = []
     allow_multiple_plays = False
     transformation = {"transpose": 0, "shift": 0}
+    neighbor_col_priorities = ["next", "next_2", "prev", "prev_2"]
+    matches_pos = 3
+    matches_mode = "simple"
+    playlist = {}
 
     def __init__(
         self,
@@ -57,47 +59,47 @@ class Seeker(Worker):
                 decode_responses=True,
             )
 
-        # load similarity table
-        pf_sim_table = os.path.join(self.p_table, "sim.parquet")
-        console.log(f"{self.tag} looking for similarity table '{pf_sim_table}'")
-        if os.path.isfile(pf_sim_table):
-            with console.status("\t\t\t      loading similarities file..."):
-                self.sim_table = pd.read_parquet(pf_sim_table)
-            console.log(
-                f"{self.tag} loaded {len(self.sim_table)}*{len(self.sim_table.columns)} sim table"
-            )
-            console.log(self.sim_table.head())
-        else:
-            console.log(f"{self.tag} error loading similarity table, exiting...")
-            exit()  # TODO: handle this better (return an error, let main handle it)
+        # # load similarity table
+        # pf_sim_table = os.path.join(self.p_table, "sim.parquet")
+        # console.log(f"{self.tag} looking for similarity table '{pf_sim_table}'")
+        # if os.path.isfile(pf_sim_table):
+        #     with console.status("\t\t\t      loading similarities file..."):
+        #         self.sim_table = pd.read_parquet(pf_sim_table)
+        #     console.log(
+        #         f"{self.tag} loaded {len(self.sim_table)}*{len(self.sim_table.columns)} sim table"
+        #     )
+        #     console.log(self.sim_table.head())
+        # else:
+        #     console.log(f"{self.tag} error loading similarity table, exiting...")
+        #     exit()  # TODO: handle this better (return an error, let main handle it)
 
-        # load neighbor table
-        pf_neighbor_table = os.path.join(self.p_table, "neighbor.parquet")
-        console.log(f"{self.tag} looking for neighbor table '{pf_neighbor_table}'")
-        if os.path.isfile(pf_neighbor_table):
-            with console.status("\t\t\t      loading neighbor file..."):
-                self.neighbor_table = pd.read_parquet(pf_neighbor_table)
-            console.log(
-                f"{self.tag} loaded {len(self.neighbor_table)}*{len(self.neighbor_table.columns)} neighbor table"
-            )
-            console.log(self.neighbor_table.head())
-        else:
-            console.log(f"{self.tag} error loading neighbor table, exiting...")
-            exit()  # TODO: handle this better (return an error, let main handle it)
+        # # load neighbor table
+        # pf_neighbor_table = os.path.join(self.p_table, "neighbor.parquet")
+        # console.log(f"{self.tag} looking for neighbor table '{pf_neighbor_table}'")
+        # if os.path.isfile(pf_neighbor_table):
+        #     with console.status("\t\t\t      loading neighbor file..."):
+        #         self.neighbor_table = pd.read_parquet(pf_neighbor_table)
+        #     console.log(
+        #         f"{self.tag} loaded {len(self.neighbor_table)}*{len(self.neighbor_table.columns)} neighbor table"
+        #     )
+        #     console.log(self.neighbor_table.head())
+        # else:
+        #     console.log(f"{self.tag} error loading neighbor table, exiting...")
+        #     exit()  # TODO: handle this better (return an error, let main handle it)
 
-        # load transformation table
-        pf_trans_table = os.path.join(self.p_table, "transformations.parquet")
-        console.log(f"{self.tag} looking for tranformation table '{pf_trans_table}'")
-        if os.path.isfile(pf_trans_table):
-            with console.status("\t\t\t      loading tranformation file..."):
-                self.trans_table = pd.read_parquet(pf_trans_table)
-            console.log(
-                f"{self.tag} loaded {len(self.trans_table)}*{len(self.trans_table.columns)} transformation table"
-            )
-            console.log(self.trans_table.head())
-        else:
-            console.log(f"{self.tag} error loading tranformation table, exiting...")
-            exit()  # TODO: handle this better (return an error, let main handle it)
+        # # load transformation table
+        # pf_trans_table = os.path.join(self.p_table, "transformations.parquet")
+        # console.log(f"{self.tag} looking for tranformation table '{pf_trans_table}'")
+        # if os.path.isfile(pf_trans_table):
+        #     with console.status("\t\t\t      loading tranformation file..."):
+        #         self.trans_table = pd.read_parquet(pf_trans_table)
+        #     console.log(
+        #         f"{self.tag} loaded {len(self.trans_table)}*{len(self.trans_table.columns)} transformation table"
+        #     )
+        #     console.log(self.trans_table.head())
+        # else:
+        #     console.log(f"{self.tag} error loading tranformation table, exiting...")
+        #     exit()  # TODO: handle this better (return an error, let main handle it)
 
         console.log(f"{self.tag} [green]successfully loaded tables")
         console.log(f"{self.tag} initialization complete")
@@ -108,10 +110,12 @@ class Seeker(Worker):
                 next_file = self._get_best()
             case "easy":
                 next_file = self._get_easy()
-            case "sequential":
-                next_file = self._get_neighbor()
+            case "playlist":
+                next_file = self._read_playlist()
             case "repeat":
                 next_file = self.played_files[-1]
+            case "sequential":
+                next_file = self._get_neighbor()
             case "random" | "shuffle" | _:
                 next_file = self._get_random()
 
@@ -122,8 +126,6 @@ class Seeker(Worker):
     def get_random(self) -> str:
         """returns a random file from the dataset"""
         random_file = self._get_random()
-        self.played_files.append(random_file)
-
         return os.path.join(self.p_dataset, random_file)
 
     def _get_best(self) -> str:
@@ -176,15 +178,24 @@ class Seeker(Worker):
         else:
             q_k = f"files:{track}_{segment}_{current_transformation}"
             console.log(f"{self.tag} querying with key '{q_k}'")
-            query_embedding = self.redis_client.json().get(q_k, f"$.{self.metric}")[0]
-            if self.verbose:
-                console.log(
-                    f"{self.tag} got embedding for '{q_k}': {len(query_embedding)}"
-                )
+            query_embedding = self.redis_client.json().get(q_k, f"$.{self.metric}")
+            if query_embedding:
+                query_embedding = query_embedding[0]
+                if self.verbose:
+                    console.log(
+                        f"{self.tag} got embedding for '{q_k}': ({len(query_embedding)})"  # type: ignore
+                    )
+            else:
+                console.log(f"{self.tag} failed to get embedding for '{q_k}'")
         played_keys = [k.split(":")[-1] for k in self.construct_keys()]
         played_files = "|".join(played_keys)
-        q = f"(-@files:{{{played_files}}})=>[KNN 10 @{self.metric} $query_vector AS vector_score]" 
+        # q = f"(-@files:{{{played_files}}})=>[KNN 10 @{self.metric} $query_vector AS vector_score]"
+        q = f"(*)=>[KNN 10 @{self.metric} $query_vector AS vector_score]"
         console.log(f"{self.tag} trying query:\n'{q}'")
+        console.log(
+            f"{self.tag} vector:\n",
+            np.array(query_embedding, dtype=np.float32).tobytes(),
+        )
         nearest_neighbors = (
             self.redis_client.ft(f"idx:files_{self.metric}_vss")
             .search(
@@ -230,7 +241,7 @@ class Seeker(Worker):
     def _get_neighbor(self) -> str:
         current_file = os.path.basename(self.played_files[-1])
 
-        for col_name in NEIGHBOR_COL_PRIORITIES:
+        for col_name in self.neighbor_col_priorities:
             neighbor = self.neighbor_table.loc[current_file, col_name]
 
             # only play files once
@@ -269,6 +280,33 @@ class Seeker(Worker):
 
         return str(random_file)
 
+    def _read_playlist(self) -> str:
+        if self.verbose:
+            console.log(
+                f"{self.tag} playing matches for '{[self.playlist.keys()][self.matches_pos]}'"
+            )
+            console.log(f"{self.tag} already played files:\n{self.played_files}")
+
+        for i, (q, ms) in enumerate(self.playlist.items()):
+            if i == self.matches_pos:
+                console.log(f"{self.tag} [grey30]{i}\t'{q}'")
+                for mode, matches in ms.items():
+                    console.log(f"{self.tag} [grey30]\t'{mode}'")
+                    if mode == self.matches_mode:
+                        for f, s in matches[:5]:
+                            if self.base_file(f"{f}.mid") in self.played_files:
+                                console.log(f"{self.tag} [grey30]\t\t'{f}'\t{s}")
+                            else:
+                                console.log(f"{self.tag} [grey70]\t\t'{f}'\t{s}")
+                                return os.path.join(self.p_dataset, f"{f}.mid")
+                        if self.matches_mode == "cplx":
+                            raise EOFError("playlist complete")
+                        console.log(f"{self.tag} switching modes")
+                        self.matches_mode = "cplx"
+                        seed = self.played_files[0]
+                        return os.path.join(self.p_dataset, f"{q}.mid")
+        return ""
+
     def transform(self, midi_file: str = "") -> str:
         pf_in = self.played_files[-1] if midi_file == "" else midi_file
         pf_out = os.path.join(
@@ -288,7 +326,7 @@ class Seeker(Worker):
 
     def base_file(self, filename: str) -> str:
         pieces = os.path.basename(filename).split("_")
-        return f"{pieces[0]}_{pieces[1]}.mid"
+        return f"{pieces[0]}_{pieces[1]}_{pieces[2][:-4]}.mid"
 
     def construct_keys(self):
         for filename in self.played_files:
@@ -302,20 +340,21 @@ class Seeker(Worker):
                 # init torch device
                 if torch.cuda.is_available():
                     device = torch.device("cuda")
-                    console.log(f"using GPU {torch.cuda.get_device_name(0)}")
+                    console.log(f"{self.tag} Using GPU {torch.cuda.get_device_name(0)}")
 
                 else:
-                    console.log(f"No GPU available, using the CPU instead.")
+                    console.log(f"{self.tag} No GPU available, using the CPU instead.")
                     device = torch.device("cpu")
                 self.model = clamp.CLaMP.from_pretrained(clamp.CLAMP_MODEL_NAME)
                 if self.verbose:
-                    console.log(f"{self.tag} loaded model:\n{self.model.eval}")
-                self.model = self.model.to(device)
+                    console.log(f"{self.tag} Loaded model:\n{self.model.eval}")
+                self.model = self.model.to(device)  # type: ignore
             case _:
-                raise TypeError(f"Unsupported model specified: {self.metric}")
+                raise TypeError(
+                    f"{self.tag} Unsupported model specified: {self.metric}"
+                )
 
     def match_pitch(self, midi_file: str, transform: str) -> int:
-
         original_midi = PrettyMIDI(
             os.path.join(
                 os.path.dirname(self.p_dataset),

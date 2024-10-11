@@ -1,16 +1,16 @@
 n_beats_per_segment: 8
-n_transitions: 10
+n_transitions: 25
 ts_min_queue_length: 12
-initialization: "kickstart" # kickstart random recording
-kickstart_path: "c4v100-060-03_0000-0005.mid"
+initialization: "random" # kickstart random recording
+kickstart_path: "c4v100-060-03_0000-0005.mid" # midi or path to matches.json
 scheduler:
   tag: "[green]schedl[/green]:"
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
-  seed: 108
-  mode: "best" # best easy repeat random sequential
-  metric: "clamp"
+  seed: 1
+  mode: "playlist" # best easy repeat random sequential playlist
+  metric: "pitch_histogram" # pitch_histogram clamp
   redis:
     host: "localhost"
     port: 6379

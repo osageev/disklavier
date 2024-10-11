@@ -1,6 +1,7 @@
 import os
 import csv
 import time
+import json
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 import pygame
@@ -83,6 +84,17 @@ def main(args, params):
         case "random" | _:  # choose random file from library
             pf_seed = seeker.get_random()
             console.log(f"{tag} [cyan]RANDOM INIT[/cyan] - '{pf_seed}'")
+
+    if params.seeker.mode == "playlist":
+        with open("data/matches.json", "r") as f:
+            seeker.playlist = json.load(f)
+        console.log(f"{tag} loaded playlist from 'data/matches.json'")
+        for i, (q, ms) in enumerate(seeker.playlist.items()):
+            if i == seeker.matches_pos:
+                pf_seed = os.path.join(seeker.p_dataset, f"{q}.mid")
+                console.log(f"{tag} added '{pf_seed}' to playlist from matches file")
+                continue
+
     seeker.played_files.append(os.path.basename(pf_seed))
 
     # offset by recording length if necessary

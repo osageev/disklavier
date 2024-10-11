@@ -550,7 +550,7 @@ class CLaMP(PreTrainedModel):
         config = AutoConfig.from_pretrained(local_dir, *model_args, **kwargs)
         model = cls(config)
         model.load_state_dict(
-            torch.load(local_dir + str("/pytorch_model.bin")),
+            torch.load(local_dir + str("/pytorch_model.bin"), weights_only=True),
             strict=False,
         )
 
