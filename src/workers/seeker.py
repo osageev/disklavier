@@ -24,7 +24,7 @@ class Seeker(Worker):
     allow_multiple_plays = False
     transformation = {"transpose": 0, "shift": 0}
     neighbor_col_priorities = ["next", "next_2", "prev", "prev_2"]
-    matches_pos = 3
+    matches_pos = 0
     matches_mode = "cplx"
     playlist = {}
     pitch_match = True
@@ -162,8 +162,9 @@ class Seeker(Worker):
                 if similarity > best_match["sim"]:
                     best_match["sim"] = similarity
                     best_match["file"] = transposed_file
-                    console.log(f"{self.tag} improved match:\n{best_match}")
-            if best_match["file"] == None:
+                    if self.verbose:
+                        console.log(f"{self.tag} improved match:\n{best_match}")
+            if best_match["file"] == None and self.verbose:
                 console.log(f"{self.tag} next file was already optimally pitch matched")
             else:
                 next_file = best_match["file"]
@@ -185,7 +186,7 @@ class Seeker(Worker):
             if self.redis_client:
                 console.log(f"{self.tag} using redis db")
 
-        console.log(f"{self.tag} {self.played_files}")
+        console.log(f"{self.tag} played files:\n{self.played_files}")
         if len(os.path.basename(self.played_files[-1])[:-4].split("_")) == 3:
             track, segment, transformation = os.path.basename(self.played_files[-1])[
                 :-4
@@ -196,9 +197,10 @@ class Seeker(Worker):
             track, segment = os.path.basename(self.played_files[-1])[:-4].split("_")
         current_transformation = f"t{self.transformation['transpose']:02d}s{self.transformation['shift']:02d}"
 
-        console.log(
-            f"{self.tag} extracted '{self.played_files[-1]}' -> '{track}' and '{segment}' and '{current_transformation}'"
-        )
+        if self.verbose:
+            console.log(
+                f"{self.tag} extracted '{self.played_files[-1]}' -> '{track}' and '{segment}' and '{current_transformation}'"
+            )
 
         if track == "player_recording":
             match self.metric:
@@ -231,32 +233,62 @@ class Seeker(Worker):
                 dtype=np.float32,
             )
 
+        console.log(f"{self.tag} querying with key '{q_key}'")
         similarities, indices = self.faiss_index.search(q_embedding, 1000)  # type: ignore
-        similarities = similarities[0]
-        indices = indices[0]
-
-        nearest_neighbors = [
-            {str(self.emb_table.index[i]): float(s)} for i, s in zip(indices, similarities)
-        ]
-
-        console.log(
-            f"{self.tag} got nearest neighbors to '{q_key}':", nearest_neighbors[:10]
+        # NO SHIFT
+        indices, similarities = zip(
+            *[
+                (i, s)
+                for i, s in zip(indices[0], similarities[0])
+                if str(self.emb_table.index[i]).endswith("s00")
+            ]
         )
+        nearest_neighbors = {}
+        for i, s in zip(indices, similarities):
+            nearest_neighbors[str(self.emb_table.index[i])] = float(s)
+
+        if self.verbose:
+            console.log(
+                f"{self.tag} got nearest neighbors to '{q_key}':",
+                sorted(
+                    nearest_neighbors.items(), key=lambda item: item[1], reverse=True
+                )[:10],
+            )
 
         next_file = self._get_random()
+        base_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
         for i_neighbor, similarity in zip(indices, similarities):
-            filename = str(self.emb_table.index[i_neighbor])
-            # if not self.allow_multiple_plays:
-            base_files = [
-                os.path.basename(self.base_file(f)) for f in self.played_files
-            ]
-            console.log(
-                f"{self.tag} looking for '{self.base_file(filename)}' in {base_files}"
-            )
-            if self.base_file(filename) not in base_files:
-                next_file = f"{filename}.mid"
+            segment_name = str(self.emb_table.index[i_neighbor])
+            # check if file has already been played
+            if segment_name in base_files:
+                continue
+
+            next_segment_name = self.base_file(segment_name)
+            next_track = next_segment_name.split("_")[0]
+            last_track = self.played_files[-1].split("_")[0]
+            # console.log(f"{self.tag} looking for '{next_segment_name}' in {base_files}")
+            # switch to different track after 8 segments
+            if len(self.played_files) % 8 == 0:
+                if next_track == last_track:
+                    console.log(
+                        f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
+                    )
+                    continue
+                else:
+                    next_file = f"{segment_name}.mid"
+                    break
+            # NO SHIFT
+            if (
+                next_segment_name not in base_files
+                and segment_name.endswith("s00")
+                and next_track == last_track
+            ):
+                next_file = f"{segment_name}.mid"
                 break
 
+        console.log(
+            f"{self.tag} best match is '{next_file}' with similarity {nearest_neighbors[next_file[:-4]]:.05f}"
+        )
         return os.path.join(os.path.dirname(self.p_dataset), "train", next_file)
 
     def _get_easy(self) -> str:
@@ -311,6 +343,9 @@ class Seeker(Worker):
                 random_file = self.rng.choice(
                     [m for m in os.listdir(self.p_dataset) if m.endswith(".mid")]
                 )
+
+        # NO SHIFT
+        random_file = random_file[:-7] + "s00.mid"
 
         return str(random_file)
 
@@ -393,33 +428,6 @@ class Seeker(Worker):
                 raise TypeError(
                     f"{self.tag} Unsupported model specified: {self.metric}"
                 )
-
-    def match_pitch(self, midi_file: str, transform: str) -> int:
-        original_midi = PrettyMIDI(
-            os.path.join(
-                os.path.dirname(self.p_dataset),
-                "train",
-                f"{self.played_files[-1][:-4]}.mid",
-            )
-        )
-        og_pch = original_midi.get_pitch_class_histogram(True, True)
-        best_shift = 0
-        best_similarity = float("-inf")
-        for shift in range(-12, 13):
-            shifted_midi = PrettyMIDI(
-                os.path.join(os.path.dirname(self.p_dataset), "train", midi_file)
-            )
-            for instrument in shifted_midi.instruments:
-                for note in instrument.notes:
-                    note.pitch += shift
-            shifted_pch = shifted_midi.get_pitch_class_histogram(True, True)
-            similarity = 1 - cosine(og_pch, shifted_pch)
-
-            if similarity > best_similarity:
-                best_similarity = similarity
-                best_shift = shift
-
-        return best_shift
 
 
 #     q_k = f"files:{track}_{segment}_{current_transformation}"

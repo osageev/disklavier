@@ -50,7 +50,7 @@ class Scheduler(Worker):
             tt_abs = -N_TICKS_PER_BEAT
 
         console.log(
-            f"{self.tag} adding file {self.n_files_queued}/100 to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s)"
+            f"{self.tag} adding file {self.n_files_queued} to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s)"
         )
 
         # add messages to queue first so that the player has access ASAP

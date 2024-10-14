@@ -38,7 +38,7 @@ def main(args, params):
             console.log(f"{tag} creating new logging folder at '{p_log}'")
         os.makedirs(p_log)
         os.makedirs(p_playlist)  # folder for copy of MIDI files
-    write_log(pf_playlist, "position", "timestamp", "filepath")
+    write_log(pf_playlist, "position", "start time", "file path")
     console.log(f"{tag} filesystem set up complete")
 
     # worker setup
@@ -132,18 +132,17 @@ def main(args, params):
         process_metronome = Process(target=metronome.tick, name="metronome")
         process_metronome.start()
         while n_files < params.n_transitions:
-            if q_playback.qsize() < 100:
-                # if ts_queue < params.ts_min_queue_length:
+            if q_playback.qsize() < params.n_min_queue_length:
                 pf_next_file = seeker.get_next()
                 ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
                 console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
+                n_files += 1
                 write_log(
                     pf_playlist,
                     n_files,
                     datetime.now().strftime("%y-%m-%d %H:%M:%S"),
                     pf_next_file,
                 )
-                n_files += 1
 
             time.sleep(0.1)
             ts_queue -= 0.1

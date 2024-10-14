@@ -1,6 +1,6 @@
 n_beats_per_segment: 8
-n_transitions: 25
-ts_min_queue_length: 100
+n_transitions: 16
+n_min_queue_length: 100
 initialization: "random" # kickstart random recording
 kickstart_path: "c4v100-060-03_0000-0005.mid" # midi or path to matches.json
 scheduler:
@@ -8,7 +8,7 @@ scheduler:
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
-  seed: 1234
+  seed: 60
   mode: "best" # best easy repeat random sequential playlist
   metric: "pitch_histogram" # pitch_histogram clamp
   redis:
@@ -22,7 +22,7 @@ metronome:
   tag: "[magenta]metro[/magenta] :"
   tick_1: "data/m_hat.wav"
   tick_2: "data/m_tick.wav"
-  do_tick: True
+  do_tick: False
 recorder:
   tag: "[red]record[/red]:"
   midi_port: 'Disklavier'
