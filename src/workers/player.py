@@ -49,7 +49,7 @@ class Player(Worker):
                 time.sleep(dt_sleep.total_seconds())
 
             if msg.velocity > 0:
-                console.log(f"{self.tag} playing ({msg}), queue size: {queue.qsize()}")
+                console.log(f"{self.tag} playing ({msg})\t{queue.qsize():03d} events queued")
             self.midi_port.send(msg)
             queue.task_done()
 

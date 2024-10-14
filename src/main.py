@@ -5,6 +5,7 @@ import json
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 import pygame
+from rich.table import Table
 from threading import Thread
 from omegaconf import OmegaConf
 from queue import PriorityQueue
@@ -37,7 +38,7 @@ def main(args, params):
             console.log(f"{tag} creating new logging folder at '{p_log}'")
         os.makedirs(p_log)
         os.makedirs(p_playlist)  # folder for copy of MIDI files
-    write_log(pf_playlist, "number", "timestamp", "filepath")
+    write_log(pf_playlist, "position", "timestamp", "filepath")
     console.log(f"{tag} filesystem set up complete")
 
     # worker setup
@@ -111,7 +112,7 @@ def main(args, params):
     q_playback = PriorityQueue()
     td_start = datetime.now()
     ts_queue = 0
-    n_files = 0
+    n_files = 1
     try:
         scheduler.td_start = td_start
         ts_queue += scheduler.enqueue_midi(pf_seed, q_playback)  # type: ignore
@@ -131,7 +132,7 @@ def main(args, params):
         process_metronome = Process(target=metronome.tick, name="metronome")
         process_metronome.start()
         while n_files < params.n_transitions:
-            if q_playback.qsize() < 50:
+            if q_playback.qsize() < 100:
                 # if ts_queue < params.ts_min_queue_length:
                 pf_next_file = seeker.get_next()
                 ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
@@ -146,6 +147,12 @@ def main(args, params):
 
             time.sleep(0.1)
             ts_queue -= 0.1
+            if not thread_player.is_alive():
+                console.log(f"{tag} player ran out of notes, exiting")
+                thread_player.join(0.1)
+                break
+
+        metronome.stop()
 
         # all necessary files queued, wait for playback to finish
         console.log(f"{tag} waiting for playback to finish...")
@@ -176,6 +183,18 @@ def main(args, params):
         process_metronome.kill()
         process_metronome.join(timeout=0.5)
     pygame.mixer.quit()
+
+    # print playlist
+    table = Table(title="PLAYLIST")
+    with open(pf_playlist, mode="r") as file:
+        headers = file.readline().strip().split(",")  # Read the header line
+        for header in headers:
+            table.add_column(header)  # Add columns to the table
+
+        for line in file:
+            row = line.strip().split(",")  # Read each subsequent line
+            table.add_row(*row)  # Add the row to the table
+    console.print(table)
 
     # run complete, save and exit
     console.save_text(os.path.join(p_log, f"{ts_start}.log"))
