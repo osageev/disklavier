@@ -1,5 +1,6 @@
 n_beats_per_segment: 8
 n_transitions: 10
+n_min_queue_length: 100
 ts_min_queue_length: 12
 initialization: "random" # kickstart random recording
 kickstart_path: "20240213-100-06_0283-0287.mid"
@@ -8,9 +9,9 @@ scheduler:
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
-  seed: 0
+  seed: 8714569
   mode: "best" # best easy repeat random sequential playlist
-  metric: "clamp" # pitch_histogram clamp
+  metric: "pitch_histogram" # pitch_histogram clamp
   redis:
     host: 'localhost'
     port: 6379

@@ -70,10 +70,8 @@ class Recorder(Worker):
                             midi.save(self.pf_midi_recording)
 
                             console.log(
-                                f"{self.tag} saved recording '{self.pf_midi_recording}':"
+                                f"{self.tag} saved recording '{self.pf_midi_recording}'"
                             )
-                            mid = mido.MidiFile(self.pf_midi_recording)
-                            mid.print_tracks()
                             return (end_time - start_time).total_seconds()
                         else:
                             # return to waiting for pedal press state

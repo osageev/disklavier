@@ -21,15 +21,16 @@ tag = "[white]main[/white]  :"
 
 
 def main(args, params):
-    td_start = datetime.now() + timedelta(seconds=1)
+    td_start = datetime.now()
     ts_start = td_start.strftime("%y%m%d-%H%M%S")
 
     # filesystem setup
     p_log = os.path.join(args.output, "logs", f"{ts_start}")
-    pf_player_recording = os.path.join(p_log, f"player_recording_{ts_start}.mid")
-    pf_master_recording = os.path.join(p_log, f"master_recording_{ts_start}.mid")
     p_playlist = os.path.join(p_log, "playlist")
     pf_playlist = os.path.join(p_log, f"playlist_{ts_start}.csv")
+    pf_master_recording = os.path.join(p_log, f"master-recording_{ts_start}.mid")
+    pf_player_recording = os.path.join(p_log, f"player-recording_{ts_start}.mid")
+    params.seeker.pf_recording = pf_player_recording
 
     if not os.path.exists(args.output):
         os.makedirs(args.output)
@@ -49,6 +50,7 @@ def main(args, params):
         pf_master_recording,
         p_playlist,
         td_start,
+        params.initialization == "recording",
         verbose=args.verbose,
     )
     seeker = workers.Seeker(
@@ -98,7 +100,13 @@ def main(args, params):
 
     seeker.played_files.append(os.path.basename(pf_seed))
 
+    # run
+    q_playback = PriorityQueue()
+    td_start = datetime.now() + timedelta(seconds=1)
+    ts_queue = 0
+    n_files = 1
     # offset by recording length if necessary
+    scheduler.td_start = td_start
     if scheduler.init_outfile(
         pf_master_recording,
         ts_recording_len if params.initialization == "recording" else 0,
@@ -107,14 +115,7 @@ def main(args, params):
     else:
         console.log(f"{tag} [red]error initializing recording, exiting")
         raise FileExistsError("Couldn't initialize MIDI recording file")
-
-    # run
-    q_playback = PriorityQueue()
-    td_start = datetime.now()
-    ts_queue = 0
-    n_files = 1
     try:
-        scheduler.td_start = td_start
         ts_queue += scheduler.enqueue_midi(pf_seed, q_playback)  # type: ignore
         write_log(
             pf_playlist,
@@ -130,10 +131,11 @@ def main(args, params):
         thread_player.start()
         metronome = workers.Metronome(params.metronome, args.bpm, td_start)
         process_metronome = Process(target=metronome.tick, name="metronome")
-        process_metronome.start()
         while n_files < params.n_transitions:
             if q_playback.qsize() < params.n_min_queue_length:
                 pf_next_file = seeker.get_next()
+                if not process_metronome.is_alive():
+                    process_metronome.start()
                 ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
                 console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
                 n_files += 1
@@ -261,8 +263,8 @@ if __name__ == "__main__":
     params.scheduler.n_beats_per_segment = params.n_beats_per_segment
     params.metronome.n_beats_per_segment = params.n_beats_per_segment
 
-    console.log(f"{tag} loading with args:\n\t{args}")
-    console.log(f"{tag} loading with params:\n\t{params}")
+    console.log(f"{tag} loading with arguments:\n\t{args}")
+    console.log(f"{tag} loading with parameters:\n\t{params}")
 
     if not os.path.exists(args.tables):
         console.log("[red bold]ERROR[/red bold]: table directory not found, exiting...")

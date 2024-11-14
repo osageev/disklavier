@@ -15,7 +15,7 @@ from utils import console
 # Constants for patch length and number of features in a patch
 PATCH_LENGTH = 64
 PATCH_FEATURES = 98
-CLAMP_MODEL_NAME = "sander-wood/clamp-small-1024"
+CLAMP_MODEL_NAME = "sander-wood/clamp-small-512"
 # CLAMP_MODEL_NAME = os.path.join("src", "models", "configs", "clamp")
 TEXT_MODEL_NAME = "distilroberta-base"
 TEXT_LENGTH = 128

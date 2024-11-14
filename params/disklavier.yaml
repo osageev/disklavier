@@ -1,20 +1,21 @@
 n_beats_per_segment: 8
-n_transitions: 16
+n_transitions: 64
 n_min_queue_length: 100
-initialization: "random" # kickstart random recording
+initialization: "recording" # kickstart random recording
 kickstart_path: "c4v100-060-03_0000-0005.mid" # midi or path to matches.json
 scheduler:
   tag: "[green]schedl[/green]:"
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
-  seed: 60
+  seed: 108
   mode: "best" # best easy repeat random sequential playlist
   metric: "pitch_histogram" # pitch_histogram clamp
   redis:
     host: "localhost"
     port: 6379
     db: 0
+  panther_user: "finlay"
 player:
   tag: "[blue]player[/blue]:"
   midi_port: 'Disklavier'

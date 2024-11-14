@@ -8,11 +8,9 @@ import redis
 import faiss
 from redis.commands.search.query import Query
 from scipy.spatial.distance import cosine
-from rich.progress import track
 
 from .worker import Worker
-from utils import console
-from models import model_list, clamp
+from utils import console, panther
 
 
 class Seeker(Worker):
@@ -48,11 +46,16 @@ class Seeker(Worker):
         self.rng = np.random.default_rng(self.params.seed)
         self.verbose = verbose
 
+        if hasattr(params, "pf_recording"):
+            self.pf_recording = params.pf_recording
+        if hasattr(params, "panther_user"):
+            self.panther_user = params.panther_user
+
         if params.mode == "best":
             self.metric = params.metric
 
-        if params.metric in model_list:
-            self.load_model()
+        # if params.metric in model_list:
+        #     self.load_model()
 
         if params.redis:
             self.redis_client = redis.Redis(
@@ -63,7 +66,7 @@ class Seeker(Worker):
             )
 
         # load embeddings
-        pf_emb_table = os.path.join(self.p_table, "clamp_embeddings_new.h5")
+        pf_emb_table = os.path.join(self.p_table, f"{params.metric}.h5")
         console.log(f"{self.tag} looking for embedding table '{pf_emb_table}'")
         if os.path.isfile(pf_emb_table):
             with console.status("\t\t\t      loading embeddings file..."):
@@ -74,12 +77,22 @@ class Seeker(Worker):
             console.log(self.emb_table.head())
 
             console.log("building FAISS index...")
-            self.emb_table["normed_embeddings"] = self.emb_table["embeddings"].apply(
-                lambda x: x / np.linalg.norm(x)
+            if self.metric == "clamp":
+                self.emb_table["normed_embeddings"] = self.emb_table[
+                    "embeddings"
+                ].apply(lambda x: x / np.linalg.norm(x))
+            else:
+                self.emb_table["normed_embeddings"] = self.emb_table.iloc[
+                    :, 0:12
+                ].apply(lambda row: row.tolist(), axis=1)
+
+            console.log(self.emb_table[["normed_embeddings"]].head())
+
+            self.faiss_index = faiss.IndexFlatIP(768 if self.metric == "clamp" else 12)
+            self.faiss_index.add(np.array(self.emb_table["normed_embeddings"].to_list(), dtype=np.float32))  # type: ignore
+            console.log(
+                f"FAISS index built ({np.array(self.emb_table["normed_embeddings"].to_list(), dtype=np.float32).shape})"
             )
-            self.faiss_index = faiss.IndexFlatIP(768)
-            self.faiss_index.add(np.array(self.emb_table["normed_embeddings"].tolist(), dtype=np.float32))  # type: ignore
-            console.log("FAISS index built")
         else:
             console.log(f"{self.tag} error loading embeddings table, exiting...")
             exit()  # TODO: handle this better (return an error, let main handle it)
@@ -98,19 +111,19 @@ class Seeker(Worker):
         #     console.log(f"{self.tag} error loading similarity table, exiting...")
         #     exit()  # TODO: handle this better (return an error, let main handle it)
 
-        # # load neighbor table
-        # pf_neighbor_table = os.path.join(self.p_table, "neighbor.parquet")
-        # console.log(f"{self.tag} looking for neighbor table '{pf_neighbor_table}'")
-        # if os.path.isfile(pf_neighbor_table):
-        #     with console.status("\t\t\t      loading neighbor file..."):
-        #         self.neighbor_table = pd.read_parquet(pf_neighbor_table)
-        #     console.log(
-        #         f"{self.tag} loaded {len(self.neighbor_table)}*{len(self.neighbor_table.columns)} neighbor table"
-        #     )
-        #     console.log(self.neighbor_table.head())
-        # else:
-        #     console.log(f"{self.tag} error loading neighbor table, exiting...")
-        #     exit()  # TODO: handle this better (return an error, let main handle it)
+        # load neighbor table
+        pf_neighbor_table = os.path.join(self.p_table, "neighbor.parquet")
+        console.log(f"{self.tag} looking for neighbor table '{pf_neighbor_table}'")
+        if os.path.isfile(pf_neighbor_table):
+            with console.status("\t\t\t      loading neighbor file..."):
+                self.neighbor_table = pd.read_parquet(pf_neighbor_table)
+            console.log(
+                f"{self.tag} loaded {len(self.neighbor_table)}*{len(self.neighbor_table.columns)} neighbor table"
+            )
+            console.log(self.neighbor_table.head())
+        else:
+            console.log(f"{self.tag} error loading neighbor table, exiting...")
+            exit()  # TODO: handle this better (return an error, let main handle it)
 
         # # load transformation table
         # pf_trans_table = os.path.join(self.p_table, "transformations.parquet")
@@ -126,7 +139,6 @@ class Seeker(Worker):
         #     console.log(f"{self.tag} error loading tranformation table, exiting...")
         #     exit()  # TODO: handle this better (return an error, let main handle it)
 
-        console.log(f"{self.tag} [green]successfully loaded tables")
         console.log(f"{self.tag} initialization complete")
 
     def get_next(self) -> str:
@@ -148,9 +160,14 @@ class Seeker(Worker):
             console.log(
                 f"{self.tag} pitch matching '{self.base_file(next_file)}' to '{self.played_files[-1]}'"
             )
-            base_pch = PrettyMIDI(
-                os.path.join(self.p_dataset, self.played_files[-1])
-            ).get_pitch_class_histogram(True, True)
+            if self.played_files[-1].split("_")[0] == "player-recording":
+                base_pch = PrettyMIDI(
+                    os.path.join(self.pf_recording)
+                ).get_pitch_class_histogram(True, True)
+            else:
+                base_pch = PrettyMIDI(
+                    os.path.join(self.p_dataset, self.played_files[-1])
+                ).get_pitch_class_histogram(True, True)
             best_match = {"file": None, "sim": -1}
             for pitch in range(12):
                 shift = next_file.split("_")[-1][4:]  # also contains .mid
@@ -183,8 +200,6 @@ class Seeker(Worker):
             console.log(
                 f"{self.tag} finding most similar file to '{self.played_files[-1]}'"
             )
-            if self.redis_client:
-                console.log(f"{self.tag} using redis db")
 
         console.log(f"{self.tag} played files:\n{self.played_files}")
         if len(os.path.basename(self.played_files[-1])[:-4].split("_")) == 3:
@@ -196,45 +211,41 @@ class Seeker(Worker):
         else:
             track, segment = os.path.basename(self.played_files[-1])[:-4].split("_")
         current_transformation = f"t{self.transformation['transpose']:02d}s{self.transformation['shift']:02d}"
+        q_key = f"{track}_{segment}_{current_transformation}"
 
-        if self.verbose:
-            console.log(
-                f"{self.tag} extracted '{self.played_files[-1]}' -> '{track}' and '{segment}' and '{current_transformation}'"
-            )
+        # if self.verbose:
+        console.log(
+            f"{self.tag} extracted '{self.played_files[-1]}' -> '{track}' and '{segment}' and '{current_transformation}'"
+        )
 
-        if track == "player_recording":
+        if track == "player-recording":
             match self.metric:
                 case "clamp":
                     console.log(
-                        f"{self.tag} got clamp embedding from {self.played_files[-1]}"
+                        f"{self.tag} getting clamp embedding for '{self.pf_recording}'"
                     )
-                    query_embedding = clamp.get_embedding(
-                        self.model, self.played_files[-1]
-                    )[0]
-                    console.log(
-                        f"{self.tag} got clamp embedding {query_embedding.shape}"
-                    )
+                    q_embedding = panther.calc_embedding(self.pf_recording)
+                    console.log(f"{self.tag} got clamp embedding {q_embedding.shape}")
                 case _:
                     if self.verbose:
                         console.log(f"{self.tag} defaulting to pitch histogram metric")
-                    query_embedding = PrettyMIDI(
-                        self.played_files[-1]
-                    ).get_pitch_class_histogram(
-                        use_duration=True, use_velocity=True, normalize=True
-                    )
+                    q_embedding = PrettyMIDI(
+                        self.pf_recording
+                    ).get_pitch_class_histogram(True, True)
+                    q_embedding = q_embedding.reshape(1, -1)
+                    console.log(f"{self.tag} {q_embedding}")
             if self.verbose:
                 console.log(
-                    f"{self.tag} calculated embedding for recording: {query_embedding.shape}"
+                    f"{self.tag} calculated embedding for recording: {q_embedding.shape}"
                 )
         else:
-            q_key = f"{track}_{segment}_{current_transformation}"
             q_embedding = np.array(
                 [self.emb_table.loc[q_key, "normed_embeddings"]],
                 dtype=np.float32,
             )
 
         console.log(f"{self.tag} querying with key '{q_key}'")
-        similarities, indices = self.faiss_index.search(q_embedding, 1000)  # type: ignore
+        similarities, indices = self.faiss_index.search(q_embedding, 5000)  # type: ignore
         # NO SHIFT
         indices, similarities = zip(
             *[
@@ -247,28 +258,31 @@ class Seeker(Worker):
         for i, s in zip(indices, similarities):
             nearest_neighbors[str(self.emb_table.index[i])] = float(s)
 
-        if self.verbose:
-            console.log(
-                f"{self.tag} got nearest neighbors to '{q_key}':",
-                sorted(
-                    nearest_neighbors.items(), key=lambda item: item[1], reverse=True
-                )[:10],
-            )
+        # if self.verbose:
+        console.log(
+            f"{self.tag} got nearest neighbors to '{q_key}':",
+            sorted(nearest_neighbors.items(), key=lambda item: item[1], reverse=True)[
+                :10
+            ],
+        )
 
-        next_file = self._get_random()
-        base_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
+        next_file = self._get_neighbor()
+        console.log(f"{self.tag} random file is '{next_file}'")
+        played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
         for i_neighbor, similarity in zip(indices, similarities):
             segment_name = str(self.emb_table.index[i_neighbor])
+            if track == "player-recording":
+                next_file = f"{segment_name}.mid"
+                break
             # check if file has already been played
-            if segment_name in base_files:
+            if segment_name in played_files:
                 continue
 
             next_segment_name = self.base_file(segment_name)
             next_track = next_segment_name.split("_")[0]
             last_track = self.played_files[-1].split("_")[0]
-            # console.log(f"{self.tag} looking for '{next_segment_name}' in {base_files}")
-            # switch to different track after 8 segments
-            if len(self.played_files) % 8 == 0:
+            # switch to different track after 2 segments
+            if len(self.played_files) % 2 == 0:
                 if next_track == last_track:
                     console.log(
                         f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
@@ -279,7 +293,7 @@ class Seeker(Worker):
                     break
             # NO SHIFT
             if (
-                next_segment_name not in base_files
+                next_segment_name not in played_files
                 and segment_name.endswith("s00")
                 and next_track == last_track
             ):
@@ -287,7 +301,10 @@ class Seeker(Worker):
                 break
 
         console.log(
-            f"{self.tag} best match is '{next_file}' with similarity {nearest_neighbors[next_file[:-4]]:.05f}"
+            f"{self.tag} best match is '{next_file}' with similarity {similarity:.05f}"
+        )
+        console.log(
+            f"{self.tag} vector compare\n\t{q_embedding}\n\t{self.emb_table.loc[next_file[:-4], "normed_embeddings"]}"
         )
         return os.path.join(os.path.dirname(self.p_dataset), "train", next_file)
 
@@ -307,33 +324,41 @@ class Seeker(Worker):
     def _get_neighbor(self) -> str:
         current_file = os.path.basename(self.played_files[-1])
 
-        for col_name in self.neighbor_col_priorities:
-            neighbor = self.neighbor_table.loc[current_file, col_name]
+        # transforms not needed
+        if len(current_file.split("_")) > 2:
+            track, segment, _ = current_file.split("_")
+            current_file = f"{track}_{segment}.mid"
 
-            # only play files once
-            if neighbor in self.played_files and not self.allow_multiple_plays:
-                neighbor = None
+        try:
+            for col_name in self.neighbor_col_priorities:
+                neighbor = self.neighbor_table.loc[current_file, col_name]
 
-            # found a neighbor
-            if neighbor != None:
-                if self.verbose:
-                    console.log(
-                        f"{self.tag} found neighboring file '{neighbor}' at position '{col_name}'"
-                    )
-                return str(neighbor)
+                # only play files once
+                if neighbor in self.played_files and not self.allow_multiple_plays:
+                    neighbor = None
 
-        console.log(
-            f"{self.tag} unable to find neighbor for '{current_file}', choosing randomly"
-        )
+                # found a neighbor
+                if neighbor != None:
+                    if self.verbose:
+                        console.log(
+                            f"{self.tag} found neighboring file '{neighbor}' at position '{col_name}'"
+                        )
+                    return str(neighbor)
+        except KeyError:
+            console.log(
+                f"{self.tag} unable to find neighbor for '{current_file}', choosing randomly"
+            )
 
+            return self._get_random()
         return self._get_random()
 
     def _get_random(self) -> str:
-        if self.verbose:
-            console.log(f"{self.tag} choosing random file")
         random_file = self.rng.choice(
             [m for m in os.listdir(self.p_dataset) if m.endswith(".mid")]
         )
+
+        if self.verbose:
+            console.log(f"{self.tag} chose random file '{random_file}'")
 
         # only play files once
         if not self.allow_multiple_plays:
@@ -412,13 +437,11 @@ class Seeker(Worker):
             case "clamp":
                 import torch
 
-                # init torch device
                 if torch.cuda.is_available():
                     device = torch.device("cuda")
                     console.log(f"{self.tag} Using GPU {torch.cuda.get_device_name(0)}")
-
                 else:
-                    console.log(f"{self.tag} No GPU available, using the CPU instead.")
+                    console.log(f"{self.tag} No GPU available, using the CPU instead")
                     device = torch.device("cpu")
                 self.model = clamp.CLaMP.from_pretrained(clamp.CLAMP_MODEL_NAME)
                 if self.verbose:
@@ -493,3 +516,21 @@ class Seeker(Worker):
 # for index, row in self.emb_table.iterrows():
 #     similarity = 1 - cosine(query_embedding, row["embeddings"])
 #     similarities.append((index, similarity))
+
+
+# Traceback (most recent call last):
+#   File "/Users/finlay/Documents/Programming/disklavier/src/main.py", line 273, in <module>
+#     main(args, params)
+#   File "/Users/finlay/Documents/Programming/disklavier/src/main.py", line 136, in main
+#     pf_next_file = seeker.get_next()
+#                    ^^^^^^^^^^^^^^^^^
+#   File "/Users/finlay/Documents/Programming/disklavier/src/workers/seeker.py", line 165, in get_next
+#     shifted_pch = PrettyMIDI(transposed_file).get_pitch_class_histogram(
+#                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#   File "/Users/finlay/Documents/Programming/disklavier/.venv/lib/python3.12/site-packages/pretty_midi/pretty_midi.py", line 63, in __init__
+#     midi_data = mido.MidiFile(filename=midi_file)
+#                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#   File "/Users/finlay/Documents/Programming/disklavier/.venv/lib/python3.12/site-packages/mido/midifiles/midifiles.py", line 319, in __init__
+#     with open(filename, 'rb') as file:
+#          ^^^^^^^^^^^^^^^^^^^^
+# FileNotFoundError: [Errno 2] No such file or directory: 'data/datasets/20240621/train/20240511-050-01_05_t00s-0518.mid'
