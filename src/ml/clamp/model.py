@@ -2,7 +2,6 @@ import os
 import torch
 import subprocess
 from unidecode import unidecode
-from rich.progress import track
 from rich.console import Console
 from transformers import AutoTokenizer
 from .utils import CLaMP, MusicPatchilizer
@@ -15,11 +14,17 @@ class Clamp:
     pf_midi2abc = "src/ml/clamp/midi2abc"
 
     def __init__(self, verbose: bool = True):
+    tag = "[#87ff87]CLaMP [/#87ff87]:"
+    pf_midi2abc = "src/ml/clamp/midi2abc"
+
+    def __init__(self, verbose: bool = True):
         self.verbose = verbose
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
             console.log(f"{self.tag} Using GPU: {torch.cuda.get_device_name(0)}")
+            console.log(f"{self.tag} Using GPU: {torch.cuda.get_device_name(0)}")
         else:
+            console.log(f"{self.tag} No GPU available, using the CPU instead.")
             console.log(f"{self.tag} No GPU available, using the CPU instead.")
             self.device = torch.device("cpu")
 
@@ -29,7 +34,7 @@ class Clamp:
         self.patch_length = 64
 
         # Load CLaMP model
-        self.model = CLaMP.from_pretrained(self.clamp_model_name)
+        self.model = CLaMP.from_pretrained(self.name)
         self.music_length = self.model.config.max_length
         self.model = self.model.to(self.device)  # type: ignore
         self.model.eval()
@@ -40,6 +45,7 @@ class Clamp:
         self.softmax = torch.nn.Softmax(dim=1)
 
         if self.verbose:
+            console.log(f"{self.tag} Initialization complete.")
             console.log(f"{self.tag} Initialization complete.")
 
     def abc_filter(self, lines: list) -> str:
@@ -97,6 +103,10 @@ class Clamp:
         Returns:
             lines (list): List of lines from the music file.
         """
+        console.log(f"{self.tag} ", subprocess.run([f"{self.pf_midi2abc} {file_path}"], capture_output=True, text=True, shell=True))
+        result = subprocess.run([f"{self.pf_midi2abc} {file_path}"], capture_output=True, text=True, shell=True).stdout.replace("\r", "")
+        lines = unidecode(result).split("\n")
+        console.log(f"{self.tag} got abc:\n{[l + '\n' for l in lines]}")
         p = subprocess.Popen(["pwd"], stdout=subprocess.PIPE)
         print(f"pwd result: '{p.communicate()[0].decode('utf-8')}'")
         p = subprocess.Popen([self.pf_midi2abc, file_path], stdout=subprocess.PIPE)
@@ -105,6 +115,7 @@ class Clamp:
         lines = unidecode(output).split("\n")
         return self.abc_filter(lines)
 
+    def forward(self, music: list[str]) -> list[torch.Tensor]:
     def forward(self, music: list[str]) -> list[torch.Tensor]:
         """
         Encode the music string into tensor format.
@@ -160,7 +171,7 @@ class Clamp:
         """
         music = [self.load_music(k) for k in files]
 
-        console.log(f"{self.tag} loaded {len(music)} segments")
+        console.log(f"{self.tag} loaded {len(music)} segment{'' if len(music) == 1 else 's'}")
 
         non_empty_keys = []
         non_empty_filenames = []
@@ -173,14 +184,19 @@ class Clamp:
                     console.log(
                         f"{self.tag} File %s not successfully loaded" % (pf_file)
                     )
+                    console.log(
+                        f"{self.tag} file '{pf_file}' not successfully loaded"
+                    )
+                    raise RuntimeError(f"couldn't convert '{files[0]}'\n{music}")
 
+        encoded_music = self.forward(non_empty_keys)
+        console.log(f"{self.tag} encoded {len(encoded_music)} segment{'' if len(music) == 1 else 's'}")
         encoded_music = self.forward(non_empty_keys)
         console.log(f"{self.tag} encoded {len(encoded_music)} segments")
         features = self.get_features(encoded_music)
         console.log(f"{self.tag} feature generation complete")
 
         return features
-
 
 if __name__ == "__main__":
     filenames = [
