@@ -194,7 +194,8 @@ def get_features(ids_list: list) -> list[torch.Tensor]:
 
 
 def main():
-    files = [os.path.join(p_in, f) for f in os.listdir(p_in) if f.endswith(".mid")]
+    files = [os.path.join(p_in, f) for f in os.listdir(p_in) if f.endswith(".mid") or f.endswith(".midi")
+f.endswith(".midi")]
     files.sort()
     console.log(f"Loading {len(files)} segments...")
     keys, filenames = convert(files)

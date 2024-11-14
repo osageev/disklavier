@@ -354,7 +354,7 @@ class Seeker(Worker):
 
     def _get_random(self) -> str:
         random_file = self.rng.choice(
-            [m for m in os.listdir(self.p_dataset) if m.endswith(".mid")]
+            [m for m in os.listdir(self.p_dataset) if m.endswith(".mid") or f.endswith(".midi")]
         )
 
         if self.verbose:
@@ -366,7 +366,7 @@ class Seeker(Worker):
             while base_file in self.played_files:
                 base_file = self.base_file(random_file)
                 random_file = self.rng.choice(
-                    [m for m in os.listdir(self.p_dataset) if m.endswith(".mid")]
+                    [m for m in os.listdir(self.p_dataset) if m.endswith(".mid") or f.endswith(".midi")]
                 )
 
         # NO SHIFT

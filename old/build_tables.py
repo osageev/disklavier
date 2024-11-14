@@ -105,10 +105,10 @@ def main(args: Namespace):
     r = redis.from_url(args.redis)
     # filenames
     train_dir = os.path.join(args.data_dir, "synthetic")
-    all_filenames = [f[:-4] for f in os.listdir(train_dir) if f.endswith(".mid")]
+    all_filenames = [f[:-4] for f in os.listdir(train_dir) if f.endswith(".mid") or f.endswith(".midi")]
     all_filenames.sort()
     play_dir = os.path.join(args.data_dir, "synthetic")
-    base_filenames = [f[:-4] for f in os.listdir(play_dir) if f.endswith(".mid")]
+    base_filenames = [f[:-4] for f in os.listdir(play_dir) if f.endswith(".mid") or f.endswith(".midi")]
     base_filenames.sort()
     split_keys = np.array_split(base_filenames, os.cpu_count())  # type: ignore
 

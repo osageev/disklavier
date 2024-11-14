@@ -40,7 +40,7 @@ def analyze(folder_path):
     outliers = []
 
     for file_name in os.listdir(folder_path):
-        if file_name.endswith(".mid"):
+        if file_name.endswith(".mid") or file_name.endswith(".midi"):
             file_path = os.path.join(folder_path, file_name)
 
             try:

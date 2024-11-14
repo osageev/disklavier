@@ -105,11 +105,11 @@ def calc_sims(rows: list[str], all_rows: list[str], index: int):
 def main():
     # get files
     p_train = os.path.join("data", "datasets", DATASET, "train")
-    train_filenames = [f[:-4] for f in os.listdir(p_train) if f.endswith(".mid")]
+    train_filenames = [f[:-4] for f in os.listdir(p_train) if f.endswith(".mid") or f.endswith(".midi")]
     train_filenames.sort()
     p_play = os.path.join("data", "datasets", DATASET, "play")
     play_filenames = [
-        os.path.join(p_play, f) for f in os.listdir(p_play) if f.endswith(".mid")
+        os.path.join(p_play, f) for f in os.listdir(p_play) if f.endswith(".mid") or f.endswith(".midi")
     ]
     play_filenames.sort()
 

@@ -14,10 +14,6 @@ class Clamp:
     pf_midi2abc = "src/ml/clamp/midi2abc"
 
     def __init__(self, verbose: bool = True):
-    tag = "[#87ff87]CLaMP [/#87ff87]:"
-    pf_midi2abc = "src/ml/clamp/midi2abc"
-
-    def __init__(self, verbose: bool = True):
         self.verbose = verbose
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -103,8 +99,21 @@ class Clamp:
         Returns:
             lines (list): List of lines from the music file.
         """
-        console.log(f"{self.tag} ", subprocess.run([f"{self.pf_midi2abc} {file_path}"], capture_output=True, text=True, shell=True))
-        result = subprocess.run([f"{self.pf_midi2abc} {file_path}"], capture_output=True, text=True, shell=True).stdout.replace("\r", "")
+        console.log(
+            f"{self.tag} ",
+            subprocess.run(
+                [f"{self.pf_midi2abc} {file_path}"],
+                capture_output=True,
+                text=True,
+                shell=True,
+            ),
+        )
+        result = subprocess.run(
+            [f"{self.pf_midi2abc} {file_path}"],
+            capture_output=True,
+            text=True,
+            shell=True,
+        ).stdout.replace("\r", "")
         lines = unidecode(result).split("\n")
         console.log(f"{self.tag} got abc:\n{[l + '\n' for l in lines]}")
         p = subprocess.Popen(["pwd"], stdout=subprocess.PIPE)
@@ -115,7 +124,6 @@ class Clamp:
         lines = unidecode(output).split("\n")
         return self.abc_filter(lines)
 
-    def forward(self, music: list[str]) -> list[torch.Tensor]:
     def forward(self, music: list[str]) -> list[torch.Tensor]:
         """
         Encode the music string into tensor format.
@@ -171,7 +179,9 @@ class Clamp:
         """
         music = [self.load_music(k) for k in files]
 
-        console.log(f"{self.tag} loaded {len(music)} segment{'' if len(music) == 1 else 's'}")
+        console.log(
+            f"{self.tag} loaded {len(music)} segment{'' if len(music) == 1 else 's'}"
+        )
 
         non_empty_keys = []
         non_empty_filenames = []
@@ -184,13 +194,13 @@ class Clamp:
                     console.log(
                         f"{self.tag} File %s not successfully loaded" % (pf_file)
                     )
-                    console.log(
-                        f"{self.tag} file '{pf_file}' not successfully loaded"
-                    )
+                    console.log(f"{self.tag} file '{pf_file}' not successfully loaded")
                     raise RuntimeError(f"couldn't convert '{files[0]}'\n{music}")
 
         encoded_music = self.forward(non_empty_keys)
-        console.log(f"{self.tag} encoded {len(encoded_music)} segment{'' if len(music) == 1 else 's'}")
+        console.log(
+            f"{self.tag} encoded {len(encoded_music)} segment{'' if len(music) == 1 else 's'}"
+        )
         encoded_music = self.forward(non_empty_keys)
         console.log(f"{self.tag} encoded {len(encoded_music)} segments")
         features = self.get_features(encoded_music)
@@ -198,11 +208,12 @@ class Clamp:
 
         return features
 
+
 if __name__ == "__main__":
     filenames = [
         f[:-4]
         for f in os.listdir("data/datasets/test/dataset samples")
-        if f.endswith(".mid")
+        if f.endswith(".mid") or f.endswith(".midi")
     ]
     model = Clamp()
     model.encode(filenames)

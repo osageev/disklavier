@@ -25,7 +25,6 @@ def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) 
 
     midi = pretty_midi.PrettyMIDI(input_file_path)
     for instrument in midi.instruments:
-        # Don't want to shift drum notes
         if not instrument.is_drum:
             for note in instrument.notes:
                 note.pitch += semitones
@@ -33,7 +32,16 @@ def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) 
 
 
 def set_tempo(input_file_path, target_tempo) -> None:
-    """"""
+    """
+    Sets the tempo of a MIDI file to a specified target tempo.
+
+    This function modifies the input MIDI file by inserting a "set_tempo" meta message
+    at the beginning of the first track, setting the tempo to the specified target tempo.
+
+    Args:
+        input_file_path (str): Path to the input MIDI file.
+        target_tempo (int): The target tempo in beats per minute (BPM) to set in the MIDI file.
+    """
     mid = MidiFile(input_file_path)
     tempo = mido.bpm2tempo(target_tempo)
     mid.tracks[0].insert(0, MetaMessage("set_tempo", tempo=tempo, time=0))
@@ -61,8 +69,22 @@ def get_note_min_max(input_file_path) -> Tuple[int, int]:
 def semitone_transpose(
     midi_path: str, output_dir: str, num_iterations: int = 1
 ) -> List[str]:
-    """vertically shift a matrix
-    chatgpt
+    """
+    Transposes a MIDI file by a specified number of semitones, alternating between up and down.
+
+    This function takes a MIDI file path, an output directory, and an optional number of iterations.
+    It calculates the maximum possible transpositions up and down without exceeding the MIDI note range.
+    Then, it iterates the specified number of times, alternating between transposing up and down by one semitone each iteration.
+    If the maximum up or down transposition is exceeded, it switches to the opposite direction immediately.
+    The transposed MIDI files are saved in the specified output directory with a modified filename indicating the direction and amount of transposition.
+
+    Args:
+        midi_path (str): Path to the input MIDI file.
+        output_dir (str): Directory where the transposed MIDI files will be saved.
+        num_iterations (int, optional): Number of iterations to transpose the MIDI file. Defaults to 1.
+
+    Returns:
+        List[str]: A list of file paths to the newly created transposed MIDI files.
     """
     new_filename = Path(midi_path).stem.split("_")
     new_filename = f"{new_filename[0]}_{new_filename[1]}"
@@ -107,7 +129,16 @@ def semitone_transpose(
 
 
 def segment_midi(input_file_path: str, params):
-    """do the segmentation"""
+    """
+    Segments a MIDI file into smaller segments based on the provided parameters.
+
+    Args:
+        input_file_path (str): Path to the input MIDI file.
+        params (object): Object containing parameters for segmenting the MIDI file.
+
+    Returns:
+        int: The number of new files created after segmenting the MIDI file.
+    """
     target_tempo = int(os.path.basename(input_file_path).split("-")[1])
     set_tempo(input_file_path, target_tempo)
 
@@ -123,17 +154,10 @@ def segment_midi(input_file_path: str, params):
     num_segments_float = total_length / segment_length
     num_segments = int(np.round(num_segments_float))
 
-    # print([total_length, segment_length, num_segments_float, num_segments, init_bpm])
-
-    # print(
-    #     f"breaking '{filename}' ({total_length:.03f} s at {target_tempo} bpm) into {num_segments:03d} segments of {segment_length:.03f} s"
-    # )
-
     new_files = 0
     for n in list(range(num_segments)):
         start = n * segment_length
         end = start + segment_length
-        # print(f"\tsplitting from {start:07.03f} s to {end:07.03f} s")
         segment_midi = pretty_midi.PrettyMIDI(initial_tempo=target_tempo)
         instrument = pretty_midi.Instrument(
             program=midi_pm.instruments[0].program,
@@ -190,21 +214,26 @@ def segment_midi(input_file_path: str, params):
             # make sure track end is correct
             modify_end_of_track(filepath, segment_length, target_tempo)
             test_mid = MidiFile(filepath)
-            # if np.round(test_mid.length, 3) != np.round(segment_length, 3):
-            #     print(
-            #         f"'{os.path.basename(filepath)}' is {test_mid.length:.3f} s at {target_tempo} BPM but should be {segment_length:.3f} s ({test_mid.ticks_per_beat} tpb)"
-            #     )
-            # test_mid.print_tracks()
 
     return new_files
 
 
 def modify_end_of_track(midi_file_path, new_end_time, tempo):
+    """
+    This function modifies the end of a MIDI track by removing existing 'end_of_track' messages
+    and adding a new 'end_of_track' message at the calculated offset time.
+
+    Args:
+        midi_file_path (str): The path to the MIDI file to be modified.
+        new_end_time (float): The new end time of the track in seconds.
+        tempo (int): The tempo of the track in beats per minute.
+
+    Returns:
+        None
+    """
     mid = MidiFile(midi_file_path)
     total_time_t = -1
     new_e_time_t = second2tick(new_end_time, 220, mido.bpm2tempo(tempo))
-    # print(f"{midi_file_path} at {mido.bpm2tempo(tempo)}")
-    # mid.print_tracks()
 
     for track in mid.tracks:
         # Remove existing 'end_of_track' messages and calculate last note time
@@ -216,9 +245,6 @@ def modify_end_of_track(midi_file_path, new_end_time, tempo):
                 offset = (
                     new_e_time_t - total_time_t if new_e_time_t > total_time_t else 0
                 )
-                # print(
-                #     f"modifying track to have end time {new_e_time_t}: {total_time_t} -> {offset}"
-                # )
                 track.append(MetaMessage("end_of_track", time=offset))
 
     # Save the modified MIDI file
@@ -263,7 +289,6 @@ def main(args):
         if filename.endswith(".mid") or filename.endswith(".midi"):
             num_files += segment_midi(os.path.join(args.data_dir, filename), args)
 
-    total_segs = len(os.listdir(args.output_dir))
     print(f"[green]segmentation complete, {num_files} files generated")
 
 
