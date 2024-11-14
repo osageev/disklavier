@@ -3,7 +3,7 @@ import time
 import zipfile
 from pretty_midi import PrettyMIDI
 import numpy as np
-from rich import print
+from numpy.linalg import norm
 from rich.pretty import pprint
 from rich.progress import (
     Progress,
@@ -12,88 +12,27 @@ from rich.progress import (
     MofNCompleteColumn,
 )
 import redis
+import itertools
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from argparse import ArgumentParser
-
-from utils.midi import insert_transformations
-from utils.redis import *
+from argparse import ArgumentParser, Namespace
+from utils import console
 
 from typing import List
 
 
-def calc_sims(rows: List[str], all_rows: List[str], metric: str, index: int):
-    print(
-        f"[SUBR{index:02d}] starting subprocess {index:02d} with {len(rows)}/{len(all_rows)} rows"
-    )
-    r = redis.Redis(host="localhost", port=6379, db=0)
-
-    progress = Progress(
-        SpinnerColumn(),
-        *Progress.get_default_columns(),
-        TimeElapsedColumn(),
-        MofNCompleteColumn(),
-        refresh_per_second=1,
-    )
-    sim_task = progress.add_task(
-        f"[SUBR{index:02d}] calculating sims", total=len(rows) * len(all_rows)
-    )
-    with progress:
-        for i, row_file in enumerate(rows):
-            print(
-                f"[SUBR{index:02d}] {i:04d}/{len(rows):04d} calculating sims for file '{row_file}'"
-            )
-
-            # find optimal transformation for each other file in dataset to maximize similarity
-            for col_file in all_rows:
-                best_sim = -1
-                best_shift = -1
-                best_trans = -1
-
-                row_metric = load_vector(r, insert_transformations(row_file), metric)
-                col_metrics = load_vectors(r, insert_transformations(col_file), metric)
-
-                for key in col_metrics.keys():
-                    similarity = np.dot(row_metric, col_metrics[key]) / (
-                        np.linalg.norm(row_metric) * np.linalg.norm(col_metrics[key])
-                    )
-
-                    if similarity > best_sim:
-                        best_sim = np.round(similarity, 5)
-                        best_trans = f"{key}"[:2]
-                        best_shift = f"{key}"[2:]
-
-                value = {
-                    "sim": best_sim,
-                    "shift": best_shift,
-                    "trans": best_trans,
-                    "row_file": row_file,
-                    "col_file": col_file,
-                    "metric": metric,
-                }
-
-                # update comparison object
-                for k, v in value.items():
-                    r.hset(f"cmp:{row_file[:-4]}:{col_file[:-4]}:{metric}", k, v)
-
-                progress.advance(sim_task)
-
-    progress.remove_task(sim_task)
-    print(f"[SUBR{index:02d}] subprocess complete")
-
-    return index
+tag = "[green]main[/green]  :"
 
 
-def main(args):
-    r = redis.Redis(host="localhost", port=6379, db=0)
-
-    # filenames
-    train_dir = os.path.join(args.data_dir, "train")
-    all_filenames = [f for f in os.listdir(train_dir) if f.endswith(".mid")]
-    all_filenames.sort()
-    play_dir = os.path.join(args.data_dir, "play")
-    base_filenames = [f for f in os.listdir(play_dir) if f.endswith(".mid")]
-    base_filenames.sort()
-    split_keys = np.array_split(base_filenames, os.cpu_count())  # type: ignore
+def calc_sims(
+    redis_url: str,
+    rows: List[str],
+    all_rows: List[str],
+    metric: str = "pitch_histogram",
+    n_transpositions: int = 12,
+    n_shifts: int = 8,
+    index: int = 0,
+) -> int:
+    redis_conn = redis.from_url(redis_url)
 
     # calculate metrics for each file
     progress = Progress(
@@ -101,107 +40,128 @@ def main(args):
         *Progress.get_default_columns(),
         TimeElapsedColumn(),
         MofNCompleteColumn(),
-        refresh_per_second=1,
+        refresh_per_second=0.1,
     )
-    pitch_histogram_task = progress.add_task(
-        f"uploading {args.metric}s", total=(len(all_filenames))
+    calc_sim_task = progress.add_task(
+        f"subr{index:02d} calculating similarities", total=len(rows) * len(all_rows)
     )
     with progress:
-        for file in all_filenames:
-            vector = PrettyMIDI(
-                os.path.join(train_dir, file)
-            ).get_pitch_class_histogram(True, True)
-            store_vector(r, file, args.metric, vector)
-            progress.advance(pitch_histogram_task)
+        for row in rows:
+            for other_row in all_rows:
+                # Generate all permutations of the comparison filename
+                permutations = [
+                    f"{other_row}_t{T:02d}s{S:02d}"
+                    for T, S in itertools.product(
+                        range(n_transpositions), range(n_shifts)
+                    )
+                ]
 
-    # calculate similarities
-    with ProcessPoolExecutor() as executor:
-        futures = {
-            executor.submit(calc_sims, chunk, base_filenames, args.metric, i): chunk
-            for i, chunk in enumerate(split_keys)
-        }
+                base_key = f"files:{row}_t00s00"
+                base_vector = np.array(
+                    redis_conn.json().get(base_key, f"$.{metric}")
+                )  # (,12)
+                if base_vector is None:
+                    raise ValueError(
+                        f"base vector not found in Redis for key: '{base_key}'"
+                    )
 
-        for future in as_completed(futures):
-            index = future.result()
-            print(f"[MAIN]   subprocess {index} returned")
+                comparison_vectors = []
+                keys = [f"files:{perm}" for perm in permutations]
+                vectors = redis_conn.json().mget(keys, f"$.{metric}")
+                for perm, vector in zip(permutations, vectors):
+                    if vector:
+                        comparison_vectors.append((perm, np.array(vector)))
+                if not comparison_vectors:
+                    raise ValueError(
+                        f"No vectors found for any comparison permutations.\n\tLast search was '{keys[-1]}.{metric}'"
+                    )
 
-    # build tables
-    table_list = []
-    if args.build_sim:
-        parquet_path = os.path.join(
-            "data", "tables", f"{args.dataset_name}_sim.parquet"
-        )
-        table_list.append(parquet_path)
+                vectors = (
+                    np.stack([vec for _, vec in comparison_vectors]).squeeze().T
+                )  # (12,96)
+                similarities = np.dot(base_vector, vectors) / (
+                    norm(base_vector) * norm(vectors)
+                )
+                best_perm = comparison_vectors[np.argmax(similarities)][0]
+                best_transpose, best_shift = map(
+                    int, best_perm.split("_t")[1].split("s")
+                )
+                transform_info = {
+                    "transpose": int(best_transpose),
+                    "shift": int(best_shift),
+                }
+                result_key = f"cmp:{base_key.split(':')[-1]}:{other_row}_t00s00"
+                redis_conn.json().set(result_key, "$", transform_info)
+                redis_conn.json().set(result_key, f"$.{metric}", similarities.max())
+                progress.advance(calc_sim_task)
 
-        start_time = time.time()
-        build_similarity_table(base_filenames, parquet_path)
-        end_time = time.time()
+    progress.remove_task(calc_sim_task)
+    console.log(f"[subr{index:02d}] subprocess complete")
 
-        big_df = pd.read_parquet(parquet_path)
-        print(f"successfully built sim table '{parquet_path}'")
-        pprint(big_df.head())
+    return index
 
-        memory_usage = big_df.memory_usage(index=True).sum()
-        print(f"Time taken to generate DataFrame: {end_time - start_time:.2f} s")
-        print(f"Memory usage of DataFrame: {memory_usage / (1024 * 1024):.2f} MB")
-        del big_df
 
-    if args.build_neighbor:
-        parquet_path = os.path.join(
-            "data", "tables", f"{args.dataset_name}_neighbor.parquet"
-        )
-        table_list.append(parquet_path)
+def main(args: Namespace):
+    r = redis.from_url(args.redis)
+    # filenames
+    train_dir = os.path.join(args.data_dir, "synthetic")
+    all_filenames = [f[:-4] for f in os.listdir(train_dir) if f.endswith(".mid")]
+    all_filenames.sort()
+    play_dir = os.path.join(args.data_dir, "synthetic")
+    base_filenames = [f[:-4] for f in os.listdir(play_dir) if f.endswith(".mid")]
+    base_filenames.sort()
+    split_keys = np.array_split(base_filenames, os.cpu_count())  # type: ignore
 
-        start_time = time.time()
-        build_neighbor_table(base_filenames, parquet_path)
-        end_time = time.time()
+    console.log(f"{tag} verifying existence of files in redis before starting")
+    all_keys_present = True
+    for base_filename in base_filenames:
+        redis_key = f"files:{base_filename}_t00s00"
+        if not r.exists(redis_key):
+            console.log(f"Warning: Key '{redis_key}' does not exist in Redis.")
+            all_keys_present = False
+    if not all_keys_present:
+        exit()
+    console.log(f"{tag} all required keys are present")
 
-        big_df = pd.read_parquet(parquet_path)
-        print(f"successfully built neighbor table '{parquet_path}':")
-        pprint(big_df.head())
+    if args.multithread:
+        with ProcessPoolExecutor() as executor:
+            futures = {
+                executor.submit(
+                    calc_sims,
+                    args.redis,
+                    chunk,
+                    base_filenames,
+                    metric=args.metric,
+                    index=i,
+                ): chunk
+                for i, chunk in enumerate(split_keys)
+            }
 
-        memory_usage = big_df.memory_usage(index=True).sum()
-        print(f"Time taken to generate DataFrame: {end_time - start_time:.2f} s")
-        print(f"Memory usage of DataFrame: {memory_usage / (1024 * 1024):.2f} MB")
-        del big_df
+            for future in as_completed(futures):
+                index = future.result()
+                console.log(f"{tag} subprocess {index} returned")
+    else:
+        calc_sims(args.redis, base_filenames, base_filenames, metric=args.metric)
 
-    if args.build_transformation:
-        parquet_path = os.path.join(
-            "data", "tables", f"{args.dataset_name}_transformations.parquet"
-        )
-        table_list.append(parquet_path)
-
-        start_time = time.time()
-        build_transformation_table(base_filenames, parquet_path)
-        end_time = time.time()
-
-        big_df = pd.read_parquet(parquet_path)
-        print(f"successfully built transformation table '{parquet_path}':")
-        pprint(big_df.head())
-
-        memory_usage = big_df.memory_usage(index=True).sum()
-        print(f"Time taken to generate DataFrame: {end_time - start_time:.2f} s")
-        print(f"Memory usage of DataFrame: {memory_usage / (1024 * 1024):.2f} MB")
-        del big_df
-
-    # CHATGPT UNTESTED
-    zip_path = os.path.join("outputs", f"{args.dataset_name}_tables.zip")
-    print(f"compressing to zipfile '{zip_path}'")
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for table in table_list:
-            zipf.write(table, os.path.basename(table))
-    print("DONE")
+    console.log(f"{tag} similarities have been calculated")
+    console.log(f"{tag} DONE")
 
 
 if __name__ == "__main__":
     # load args
     parser = ArgumentParser(description="Argparser description")
-    parser.add_argument("--data_dir", default=None, help="location of MIDI files")
     parser.add_argument(
-        "--dataset_name", type=str, default="dataset", help="name of dataset"
+        "--data_dir", default="data/datasets/test", help="location of MIDI files"
     )
     parser.add_argument(
-        "--metric", "-m", default="pitch_histogram", help="metric to use/calculate"
+        "--dataset_name", type=str, default="test", help="name of dataset"
+    )
+    parser.add_argument(
+        "--metric",
+        "-m",
+        type=str,
+        default="pitch_histogram",
+        help="metric to use/calculate for similarity measurements",
     )
     parser.add_argument(
         "--num_beats",
@@ -248,8 +208,19 @@ if __name__ == "__main__":
         default=False,
         help="test dataset mode (don't expect transformations)",
     )
+    parser.add_argument(
+        "--redis",
+        type=str,
+        default="redis://localhost:6379/0",
+        help="override default redis url",
+    )
+    parser.add_argument(
+        "--multithread",
+        action="store_true",
+        default=False,
+        help="enable multithreading",
+    )
     args = parser.parse_args()
-
     pprint(args)
 
     main(args)
