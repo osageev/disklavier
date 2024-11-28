@@ -1,18 +1,29 @@
 import os
 import json
-from collections import Counter
-import matplotlib.pyplot as plt
+import random
 import pretty_midi
+import matplotlib.pyplot as plt
+from collections import Counter
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TimeElapsedColumn,
+    MofNCompleteColumn,
+    track,
+)
 
 # filesystem parameters
-INPUT_DIR = "../../data/datasets/20240621/play"
-OUTPUT_PATH = "../../data/tests"
-OUTPUT_ID = "20240621"  # what identifies this run?
+INPUT_DIR = "/media/nova/Datasets/maestro/segments"
+# INPUT_DIR = "/media/nova/Datasets/sageev-midi/20240621"
+SEGMENT_DIR = INPUT_DIR + "/segmented"  # basic segmented files
+AUGMENT_DIR = INPUT_DIR + "/augmented"  # ^ + all augmentations
+OUTPUT_DIR = "../data/tests"
+DATASET_NAME = "maestro"
 
 # dataset parameters
 NUM_BEATS = 9
 MIN_BPM = 50
-MAX_BPM = 100
+MAX_BPM = 130
 
 # bounds for outlier detection
 OUTLIERS = {
@@ -30,7 +41,9 @@ OUTLIERS = {
 }
 
 
-def analyze(folder_path):
+def analyze(folder_path: str):
+    print(f"analyzing {folder_path}")
+
     dur_counter = Counter()
     len_counter = Counter()
     pch_counter = Counter()
@@ -39,120 +52,155 @@ def analyze(folder_path):
 
     outliers = []
 
-    for file_name in os.listdir(folder_path):
-        if file_name.endswith(".mid") or file_name.endswith(".midi"):
-            file_path = os.path.join(folder_path, file_name)
+    p = Progress(
+        SpinnerColumn(),
+        *Progress.get_default_columns(),
+        TimeElapsedColumn(),
+        MofNCompleteColumn(),
+    )
 
-            try:
-                midi = pretty_midi.PrettyMIDI(file_path)
+    with p:
+        for dir_path, _, files in os.walk(folder_path):
+            scan_task = p.add_task(
+                f"scanning {os.path.basename(dir_path)}", total=len(files)
+            )
+            for file_name in files:
+                if file_name.endswith(".mid") or file_name.endswith(".midi"):
+                    file_path = os.path.join(dir_path, file_name)
 
-                # count segment-level properties
-                # segment length
-                et = midi.get_end_time()
-                len_counter[et] += 1
-                if et <= OUTLIERS["min_seg_len"]:
-                    print(f"short segment found w length {et:.03f}s:\t{file_name}")
-                    outliers.append(
-                        {
-                            "file": file_name,
-                            "type": "under min segment length",
-                            "value": et,
-                        }
-                    )
-                elif et >= OUTLIERS["max_seg_len"]:
-                    print(f"long segment found w length {et:.03f}s:\t{file_name}")
-                    outliers.append(
-                        {
-                            "file": file_name,
-                            "type": "over max segment length",
-                            "value": et,
-                        }
-                    )
+                    try:
+                        midi = pretty_midi.PrettyMIDI(file_path)
 
-                # segment pitch histogram
-                phn = midi.get_pitch_class_histogram()
-                for i, pitch in enumerate(phn):
-                    phn_counter[i] += pitch
-
-                # count note-level properties
-                midi_data = pretty_midi.PrettyMIDI(file_path)
-                for instrument in midi_data.instruments:
-                    for note in instrument.notes:
-                        # note duration
-                        dt = note.end - note.start
-                        dur_counter[dt] += 1
-                        if dt <= OUTLIERS["min_note_len"]:
+                        # count segment-level properties
+                        # segment length
+                        et = midi.get_end_time()
+                        len_counter[et] += 1
+                        if et <= OUTLIERS["min_seg_len"]:
                             print(
-                                f"short note found w note dur {dt:.03f}:\t{file_name}"
+                                f"short segment found w length {et:.03f}s:\t{file_name}"
                             )
                             outliers.append(
                                 {
-                                    "file": file_name,
-                                    "type": "under min note length",
-                                    "value": dt,
+                                    "name": file_name,
+                                    "type": "under min segment length",
+                                    "value": et,
+                                    "path": file_path,
                                 }
                             )
-                        elif dt >= OUTLIERS["max_note_len"]:
-                            print(f"long note found w note dur {dt:.03f}:\t{file_name}")
-                            outliers.append(
-                                {
-                                    "file": file_name,
-                                    "type": "over max note length",
-                                    "value": dt,
-                                }
-                            )
-                        # note pitch
-                        pch_counter[note.pitch] += 1
-                        if note.pitch <= OUTLIERS["min_pitch"]:
-                            print(f"low note found w pitch {note.pitch}:\t{file_name}")
-                            outliers.append(
-                                {
-                                    "file": file_name,
-                                    "type": "under min pitch",
-                                    "value": note.pitch,
-                                }
-                            )
-                        elif note.pitch >= OUTLIERS["max_pitch"]:
-                            print(f"high note found w pitch {note.pitch}:\t{file_name}")
-                            outliers.append(
-                                {
-                                    "file": file_name,
-                                    "type": "over max pitch",
-                                    "value": note.pitch,
-                                }
-                            )
-                        # note velocity
-                        vel_counter[note.velocity] += 1
-                        if note.velocity <= OUTLIERS["min_vel"]:
+                        elif et >= OUTLIERS["max_seg_len"]:
                             print(
-                                f"quiet note found w vel {note.velocity:03d}:\t{file_name}"
+                                f"long segment found w length {et:.03f}s:\t{file_name}"
                             )
                             outliers.append(
                                 {
-                                    "file": file_name,
-                                    "type": "under min velocity",
-                                    "value": note.velocity,
-                                }
-                            )
-                        elif note.velocity >= OUTLIERS["max_vel"]:
-                            print(
-                                f"loud note found w vel {note.velocity:03d}:\t{file_name}"
-                            )
-                            outliers.append(
-                                {
-                                    "file": file_name,
-                                    "type": "over max velocity",
-                                    "value": note.velocity,
+                                    "name": file_name,
+                                    "type": "over max segment length",
+                                    "value": et,
+                                    "path": file_path,
                                 }
                             )
 
-            except Exception as e:
-                print(f"Error processing {file_path}: {e}")
-                outliers.append(
-                    {"file": file_name, "type": "file processing error", "value": None}
-                )
-                continue
+                        # segment pitch histogram
+                        phn = midi.get_pitch_class_histogram()
+                        for i, pitch in enumerate(phn):
+                            phn_counter[i] += pitch
 
+                        # count note-level properties
+                        midi_data = pretty_midi.PrettyMIDI(file_path)
+                        for instrument in midi_data.instruments:
+                            for note in instrument.notes:
+                                # note duration
+                                dt = note.end - note.start
+                                dur_counter[dt] += 1
+                                if dt <= OUTLIERS["min_note_len"]:
+                                    print(
+                                        f"short note found w note dur {dt:.03f}:\t{file_name}"
+                                    )
+                                    outliers.append(
+                                        {
+                                            "name": file_name,
+                                            "type": "under min note length",
+                                            "value": dt,
+                                            "path": file_path,
+                                        }
+                                    )
+                                elif dt >= OUTLIERS["max_note_len"]:
+                                    print(
+                                        f"long note found w note dur {dt:.03f}:\t{file_name}"
+                                    )
+                                    outliers.append(
+                                        {
+                                            "name": file_name,
+                                            "type": "over max note length",
+                                            "value": dt,
+                                            "path": file_path,
+                                        }
+                                    )
+                                # note pitch
+                                pch_counter[note.pitch] += 1
+                                if note.pitch <= OUTLIERS["min_pitch"]:
+                                    print(
+                                        f"low note found w pitch {note.pitch}:\t{file_name}"
+                                    )
+                                    outliers.append(
+                                        {
+                                            "name": file_name,
+                                            "type": "under min pitch",
+                                            "value": note.pitch,
+                                            "path": file_path,
+                                        }
+                                    )
+                                elif note.pitch >= OUTLIERS["max_pitch"]:
+                                    print(
+                                        f"high note found w pitch {note.pitch}:\t{file_name}"
+                                    )
+                                    outliers.append(
+                                        {
+                                            "name": file_name,
+                                            "type": "over max pitch",
+                                            "value": note.pitch,
+                                            "path": file_path,
+                                        }
+                                    )
+                                # note velocity
+                                vel_counter[note.velocity] += 1
+                                if note.velocity <= OUTLIERS["min_vel"]:
+                                    print(
+                                        f"quiet note found w vel {note.velocity:03d}:\t{file_name}"
+                                    )
+                                    outliers.append(
+                                        {
+                                            "name": file_name,
+                                            "type": "under min velocity",
+                                            "value": note.velocity,
+                                            "path": file_path,
+                                        }
+                                    )
+                                elif note.velocity >= OUTLIERS["max_vel"]:
+                                    print(
+                                        f"loud note found w vel {note.velocity:03d}:\t{file_name}"
+                                    )
+                                    outliers.append(
+                                        {
+                                            "name": file_name,
+                                            "type": "over max velocity",
+                                            "value": note.velocity,
+                                            "path": file_path,
+                                        }
+                                    )
+                    except Exception as e:
+                        print(f"Error processing {file_path}: {e}")
+                        outliers.append(
+                            {
+                                "name": file_name,
+                                "type": "file processing error",
+                                "value": None,
+                                "path": file_path,
+                            }
+                        )
+                        continue
+                p.advance(scan_task)
+            p.remove_task(scan_task)
     return (
         len_counter,
         pch_counter,
@@ -165,7 +213,7 @@ def analyze(folder_path):
 def plot_histogram(
     histogram,
     save_path,
-    show=True,
+    show=False,
     grid=False,
     x_label="Time (s)",
     y_label="Count",
@@ -174,7 +222,9 @@ def plot_histogram(
 ) -> None:
     plt.figure(figsize=(10, 6))
 
-    plt.bar(list(histogram.keys()), list(histogram.values()))
+    plt.bar(
+        list(histogram.keys()), list(histogram.values())
+    )  # , width=1.0, edgecolor="black")
     plt.xlabel(x_label)
     plt.ylabel(y_label)
     plt.grid(grid)
@@ -192,62 +242,103 @@ def plot_histogram(
         plt.close()
 
 
+def plot_piano_rolls(
+    pf_midi: list[str],
+    output_path: str,
+    main_title: str = f"{DATASET_NAME} Piano Rolls",
+) -> None:
+    fig, axs = plt.subplots(3, 3, figsize=(15, 10))
+    for ax, midi_file in zip(axs.flatten(), pf_midi):
+        midi = pretty_midi.PrettyMIDI(midi_file)
+        piano_roll = midi.get_piano_roll()
+        ax.imshow(piano_roll, aspect="auto", cmap="gray", origin="lower")
+        ax.set_title(os.path.basename(midi_file))
+        ax.axis("off")
+
+    plt.suptitle(main_title)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_path, f"{main_title}.png"))
+    plt.close()
+
+
 def get_analytics():
     # parameter verification
     if len(os.listdir(INPUT_DIR)) < 1:
         print(f"input directory '{INPUT_DIR}' is empty")
         raise IndexError
 
-    output_dir = os.path.join(OUTPUT_PATH, OUTPUT_ID)
-    if os.path.isdir(output_dir):
-        print(f"output folder '{output_dir}' already exists, pick a new one")
-        raise IsADirectoryError
+    output_dir = os.path.join(OUTPUT_DIR, DATASET_NAME)
+    os.makedirs(output_dir, exist_ok=True)
 
-    os.makedirs(output_dir)
-
-    (lc, pc, vc, dc, pn), outliers = analyze(INPUT_DIR)
+    (lc, pc, vc, dc, pn), outliers = analyze(SEGMENT_DIR)
 
     outlier_file = os.path.join(output_dir, "outliers.json")
     print(f"{len(outliers)} outliers found, writing out to '{outlier_file}'")
-    with open(outlier_file, "w", encoding="utf-8") as f:
+    with open(outlier_file, "w") as f:
         json.dump(outliers, f)
 
-    lc_plot_name = "segment_lengths.png"
+    # plot piano rolls
+    midi_files = []
+    for dir_path, _, files in track(os.walk(AUGMENT_DIR), "randomly plotting PRs"):
+        for file_name in files:
+            if file_name.endswith(".mid") or file_name.endswith(".midi"):
+                midi_files.append(os.path.join(dir_path, file_name))
+
+    selected_files = random.sample(midi_files, min(9, len(midi_files)))
+    selected_outliers = [
+        outlier["path"] for outlier in random.sample(outliers, min(9, len(outliers)))
+    ]
+
+    plot_piano_rolls(selected_files, output_dir, "Randomly Sampled Segments")
+    plot_piano_rolls(selected_outliers, output_dir, "Randomly Sampled Outliers")
+
+    # plot histograms
     plot_histogram(
         lc,
-        os.path.join(output_dir, lc_plot_name),
+        os.path.join(output_dir, "segment_lengths.png"),
         title="Histogram of MIDI File Lengths",
     )
-    pc_plot_name = "pitch_counts.png"
     plot_histogram(
         pc,
-        os.path.join(output_dir, pc_plot_name),
+        os.path.join(output_dir, "pitch_counts.png"),
         x_label="MIDI Pitch",
         title="Histogram of MIDI Note Pitches",
     )
-    vc_plot_name = "velocity_counts.png"
     plot_histogram(
         vc,
-        os.path.join(output_dir, vc_plot_name),
+        os.path.join(output_dir, "velocity_counts.png"),
         x_label="MIDI Velocity",
         title="Histogram of MIDI Note Velocities",
     )
-    dc_plot_name = "duration_counts.png"
     plot_histogram(
         dc,
-        os.path.join(output_dir, dc_plot_name),
+        os.path.join(output_dir, "duration_counts.png"),
         x_label="Duration (s)",
         title="Histogram of MIDI Note Durations",
     )
-    semitones = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-    pn_plot_name = "pitch_histogram_counts.png"
     plot_histogram(
         pn,
-        os.path.join(output_dir, pn_plot_name),
-        x_tick_labels=semitones,
+        os.path.join(output_dir, "pitch_histogram_counts.png"),
+        x_tick_labels=["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
         x_label="Note",
         title="Sum of Pitch Histograms",
     )
+
+    # delete empty files
+    n_deleted = 0
+    for dir_path, _, files in track(os.walk(AUGMENT_DIR), "deleting empty files"):
+        for file_name in files:
+            if file_name.endswith(".mid") or file_name.endswith(".midi"):
+                midi = pretty_midi.PrettyMIDI(os.path.join(dir_path, file_name))
+                note_count = 0
+                for ins in midi.instruments:
+                    note_count += len(ins.notes)
+
+                if note_count == 0:
+                    print(f"empty file found: '{file_name}'\tremoving...")
+                    # os.remove(os.path.join(dir_path, file_name))
+                    n_deleted += 1
+    print(f"found and deleted {n_deleted} empty files")
 
 
 if __name__ == "__main__":

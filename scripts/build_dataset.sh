@@ -1,14 +1,15 @@
 #!/bin/bash
-DATASET="test_micro"
+DATASET="maestro"
 
 cd "$(dirname "$0")"/.. || exit
-python build_dataset.py\
-    --data_dir "data/datasets/$DATASET"\
+python src/build_dataset.py\
+    --data_dir "/media/nova/Datasets/maestro/midi"\
+    --out_dir "/media/nova/Datasets/maestro/segments"\
     --dataset_name "$DATASET"\
-    -art
+    -ast
 
-python build_tables.py\
-    --data_dir "data/datasets/$DATASET"\
-    --dataset_name "$DATASET"\
-    --metric "pitch_histogram"\
-    -nrst
+# python build_tables.py\
+#     --data_dir "data/datasets/$DATASET"\
+#     --dataset_name "$DATASET"\
+#     --metric "pitch_histogram"\
+#     -nrst
