@@ -3,6 +3,7 @@ import zipfile
 from argparse import ArgumentParser
 import mido
 import pretty_midi
+from PIL import Image
 import numpy as np
 from rich.progress import (
     Progress,
@@ -16,6 +17,8 @@ from utils import console
 
 from typing import List
 
+PR_FS = 50
+N_BEATS = 9
 
 def get_bpm(file_path: str) -> int:
     """
@@ -40,9 +43,34 @@ def get_bpm(file_path: str) -> int:
     return tempo
 
 
+def calculate_piano_roll_columns(tempo: int, fs: int = 100, beats: int = 9) -> int:
+    """
+    Calculate the number of columns in a piano roll for a given tempo and duration.
+
+    Args:
+        tempo (int): Tempo in beats per minute (BPM).
+        fs (int): Sampling frequency in Hz (frames per second). Default is 100.
+        beats (int): Number of beats for the duration. Default is 9.
+
+    Returns:
+        int: Number of columns in the piano roll.
+    """
+    # Calculate duration of one beat in seconds
+    seconds_per_beat = 60 / tempo
+
+    # Calculate total duration for the given number of beats
+    total_duration = beats * seconds_per_beat
+
+    # Calculate the number of columns for the given sampling frequency
+    num_columns = int(total_duration * fs)
+
+    return num_columns
+
+
 def process_files(pf_files: List[str], p_outputs: str, index: int = 1) -> int:
     """
-    Generate piano rolls from midi files
+    Generate piano rolls from MIDI files with pixel-perfect resolution,
+    trimming them to a calculated number of columns and squashing them into a square (128x128).
 
     Arguments
     --------
@@ -58,7 +86,6 @@ def process_files(pf_files: List[str], p_outputs: str, index: int = 1) -> int:
     int
         process index, again just used for printing
     """
-    from matplotlib import pyplot as plt
 
     p = Progress(
         SpinnerColumn(),
@@ -80,26 +107,29 @@ def process_files(pf_files: List[str], p_outputs: str, index: int = 1) -> int:
 
                 # Load MIDI file and generate piano roll
                 midi = pretty_midi.PrettyMIDI(pf_file)
-                piano_roll = midi.get_piano_roll()
+                piano_roll = midi.get_piano_roll(fs=PR_FS)
+
+                # Trim the piano roll to the number of columns defined by tempo and beats
+                tempo = get_bpm(pf_file)
+                num_columns = calculate_piano_roll_columns(tempo, fs=PR_FS, beats=N_BEATS)
+                trimmed_piano_roll = piano_roll[:, :num_columns]
 
                 # Trim the piano roll to start from the first note
                 non_empty_columns = np.any(piano_roll > 0, axis=0)
                 first_note_idx = np.argmax(non_empty_columns)
                 trimmed_piano_roll = piano_roll[:, first_note_idx:]
 
-                # Save the piano roll as an image
-                plt.figure(figsize=(10, 4))
-                plt.imshow(
-                    trimmed_piano_roll,
-                    origin="lower",
-                    aspect="auto",
-                    cmap="gray_r",
-                    interpolation="nearest",
+                # Normalize and invert the piano roll
+                normalized_roll = (127 - trimmed_piano_roll).astype(np.uint8)
+
+                # Resize the trimmed piano roll to (128, 128)
+                resized_roll = np.array(
+                    Image.fromarray(normalized_roll.T, mode="L").resize((128, 128), Image.Resampling.LANCZOS)
                 )
-                plt.axis("off")
-                plt.tight_layout()
-                plt.savefig(os.path.splitext(output_path)[0] + ".png")
-                plt.close()
+
+                # Save the resized piano roll as an image
+                img = Image.fromarray(resized_roll, mode="L")
+                img.save(os.path.splitext(output_path)[0] + ".png")
 
                 p.update(task_s, advance=1)
             except Exception as e:
@@ -149,10 +179,10 @@ def main(args):
             index = future.result()
             console.log(f"subprocess {index} returned")
 
+    n_files = 0
     if args.zip:
         zip_path = os.path.join("data", "datasets", f"{args.dataset_name}_prs.zip")
         console.log(f"compressing to zipfile '{zip_path}'")
-        n_files = 0
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
             for path, dirs, files in os.walk(args.data_dir):
                 for file in files:
@@ -161,7 +191,9 @@ def main(args):
                     zipf.write(file_path, arcname)
                     n_files += 1
 
-    console.log(f"[green bold]segmentation complete, {n_files} files generated")
+    console.log(
+        f"[green bold]piano roll generation complete, {n_files} files generated"
+    )
 
 
 if __name__ == "__main__":
