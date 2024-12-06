@@ -12,13 +12,14 @@ from rich.progress import (
     MofNCompleteColumn,
 )
 from concurrent.futures import ProcessPoolExecutor, as_completed
-
+import random
 from utils import console
 
 from typing import List
 
 PR_FS = 50
 N_BEATS = 9
+
 
 def get_bpm(file_path: str) -> int:
     """
@@ -100,7 +101,7 @@ def process_files(pf_files: List[str], p_outputs: str, index: int = 1) -> int:
         for pf_file in pf_files:
             try:
                 # Create output path by replicating the directory structure
-                rel_path = os.path.relpath(pf_file, start=os.path.dirname(pf_files[0]))
+                rel_path = os.path.relpath(pf_file, start=os.path.dirname(pf_file))
                 output_path = os.path.join(p_outputs, rel_path)
                 output_dir = os.path.dirname(output_path)
                 os.makedirs(output_dir, exist_ok=True)
@@ -111,24 +112,28 @@ def process_files(pf_files: List[str], p_outputs: str, index: int = 1) -> int:
 
                 # Trim the piano roll to the number of columns defined by tempo and beats
                 tempo = get_bpm(pf_file)
-                num_columns = calculate_piano_roll_columns(tempo, fs=PR_FS, beats=N_BEATS)
+                num_columns = calculate_piano_roll_columns(
+                    tempo, fs=PR_FS, beats=N_BEATS
+                )
                 trimmed_piano_roll = piano_roll[:, :num_columns]
 
                 # Trim the piano roll to start from the first note
                 non_empty_columns = np.any(piano_roll > 0, axis=0)
                 first_note_idx = np.argmax(non_empty_columns)
-                trimmed_piano_roll = piano_roll[:, first_note_idx:]
+                trimmed_piano_roll = piano_roll[:, first_note_idx:].astype(np.uint8)
 
-                # Normalize and invert the piano roll
-                normalized_roll = (127 - trimmed_piano_roll).astype(np.uint8)
-
-                # Resize the trimmed piano roll to (128, 128)
-                resized_roll = np.array(
-                    Image.fromarray(normalized_roll.T, mode="L").resize((128, 128), Image.Resampling.LANCZOS)
-                )
+                # randomly select 128 column range
+                total_columns = trimmed_piano_roll.shape[1]
+                if total_columns > 128:
+                    start_idx = random.randint(0, total_columns - 128)
+                    cropped_piano_roll = trimmed_piano_roll[
+                        :, start_idx : start_idx + 128
+                    ]
+                else:
+                    cropped_piano_roll = trimmed_piano_roll
 
                 # Save the resized piano roll as an image
-                img = Image.fromarray(resized_roll, mode="L")
+                img = Image.fromarray(cropped_piano_roll, mode="L")
                 img.save(os.path.splitext(output_path)[0] + ".png")
 
                 p.update(task_s, advance=1)
@@ -184,7 +189,7 @@ def main(args):
         zip_path = os.path.join("data", "datasets", f"{args.dataset_name}_prs.zip")
         console.log(f"compressing to zipfile '{zip_path}'")
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for path, dirs, files in os.walk(args.data_dir):
+            for path, _, files in os.walk(args.data_dir):
                 for file in files:
                     file_path = os.path.join(path, file)
                     arcname = os.path.relpath(file_path, args.data_dir)
