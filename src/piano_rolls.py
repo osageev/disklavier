@@ -67,11 +67,11 @@ def calculate_piano_roll_columns(tempo: int, fs: int = 100, beats: int = 9) -> i
 
     return num_columns
 
-
 def process_files(pf_files: List[str], p_outputs: str, index: int = 1) -> int:
     """
     Generate piano rolls from MIDI files with pixel-perfect resolution,
-    trimming them to a calculated number of columns and squashing them into a square (128x128).
+    trimming them to a calculated number of columns, cropping to 128 columns,
+    zero-padding vertically to 128 rows, and saving with the correct folder structure.
 
     Arguments
     --------
@@ -100,9 +100,11 @@ def process_files(pf_files: List[str], p_outputs: str, index: int = 1) -> int:
     with p:
         for pf_file in pf_files:
             try:
-                # Create output path by replicating the directory structure
-                rel_path = os.path.relpath(pf_file, start=os.path.dirname(pf_file))
+                # Derive relative path and create corresponding output path
+                input_root = os.path.commonpath(pf_files)  # Determine the common root
+                rel_path = os.path.relpath(pf_file, start=input_root)
                 output_path = os.path.join(p_outputs, rel_path)
+                output_path = os.path.splitext(output_path)[0] + ".png"  # Change extension to .png
                 output_dir = os.path.dirname(output_path)
                 os.makedirs(output_dir, exist_ok=True)
 
@@ -122,7 +124,7 @@ def process_files(pf_files: List[str], p_outputs: str, index: int = 1) -> int:
                 first_note_idx = np.argmax(non_empty_columns)
                 trimmed_piano_roll = piano_roll[:, first_note_idx:].astype(np.uint8)
 
-                # randomly select 128 column range
+                # Randomly select a 128-column range
                 total_columns = trimmed_piano_roll.shape[1]
                 if total_columns > 128:
                     start_idx = random.randint(0, total_columns - 128)
@@ -132,9 +134,19 @@ def process_files(pf_files: List[str], p_outputs: str, index: int = 1) -> int:
                 else:
                     cropped_piano_roll = trimmed_piano_roll
 
+                # Zero-pad vertically to ensure 128 rows
+                current_rows = cropped_piano_roll.shape[0]
+                if current_rows < 128:
+                    padded_piano_roll = np.zeros(
+                        (128, cropped_piano_roll.shape[1]), dtype=np.uint8
+                    )
+                    padded_piano_roll[128 - current_rows :, :] = cropped_piano_roll
+                else:
+                    padded_piano_roll = cropped_piano_roll
+
                 # Save the resized piano roll as an image
-                img = Image.fromarray(cropped_piano_roll, mode="L")
-                img.save(os.path.splitext(output_path)[0] + ".png")
+                img = Image.fromarray(padded_piano_roll, mode="L")
+                img.save(output_path)
 
                 p.update(task_s, advance=1)
             except Exception as e:
@@ -149,7 +161,7 @@ def main(args):
         console.log(f"no data dir found at {args.data_dir}")
         raise IsADirectoryError
 
-    p_outputs = os.path.join(args.out_dir, "piano_rolls")
+    # p_outputs = os.path.join(args.out_dir, "piano_rolls")
 
     # collect all paths
     tracks = []
@@ -174,7 +186,7 @@ def main(args):
             executor.submit(
                 process_files,
                 list(chunk),
-                p_outputs,
+                args.out_dir,
                 index=i,
             ): chunk
             for i, chunk in enumerate(split_keys)
@@ -186,7 +198,7 @@ def main(args):
 
     n_files = 0
     if args.zip:
-        zip_path = os.path.join("data", "datasets", f"{args.dataset_name}_prs.zip")
+        zip_path = os.path.join(args.out_dir, f"{args.dataset_name}_prs.zip")
         console.log(f"compressing to zipfile '{zip_path}'")
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
             for path, _, files in os.walk(args.data_dir):
