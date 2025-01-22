@@ -1,9 +1,6 @@
 import os
 import mido
-import pretty_midi
-import numpy as np
 from math import floor
-import matplotlib.pyplot as plt
 
 p_dataset = "/media/nova/Datasets/sageev-midi"
 old_dataset_name = "20240621-nested"
