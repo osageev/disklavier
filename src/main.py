@@ -25,7 +25,11 @@ def main(args, params):
     ts_start = td_start.strftime("%y%m%d-%H%M%S")
 
     # filesystem setup
-    p_log = os.path.join(args.output, "logs", f"{ts_start}_{params.seeker.metric}_{params.seeker.seed}_{params.initialization}")
+    p_log = os.path.join(
+        args.output,
+        "logs",
+        f"{ts_start}_{params.seeker.metric}_{params.seeker.seed}_{params.initialization}",
+    )
     p_playlist = os.path.join(p_log, "playlist")
     pf_playlist = os.path.join(p_log, f"playlist_{ts_start}.csv")
     pf_master_recording = os.path.join(p_log, f"master-recording_{ts_start}.mid")
@@ -41,7 +45,6 @@ def main(args, params):
         os.makedirs(p_playlist)  # folder for copy of MIDI files
     write_log(pf_playlist, "position", "start time", "file path", "similarity")
     console.log(f"{tag} filesystem set up complete")
-
 
     # worker setup
     scheduler = workers.Scheduler(
@@ -130,10 +133,12 @@ def main(args, params):
         thread_player.start()
         metronome = workers.Metronome(params.metronome, args.bpm, td_start)
         process_metronome = Process(target=metronome.tick, name="metronome")
+        process_metronome.start()
         while n_files < params.n_transitions:
             if q_playback.qsize() < params.n_min_queue_length:
                 pf_next_file, similarity = seeker.get_next()
                 if not process_metronome.is_alive():
+                    console.log(f"{tag} [yellow]restarting metronome")
                     process_metronome.start()
                 ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
                 console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")

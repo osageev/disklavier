@@ -17,31 +17,32 @@ class Metronome(Worker):
         self.td_start = t_start
         self.beat_interval = 60 / self.bpm
         self.running = False
-        
+
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
 
     def tick(self):
         self.running = True
+        console.log(f"{self.tag} initializing pygame")
         pygame.mixer.init()
+        console.log(f"{self.tag} initialized pygame")
         next_tick = self.td_start  # + timedelta(seconds=TS_DELAY_COMPENSATION)
         try:
             while self.running:
                 now = datetime.now()
                 if now >= next_tick:
-                    beat_number = (
+                    num_beat = (
                         int((now - self.td_start).total_seconds() / self.beat_interval)
                         % self.params.n_beats_per_segment
                     ) + 1
                     console.log(
-                        f"{self.tag} [grey50]tick {beat_number}/{self.params.n_beats_per_segment}[/grey50]"
+                        f"{self.tag} [grey50]tick {num_beat}/{self.params.n_beats_per_segment}[/grey50]"
                     )
                     if self.do_tick:
-                        if beat_number == 1:
-                            self.tick_sound = pygame.mixer.Sound(self.wav_file_1)
-                        else:
-                            self.tick_sound = pygame.mixer.Sound(self.wav_file_2)
-                        self.tick_sound.play()
+                        # play tick, changing sample on first beat
+                        pygame.mixer.Sound(
+                            self.wav_file_1 if num_beat == 1 else self.wav_file_2
+                        ).play()
                     next_tick += timedelta(seconds=self.beat_interval)
                 time.sleep(0.01)  # Small sleep to prevent busy-waiting
         except KeyboardInterrupt:
