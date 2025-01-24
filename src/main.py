@@ -39,7 +39,7 @@ def main(args, params):
             console.log(f"{tag} creating new logging folder at '{p_log}'")
         os.makedirs(p_log)
         os.makedirs(p_playlist)  # folder for copy of MIDI files
-    write_log(pf_playlist, "position", "start time", "file path")
+    write_log(pf_playlist, "position", "start time", "file path", "similarity")
     console.log(f"{tag} filesystem set up complete")
 
     # worker setup
@@ -122,6 +122,7 @@ def main(args, params):
             n_files,
             datetime.now().strftime("%y-%m-%d %H:%M:%S"),
             pf_seed,
+            0,
         )
 
         # start playback
@@ -133,7 +134,7 @@ def main(args, params):
         process_metronome = Process(target=metronome.tick, name="metronome")
         while n_files < params.n_transitions:
             if q_playback.qsize() < params.n_min_queue_length:
-                pf_next_file = seeker.get_next()
+                pf_next_file, similarity = seeker.get_next()
                 if not process_metronome.is_alive():
                     process_metronome.start()
                 ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
@@ -144,6 +145,7 @@ def main(args, params):
                     n_files,
                     datetime.now().strftime("%y-%m-%d %H:%M:%S"),
                     pf_next_file,
+                    similarity,
                 )
 
             time.sleep(0.1)
@@ -174,15 +176,8 @@ def main(args, params):
 
     if args.verbose:
         console.log(f"{tag} stopping metronome")
-    process_metronome.terminate()
-    process_metronome.join(timeout=0.1)
-    if process_metronome.is_alive():
-        if args.verbose:
-            console.log(
-                f"{tag}[yellow] metronome process did not terminate, forcefully killing..."
-            )
-        process_metronome.kill()
-        process_metronome.join(timeout=0.5)
+    process_metronome.kill()
+    process_metronome.join(timeout=0.5)
     pygame.mixer.quit()
 
     # print playlist

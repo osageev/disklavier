@@ -3,19 +3,15 @@ n_transitions: 10
 n_min_queue_length: 100
 ts_min_queue_length: 12
 initialization: "random" # kickstart random recording
-kickstart_path: "20240213-100-06_0283-0287.mid"
+# kickstart_path: "20240213-100-06_0283-0287.mid"
 scheduler:
   tag: "[green]schedl[/green]:"
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
-  seed: 8714569
+  seed: 108
   mode: "best" # best easy repeat random sequential playlist
-  metric: "pitch_histogram" # pitch_histogram clamp
-  redis:
-    host: 'localhost'
-    port: 6379
-    db: 0
+  metric: "specdiff" # pitch_histogram clamp specdiff
 player:
   tag: "[blue]player[/blue]:"
   midi_port: 'to Max 1'

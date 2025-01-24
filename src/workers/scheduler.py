@@ -39,7 +39,10 @@ class Scheduler(Worker):
         self.p_playlist = playlist_path
         self.td_start = start_time
         self.recording_mode = recording_mode
+
         console.log(f"{self.tag} initialization complete")
+        if self.verbose:
+            console.log(f"{self.tag} settings:\n{self.__dict__}")
 
     def enqueue_midi(self, pf_midi: str, q_midi: PriorityQueue) -> float:
         midi_in = mido.MidiFile(pf_midi)
@@ -96,10 +99,10 @@ class Scheduler(Worker):
         ):
 
             _ = self._gen_transitions(self.ts_transitions[-1], n_stamps=1)
-        # if self._log_midi(pf_midi):
-        #     console.log(f"{self.tag} successfully updated recording file")
-        # else:
-        #     console.log(f"{self.tag} [orange]error updating recording file")
+        if self._log_midi(pf_midi):
+            console.log(f"{self.tag} successfully updated recording file")
+        else:
+            console.log(f"{self.tag} [orange]error updating recording file")
 
         self.n_files_queued += 1
 
@@ -110,6 +113,7 @@ class Scheduler(Worker):
         return mido.tick2second(tt_sum, N_TICKS_PER_BEAT, self.tempo)
 
     def init_outfile(self, pf_midi: str, offset: float = 0) -> bool:
+        """Initialize a MIDI file to hold a playback recording."""
         if self.verbose:
             console.log(f"{self.tag} initializing output file with offset {offset} s")
         midi = mido.MidiFile()
@@ -158,7 +162,7 @@ class Scheduler(Worker):
             console.log(
                 f"{self.tag} segment interval is {ts_interval} seconds (from {self.td_start})",
                 [
-                    f"{t:.03f}s -> {str(self.td_start + timedelta(seconds=t))}"
+                    f"{t:6.03f}s -> {str(self.td_start + timedelta(seconds=t))}"
                     for t in self.ts_transitions
                 ],
             )
@@ -191,9 +195,9 @@ class Scheduler(Worker):
         return transitions
 
     def _get_next_transition(self) -> tuple[float, int]:
-        ts_offset = self.ts_transitions[
-            self.n_files_queued - 1 if self.recording_mode else 0
-        ]
+        console.log(f"{self.tag} transition times:\n{self.ts_transitions}")
+        # ts_offset = self.ts_transitions[self.n_files_queued - 1 if self.recording_mode else 0]
+        ts_offset = self.ts_transitions[self.n_files_queued]
         if self.lead_bar:
             ts_offset -= 60 / self.bpm
             ts_offset = (
@@ -206,6 +210,12 @@ class Scheduler(Worker):
         midi_in = mido.MidiFile(pf_midi)
         midi_out = mido.MidiFile(self.pf_midi_recording)
         ts_offset, _ = self._get_next_transition()
+
+        # also copy midi file to playlist folder
+        console.log(
+            f"{self.tag} copying midi to '{os.path.join(self.p_playlist, os.path.basename(pf_midi))}'"
+        )
+        midi_in.save(os.path.join(self.p_playlist, os.path.basename(pf_midi)))
 
         # create playback track if it doesn't already exist
         play_track = None

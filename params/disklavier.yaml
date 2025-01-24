@@ -1,21 +1,16 @@
 n_beats_per_segment: 8
-n_transitions: 64
-n_min_queue_length: 100
-initialization: "recording" # kickstart random recording
+n_transitions: 8
+n_min_queue_length: 50
+initialization: "random" # kickstart random recording
 kickstart_path: "c4v100-060-03_0000-0005.mid" # midi or path to matches.json
 scheduler:
   tag: "[green]schedl[/green]:"
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
-  seed: 108
+  seed: 4
   mode: "best" # best easy repeat random sequential playlist
-  metric: "pitch_histogram" # pitch_histogram clamp
-  redis:
-    host: "localhost"
-    port: 6379
-    db: 0
-  panther_user: "finlay"
+  metric: "specdiff" # pitch_histogram clamp specdiff
 player:
   tag: "[blue]player[/blue]:"
   midi_port: 'Disklavier'
@@ -23,7 +18,7 @@ metronome:
   tag: "[magenta]metro[/magenta] :"
   tick_1: "data/m_hat.wav"
   tick_2: "data/m_tick.wav"
-  do_tick: False
+  do_tick: True
 recorder:
   tag: "[red]record[/red]:"
   midi_port: 'Disklavier'

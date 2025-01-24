@@ -1,16 +1,16 @@
 import os
+import faiss
 import numpy as np
 import pandas as pd
 from shutil import copy2
 from mido import bpm2tempo
 from pretty_midi import PrettyMIDI
-import redis
-import faiss
-from redis.commands.search.query import Query
 from scipy.spatial.distance import cosine
 
 from .worker import Worker
 from utils import console, panther
+
+SUPPORTED_EXTENSIONS = (".mid", ".midi")
 
 
 class Seeker(Worker):
@@ -25,7 +25,7 @@ class Seeker(Worker):
     matches_pos = 0
     matches_mode = "cplx"
     playlist = {}
-    pitch_match = True
+    pitch_match = False
 
     def __init__(
         self,
@@ -57,14 +57,6 @@ class Seeker(Worker):
         # if params.metric in model_list:
         #     self.load_model()
 
-        if params.redis:
-            self.redis_client = redis.Redis(
-                host=params.redis.host,
-                port=params.redis.port,
-                db=params.redis.db,
-                decode_responses=True,
-            )
-
         # load embeddings
         pf_emb_table = os.path.join(self.p_table, f"{params.metric}.h5")
         console.log(f"{self.tag} looking for embedding table '{pf_emb_table}'")
@@ -77,39 +69,37 @@ class Seeker(Worker):
             console.log(self.emb_table.head())
 
             console.log("building FAISS index...")
-            if self.metric == "clamp":
-                self.emb_table["normed_embeddings"] = self.emb_table[
-                    "embeddings"
-                ].apply(lambda x: x / np.linalg.norm(x))
-            else:
-                self.emb_table["normed_embeddings"] = self.emb_table.iloc[
-                    :, 0:12
-                ].apply(lambda row: row.tolist(), axis=1)
+            match self.metric:
+                case "clamp":
+                    self.emb_table["normed_embeddings"] = self.emb_table[
+                        "embeddings"
+                    ].apply(lambda x: x / np.linalg.norm(x))
+                    embedding_dim = 768
+                case "specdiff":
+                    self.emb_table["normed_embeddings"] = self.emb_table[
+                        "embeddings"
+                    ].apply(lambda x: x / np.linalg.norm(x))
+                    embedding_dim = 768
+                case _:
+                    self.emb_table["normed_embeddings"] = self.emb_table.iloc[
+                        :, 0:12
+                    ].apply(lambda row: row.tolist(), axis=1)
+                    embedding_dim = 12
 
             console.log(self.emb_table[["normed_embeddings"]].head())
 
-            self.faiss_index = faiss.IndexFlatIP(768 if self.metric == "clamp" else 12)
-            self.faiss_index.add(np.array(self.emb_table["normed_embeddings"].to_list(), dtype=np.float32))  # type: ignore
+            self.faiss_index = faiss.IndexFlatIP(embedding_dim)
+            self.faiss_index.add(
+                np.array(
+                    self.emb_table["normed_embeddings"].to_list(), dtype=np.float32
+                )
+            )
             console.log(
                 f"FAISS index built ({np.array(self.emb_table["normed_embeddings"].to_list(), dtype=np.float32).shape})"
             )
         else:
             console.log(f"{self.tag} error loading embeddings table, exiting...")
             exit()  # TODO: handle this better (return an error, let main handle it)
-
-        # # load similarity table
-        # pf_sim_table = os.path.join(self.p_table, "sim.parquet")
-        # console.log(f"{self.tag} looking for similarity table '{pf_sim_table}'")
-        # if os.path.isfile(pf_sim_table):
-        #     with console.status("\t\t\t      loading similarities file..."):
-        #         self.sim_table = pd.read_parquet(pf_sim_table)
-        #     console.log(
-        #         f"{self.tag} loaded {len(self.sim_table)}*{len(self.sim_table.columns)} sim table"
-        #     )
-        #     console.log(self.sim_table.head())
-        # else:
-        #     console.log(f"{self.tag} error loading similarity table, exiting...")
-        #     exit()  # TODO: handle this better (return an error, let main handle it)
 
         # load neighbor table
         pf_neighbor_table = os.path.join(self.p_table, "neighbor.parquet")
@@ -125,26 +115,15 @@ class Seeker(Worker):
             console.log(f"{self.tag} error loading neighbor table, exiting...")
             exit()  # TODO: handle this better (return an error, let main handle it)
 
-        # # load transformation table
-        # pf_trans_table = os.path.join(self.p_table, "transformations.parquet")
-        # console.log(f"{self.tag} looking for tranformation table '{pf_trans_table}'")
-        # if os.path.isfile(pf_trans_table):
-        #     with console.status("\t\t\t      loading tranformation file..."):
-        #         self.trans_table = pd.read_parquet(pf_trans_table)
-        #     console.log(
-        #         f"{self.tag} loaded {len(self.trans_table)}*{len(self.trans_table.columns)} transformation table"
-        #     )
-        #     console.log(self.trans_table.head())
-        # else:
-        #     console.log(f"{self.tag} error loading tranformation table, exiting...")
-        #     exit()  # TODO: handle this better (return an error, let main handle it)
-
         console.log(f"{self.tag} initialization complete")
+        if self.verbose:
+            console.log(f"{self.tag} settings:\n{self.__dict__}")
 
-    def get_next(self) -> str:
+    def get_next(self) -> tuple[str, float]:
+        similarity = 0.0
         match self.mode:
             case "best":
-                next_file = self._get_best()
+                next_file, similarity = self._get_best()
             case "easy":
                 next_file = self._get_easy()
             case "playlist":
@@ -188,20 +167,21 @@ class Seeker(Worker):
 
         self.played_files.append(os.path.basename(next_file))
 
-        return next_file
+        return next_file, similarity
 
     def get_random(self) -> str:
         """returns a random file from the dataset"""
         random_file = self._get_random()
         return os.path.join(self.p_dataset, random_file)
 
-    def _get_best(self) -> str:
+    def _get_best(self) -> tuple[str, float]:
         if self.verbose:
             console.log(
                 f"{self.tag} finding most similar file to '{self.played_files[-1]}'"
             )
 
         console.log(f"{self.tag} played files:\n{self.played_files}")
+        # handle parsing file names with and without augmentation
         if len(os.path.basename(self.played_files[-1])[:-4].split("_")) == 3:
             track, segment, transformation = os.path.basename(self.played_files[-1])[
                 :-4
@@ -213,10 +193,10 @@ class Seeker(Worker):
         current_transformation = f"t{self.transformation['transpose']:02d}s{self.transformation['shift']:02d}"
         q_key = f"{track}_{segment}_{current_transformation}"
 
-        # if self.verbose:
-        console.log(
-            f"{self.tag} extracted '{self.played_files[-1]}' -> '{track}' and '{segment}' and '{current_transformation}'"
-        )
+        if self.verbose:
+            console.log(
+                f"{self.tag} extracted '{self.played_files[-1]}' -> '{track}' and '{segment}' and '{current_transformation}'"
+            )
 
         if track == "player-recording":
             match self.metric:
@@ -226,6 +206,11 @@ class Seeker(Worker):
                     )
                     q_embedding = panther.calc_embedding(self.pf_recording)
                     console.log(f"{self.tag} got clamp embedding {q_embedding.shape}")
+                case "specdiff":
+                    console.log(
+                        f"{self.tag} getting spectrogram diffusion embedding for '{self.pf_recording}'"
+                    )
+                    raise NotImplementedError("nah")
                 case _:
                     if self.verbose:
                         console.log(f"{self.tag} defaulting to pitch histogram metric")
@@ -245,7 +230,8 @@ class Seeker(Worker):
             )
 
         console.log(f"{self.tag} querying with key '{q_key}'")
-        similarities, indices = self.faiss_index.search(q_embedding, 5000)  # type: ignore
+        similarities, indices = self.faiss_index.search(q_embedding, 5000)
+        # console.log(f"{self.tag} indices {indices[:10]}\nsimilarities {similarities[:10]}")
         # NO SHIFT
         indices, similarities = zip(
             *[
@@ -258,16 +244,16 @@ class Seeker(Worker):
         for i, s in zip(indices, similarities):
             nearest_neighbors[str(self.emb_table.index[i])] = float(s)
 
-        # if self.verbose:
-        console.log(
-            f"{self.tag} got nearest neighbors to '{q_key}':",
-            sorted(nearest_neighbors.items(), key=lambda item: item[1], reverse=True)[
-                :10
-            ],
-        )
+        if self.verbose:
+            console.log(
+                f"{self.tag} got nearest neighbors to '{q_key}':",
+                sorted(
+                    nearest_neighbors.items(), key=lambda item: item[1], reverse=True
+                )[:10],
+            )
 
         next_file = self._get_neighbor()
-        console.log(f"{self.tag} random file is '{next_file}'")
+        console.log(f"{self.tag} 'random' file is '{next_file}'")
         played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
         for i_neighbor, similarity in zip(indices, similarities):
             segment_name = str(self.emb_table.index[i_neighbor])
@@ -282,15 +268,15 @@ class Seeker(Worker):
             next_track = next_segment_name.split("_")[0]
             last_track = self.played_files[-1].split("_")[0]
             # switch to different track after 2 segments
-            if len(self.played_files) % 2 == 0:
-                if next_track == last_track:
-                    console.log(
-                        f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
-                    )
-                    continue
-                else:
-                    next_file = f"{segment_name}.mid"
-                    break
+            # if len(self.played_files) % 2 == 0:
+            #     if next_track == last_track:
+            #         console.log(
+            #             f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
+            #         )
+            #         continue
+            #     else:
+            #         next_file = f"{segment_name}.mid"
+            #         break
             # NO SHIFT
             if (
                 next_segment_name not in played_files
@@ -303,10 +289,7 @@ class Seeker(Worker):
         console.log(
             f"{self.tag} best match is '{next_file}' with similarity {similarity:.05f}"
         )
-        console.log(
-            f"{self.tag} vector compare\n\t{q_embedding}\n\t{self.emb_table.loc[next_file[:-4], "normed_embeddings"]}"
-        )
-        return os.path.join(os.path.dirname(self.p_dataset), "train", next_file)
+        return os.path.join(self.p_dataset, next_file), similarity
 
     def _get_easy(self) -> str:
         if self.verbose:
@@ -353,9 +336,17 @@ class Seeker(Worker):
         return self._get_random()
 
     def _get_random(self) -> str:
-        random_file = self.rng.choice(
-            [m for m in os.listdir(self.p_dataset) if m.endswith(".mid") or f.endswith(".midi")]
+        console.log(
+            f"{self.tag} choosing randomly from '{self.p_dataset}':\n{[m for m in os.listdir(self.p_dataset)][:5]}"
         )
+        random_file = self.rng.choice(
+            [m for m in os.listdir(self.p_dataset) if m.endswith(SUPPORTED_EXTENSIONS)],
+            1,
+        )[0]
+
+        # correct for missing augmentation information
+        if "_t" not in random_file:
+            random_file = random_file[:-4] + "_t00s00.mid"
 
         if self.verbose:
             console.log(f"{self.tag} chose random file '{random_file}'")
@@ -366,11 +357,15 @@ class Seeker(Worker):
             while base_file in self.played_files:
                 base_file = self.base_file(random_file)
                 random_file = self.rng.choice(
-                    [m for m in os.listdir(self.p_dataset) if m.endswith(".mid") or f.endswith(".midi")]
+                    [
+                        m
+                        for m in os.listdir(self.p_dataset)
+                        if m.endswith(SUPPORTED_EXTENSIONS)
+                    ]
                 )
 
-        # NO SHIFT
-        random_file = random_file[:-7] + "s00.mid"
+        # NO TRANSFORMS
+        random_file = os.path.splitext(random_file)[0][:-6] + "t00s00.mid"
 
         return str(random_file)
 
@@ -417,7 +412,7 @@ class Seeker(Worker):
         console.log(f"{self.tag} transforming '{pf_in}' to '{pf_out}'")
 
         copy2(
-            os.path.join(os.path.dirname(self.p_dataset), "train", pf_in),
+            os.path.join(os.path.dirname(self.p_dataset), pf_in),
             pf_out,
         )
 
@@ -435,6 +430,7 @@ class Seeker(Worker):
     def load_model(self):
         match self.metric:
             case "clamp":
+                raise NotImplementedError("CLaMP model is no longer supported")
                 import torch
 
                 if torch.cuda.is_available():
@@ -451,86 +447,3 @@ class Seeker(Worker):
                 raise TypeError(
                     f"{self.tag} Unsupported model specified: {self.metric}"
                 )
-
-
-#     q_k = f"files:{track}_{segment}_{current_transformation}"
-#     q_k = f"{track}_{segment}_{current_transformation}"
-#     console.log(f"{self.tag} querying with key '{q_k}'")
-#     # query_embedding = self.redis_client.json().get(q_k, f"$.{self.metric}")
-#     query_embedding = self.emb_table.loc[q_k, "embeddings"]
-#     console.log(f"{self.tag} got embedding {query_embedding.shape}")
-#     # if query_embedding:
-#     #     query_embedding = query_embedding[0]
-#     #     if self.verbose:
-#     #         console.log(
-#     #             f"{self.tag} got embedding for '{q_k}': ({len(query_embedding)})"  # type: ignore
-#     #         )
-#     # else:
-#     #     console.log(f"{self.tag} failed to get embedding for '{q_k}'")
-# played_keys = [k.split(":")[-1] for k in self.construct_keys()]
-# played_files = "|".join(played_keys)
-# # q = f"(-@files:{{{played_files}}})=>[KNN 10 @{self.metric} $query_vector AS vector_score]"
-# # q = f"(*)=>[KNN 10 @{self.metric} $query_vector AS vector_score]"
-# # console.log(f"{self.tag} trying query:\n'{q}'")
-# # console.log(
-# #     f"{self.tag} vector:\n",
-# #     np.array(query_embedding, dtype=np.float32).tobytes(),
-# # )
-# # nearest_neighbors = (
-# #     self.redis_client.ft(f"idx:files_{self.metric}_vss")
-# #     .search(
-# #         Query(q)
-# #         .sort_by("vector_score")
-# #         .return_fields("vector_score", "id")
-# #         .dialect(4),
-# #         {"query_vector": np.array(query_embedding, dtype=np.float32).tobytes()},
-# #     )
-# #     .docs  # type: ignore
-# # )
-
-# similarities = []
-# for chunk in self.emb_chunks:
-#     embeddings = np.vstack(
-#         chunk.loc[:, "embeddings"].values
-#     )  # Convert to 2D array
-#     sims = np.dot(query_embedding, embeddings.T) / (
-#         np.linalg.norm(query_embedding) * np.linalg.norm(embeddings, axis=1)
-#     )
-
-#     # Update top similarities
-#     for idx, sim in enumerate(sims):
-#         if len(similarities) < 1000:
-#             similarities.append(
-#                 (float(sim), chunk.index[idx])
-#             )  # Store similarity and corresponding index
-#         else:
-#             # If we have 1000 similarities, check if the current one is higher than the lowest
-#             min_sim = min(similarities, key=lambda x: x[0])
-#             if sim > min_sim[0]:
-#                 similarities.remove(min_sim)  # Remove the lowest similarity
-#                 similarities.append((float(sim), chunk.index[idx]))
-# similarities.sort(reverse=True, key=lambda x: x[0])
-# nearest_neighbors = [{"sim": s[0], "id": s[1]} for s in similarities]
-
-# similarities = []
-# for index, row in self.emb_table.iterrows():
-#     similarity = 1 - cosine(query_embedding, row["embeddings"])
-#     similarities.append((index, similarity))
-
-
-# Traceback (most recent call last):
-#   File "/Users/finlay/Documents/Programming/disklavier/src/main.py", line 273, in <module>
-#     main(args, params)
-#   File "/Users/finlay/Documents/Programming/disklavier/src/main.py", line 136, in main
-#     pf_next_file = seeker.get_next()
-#                    ^^^^^^^^^^^^^^^^^
-#   File "/Users/finlay/Documents/Programming/disklavier/src/workers/seeker.py", line 165, in get_next
-#     shifted_pch = PrettyMIDI(transposed_file).get_pitch_class_histogram(
-#                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#   File "/Users/finlay/Documents/Programming/disklavier/.venv/lib/python3.12/site-packages/pretty_midi/pretty_midi.py", line 63, in __init__
-#     midi_data = mido.MidiFile(filename=midi_file)
-#                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#   File "/Users/finlay/Documents/Programming/disklavier/.venv/lib/python3.12/site-packages/mido/midifiles/midifiles.py", line 319, in __init__
-#     with open(filename, 'rb') as file:
-#          ^^^^^^^^^^^^^^^^^^^^
-# FileNotFoundError: [Errno 2] No such file or directory: 'data/datasets/20240621/train/20240511-050-01_05_t00s-0518.mid'
