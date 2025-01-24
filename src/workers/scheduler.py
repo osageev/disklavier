@@ -27,12 +27,9 @@ class Scheduler(Worker):
         playlist_path: str,
         start_time: datetime,
         recording_mode: bool,
-        verbose: bool = False,
     ):
-        super().__init__(params, verbose=verbose)
+        super().__init__(params, bpm=bpm)
         self.lead_bar = params.lead_bar
-        self.bpm = bpm
-        self.tempo = mido.bpm2tempo(self.bpm)
         self.n_beats_per_segment = params.n_beats_per_segment
         self.pf_log = log_path
         self.pf_midi_recording = recording_file_path
@@ -86,10 +83,10 @@ class Scheduler(Worker):
                         else:
                             tt_abs = tt_upper_bound
                     self.tt_all_messages.append(tt_abs)
-                    # if self.verbose:
-                    #     console.log(
-                    #         f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
-                    #     )
+                    if self.verbose:
+                        console.log(
+                            f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
+                        )
                     q_midi.put((tt_abs, msg))
 
         # update midi log file

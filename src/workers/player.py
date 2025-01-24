@@ -12,13 +12,13 @@ class Player(Worker):
     td_last_note: datetime
     first_note = False
 
-    def __init__(self, params, bpm: int, t_start: datetime, verbose: bool = False):
-        super().__init__(params, verbose=verbose)
+    def __init__(self, params, bpm: int, t_start: datetime):
+        super().__init__(params, bpm=bpm)
         self.midi_port = mido.open_output(params.midi_port)  # type: ignore
-        self.bpm = bpm
-        self.tempo = mido.bpm2tempo(bpm)
         self.td_start = t_start
         self.td_last_note = t_start
+        if self.verbose:
+            console.log(f"{self.tag} settings:\n{self.__dict__}")
         console.log(
             f"{self.tag} initialization complete, start time is {self.td_start.strftime('%H:%M:%S.%f')[:-3]}"
         )
@@ -35,11 +35,11 @@ class Player(Worker):
                     f"{self.tag} absolute time is {tt_abs} ticks (delta is {ts_abs:.03f} seconds)"
                 )
 
-            # if self.verbose:
-            #     ts_abs_message_time = mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo)
-            #     console.log(
-            #         f"{self.tag} \ttotal time should be {self.td_start.strftime('%H:%M:%S.%f')} + {ts_abs_message_time:.02f} = {(self.td_start + timedelta(seconds=ts_abs_message_time)).strftime(('%H:%M:%S.%f'))}"
-            #     )
+            if self.verbose:
+                ts_abs_message_time = mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo)
+                console.log(
+                    f"{self.tag} \ttotal time should be {self.td_start.strftime('%H:%M:%S.%f')} + {ts_abs_message_time:.02f} = {(self.td_start + timedelta(seconds=ts_abs_message_time)).strftime(('%H:%M:%S.%f'))}"
+                )
 
             td_now = datetime.now()
             if not self.first_note:

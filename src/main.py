@@ -25,7 +25,7 @@ def main(args, params):
     ts_start = td_start.strftime("%y%m%d-%H%M%S")
 
     # filesystem setup
-    p_log = os.path.join(args.output, "logs", f"{ts_start}")
+    p_log = os.path.join(args.output, "logs", f"{ts_start}_{params.seeker.metric}_{params.seeker.seed}_{params.initialization}")
     p_playlist = os.path.join(p_log, "playlist")
     pf_playlist = os.path.join(p_log, f"playlist_{ts_start}.csv")
     pf_master_recording = os.path.join(p_log, f"master-recording_{ts_start}.mid")
@@ -42,6 +42,7 @@ def main(args, params):
     write_log(pf_playlist, "position", "start time", "file path", "similarity")
     console.log(f"{tag} filesystem set up complete")
 
+
     # worker setup
     scheduler = workers.Scheduler(
         params.scheduler,
@@ -51,7 +52,6 @@ def main(args, params):
         p_playlist,
         td_start,
         params.initialization == "recording",
-        verbose=args.verbose,
     )
     seeker = workers.Seeker(
         params.seeker,
@@ -59,14 +59,12 @@ def main(args, params):
         args.dataset,
         p_playlist,
         args.bpm,
-        verbose=args.verbose,
     )
-    player = workers.Player(params.player, args.bpm, td_start, verbose=args.verbose)
+    player = workers.Player(params.player, args.bpm, td_start)
     recorder = workers.Recorder(
         params.recorder,
         args.bpm,
         pf_player_recording,
-        verbose=args.verbose,
     )
     # data setup
     match params.initialization:

@@ -34,22 +34,16 @@ class Seeker(Worker):
         dataset_path: str,
         playlist_path: str,
         bpm: int,
-        verbose: bool = False,
     ):
-        super().__init__(params, verbose=verbose)
+        super().__init__(params, bpm=bpm)
         self.mode = params.mode
         self.p_table = table_path
         self.p_dataset = dataset_path
         self.p_playlist = playlist_path
-        self.bpm = bpm
-        self.tempo = bpm2tempo(self.bpm)
         self.rng = np.random.default_rng(self.params.seed)
-        self.verbose = verbose
 
         if hasattr(params, "pf_recording"):
             self.pf_recording = params.pf_recording
-        if hasattr(params, "panther_user"):
-            self.panther_user = params.panther_user
 
         if params.mode == "best":
             self.metric = params.metric
@@ -93,7 +87,7 @@ class Seeker(Worker):
                 np.array(
                     self.emb_table["normed_embeddings"].to_list(), dtype=np.float32
                 )
-            )
+            )  # type: ignore
             console.log(
                 f"FAISS index built ({np.array(self.emb_table["normed_embeddings"].to_list(), dtype=np.float32).shape})"
             )
@@ -115,9 +109,9 @@ class Seeker(Worker):
             console.log(f"{self.tag} error loading neighbor table, exiting...")
             exit()  # TODO: handle this better (return an error, let main handle it)
 
-        console.log(f"{self.tag} initialization complete")
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
+        console.log(f"{self.tag} initialization complete")
 
     def get_next(self) -> tuple[str, float]:
         similarity = 0.0
@@ -230,7 +224,7 @@ class Seeker(Worker):
             )
 
         console.log(f"{self.tag} querying with key '{q_key}'")
-        similarities, indices = self.faiss_index.search(q_embedding, 5000)
+        similarities, indices = self.faiss_index.search(q_embedding, 5000)  # type: ignore
         # console.log(f"{self.tag} indices {indices[:10]}\nsimilarities {similarities[:10]}")
         # NO SHIFT
         indices, similarities = zip(
@@ -267,16 +261,17 @@ class Seeker(Worker):
             next_segment_name = self.base_file(segment_name)
             next_track = next_segment_name.split("_")[0]
             last_track = self.played_files[-1].split("_")[0]
+            played_tracks = [file.split("_")[0] for file in self.played_files]
             # switch to different track after 2 segments
             # if len(self.played_files) % 2 == 0:
-            #     if next_track == last_track:
-            #         console.log(
-            #             f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
-            #         )
-            #         continue
-            #     else:
-            #         next_file = f"{segment_name}.mid"
-            #         break
+            if next_track in played_tracks:
+                console.log(
+                    f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
+                )
+                continue
+            else:
+                next_file = f"{segment_name}.mid"
+                break
             # NO SHIFT
             if (
                 next_segment_name not in played_files

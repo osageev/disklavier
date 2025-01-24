@@ -20,12 +20,12 @@ class Recorder(Worker):
         params,
         bpm: int,
         recording_file_path: str,
-        verbose: bool = False,
     ):
-        super().__init__(params, verbose=verbose)
-        self.bpm = bpm
-        self.tempo = mido.bpm2tempo(self.bpm)
+        super().__init__(params, bpm=bpm)
         self.pf_midi_recording = recording_file_path
+
+        if self.verbose:
+            console.log(f"{self.tag} settings:\n{self.__dict__}")
 
     def run(self) -> float:
         start_time = datetime.now()
