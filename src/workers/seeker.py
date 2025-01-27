@@ -1,9 +1,9 @@
 import os
+import h5py
 import faiss
 import numpy as np
 import pandas as pd
 from shutil import copy2
-from mido import bpm2tempo
 from pretty_midi import PrettyMIDI
 from scipy.spatial.distance import cosine
 
@@ -56,13 +56,19 @@ class Seeker(Worker):
         console.log(f"{self.tag} looking for embedding table '{pf_emb_table}'")
         if os.path.isfile(pf_emb_table):
             with console.status("\t\t\t      loading embeddings file..."):
-                self.emb_table = pd.read_hdf(pf_emb_table)
+                # self.emb_table = pd.read_hdf(pf_emb_table)
+                with h5py.File(pf_emb_table, "r") as f:
+                    self.emb_table = pd.DataFrame(
+                        list([e] for e in f["embeddings"]),
+                        index=[str(name[0], "utf-8") for name in f["filenames"]],
+                        columns=["embeddings"],
+                    )
             console.log(
                 f"{self.tag} loaded {len(self.emb_table)}*{len(self.emb_table.columns)} embeddings table"
             )
             console.log(self.emb_table.head())
 
-            console.log("building FAISS index...")
+            console.log(f"{self.tag} building FAISS index...")
             match self.metric:
                 case "clamp":
                     self.emb_table["normed_embeddings"] = self.emb_table[
@@ -89,7 +95,7 @@ class Seeker(Worker):
                 )
             )  # type: ignore
             console.log(
-                f"FAISS index built ({np.array(self.emb_table["normed_embeddings"].to_list(), dtype=np.float32).shape})"
+                f"{self.tag} FAISS index built ({np.array(self.emb_table["normed_embeddings"].to_list(), dtype=np.float32).shape})"
             )
         else:
             console.log(f"{self.tag} error loading embeddings table, exiting...")
@@ -174,7 +180,9 @@ class Seeker(Worker):
                 f"{self.tag} finding most similar file to '{self.played_files[-1]}'"
             )
 
-        console.log(f"{self.tag} played files:\n{self.played_files}")
+        console.log(
+            f"{self.tag} {len(self.played_files)} played files:\n{self.played_files}"
+        )
         # handle parsing file names with and without augmentation
         if len(os.path.basename(self.played_files[-1])[:-4].split("_")) == 3:
             track, segment, transformation = os.path.basename(self.played_files[-1])[
@@ -261,17 +269,17 @@ class Seeker(Worker):
             next_segment_name = self.base_file(segment_name)
             next_track = next_segment_name.split("_")[0]
             last_track = self.played_files[-1].split("_")[0]
-            played_tracks = [file.split("_")[0] for file in self.played_files]
             # switch to different track after 2 segments
             # if len(self.played_files) % 2 == 0:
-            if next_track in played_tracks:
-                console.log(
-                    f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
-                )
-                continue
-            else:
-                next_file = f"{segment_name}.mid"
-                break
+            # played_tracks = [file.split("_")[0] for file in self.played_files]
+            # if next_track in played_tracks:
+            #     console.log(
+            #         f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
+            #     )
+            #     continue
+            # else:
+            #     next_file = f"{segment_name}.mid"
+            #     break
             # NO SHIFT
             if (
                 next_segment_name not in played_files
@@ -359,7 +367,7 @@ class Seeker(Worker):
                     ]
                 )
 
-        # NO TRANSFORMS
+        # NO TRANSFORMS -- TODO REMOVE ONCE EMBEDDINGS FOR AUGMENTED DATASET ARE READY
         random_file = os.path.splitext(random_file)[0][:-6] + "t00s00.mid"
 
         return str(random_file)

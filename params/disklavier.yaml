@@ -1,8 +1,8 @@
 n_beats_per_segment: 8
-n_transitions: 2
+n_transitions: 160
 n_min_queue_length: 50
 initialization: "random" # kickstart random recording
-kickstart_path: "c4v100-060-03_0000-0005.mid" # midi or path to matches.json
+kickstart_path: "20240401-065-03_0228-0236_t00s00.mid" # midi or path to matches.json
 scheduler:
   tag: "[green]schedl[/green]:"
   verbose: False
@@ -10,7 +10,7 @@ scheduler:
 seeker:
   tag: "[yellow]seeker[/yellow]:"
   verbose: False
-  seed: 384728
+  seed: 87987657564
   mode: "best" # best easy repeat random sequential playlist
   metric: "specdiff" # pitch_histogram clamp specdiff
 player:
@@ -19,7 +19,7 @@ player:
   midi_port: 'Disklavier'
 metronome:
   tag: "[magenta]metro[/magenta] :"
-  verbose: True
+  verbose: False
   tick_1: "data/MetronomeUp.wav"
   tick_2: "data/Metronome.wav"
   do_tick: True

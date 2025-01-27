@@ -52,6 +52,11 @@ class Scheduler(Worker):
         tt_abs: int = tt_offset  # track the absolute time since system start
         tt_sum: int = 0  # track the sum of all notes in the segment
 
+        if midi_in.ticks_per_beat != N_TICKS_PER_BEAT:
+            console.log(
+                f"{self.tag}[red] midi file ticks per beat mismatch!\n\tfile has {midi_in.ticks_per_beat} tpb but expected {N_TICKS_PER_BEAT}"
+            )
+
         if tt_offset == 0:
             tt_abs = -N_TICKS_PER_BEAT
 
@@ -205,7 +210,9 @@ class Scheduler(Worker):
 
     def _log_midi(self, pf_midi: str) -> bool:
         midi_in = mido.MidiFile(pf_midi)
-        midi_out = mido.MidiFile(self.pf_midi_recording)
+        midi_out = mido.MidiFile(
+            self.pf_midi_recording, ticks_per_beat=N_TICKS_PER_BEAT
+        )
         ts_offset, _ = self._get_next_transition()
 
         # also copy midi file to playlist folder

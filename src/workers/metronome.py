@@ -5,9 +5,6 @@ from datetime import datetime, timedelta
 from .worker import Worker
 from utils import console
 
-TS_DELAY_COMPENSATION = 0.1
-
-
 class Metronome(Worker):
     def __init__(self, params, bpm: int, t_start: datetime):
         super().__init__(params, bpm=bpm)
@@ -23,10 +20,8 @@ class Metronome(Worker):
 
     def tick(self):
         self.running = True
-        console.log(f"{self.tag} initializing pygame")
         pygame.mixer.init()
-        console.log(f"{self.tag} initialized pygame")
-        next_tick = self.td_start  # + timedelta(seconds=TS_DELAY_COMPENSATION)
+        next_tick = self.td_start
         try:
             while self.running:
                 now = datetime.now()
