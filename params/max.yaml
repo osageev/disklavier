@@ -10,7 +10,7 @@ scheduler:
 seeker:
   tag: "[yellow]seeker[/yellow]:"
   verbose: True
-  seed: 328000
+  seed: 1010
   mode: "best" # best easy repeat random sequential playlist
   metric: "specdiff" # pitch_histogram clamp specdiff
 player:
@@ -22,7 +22,7 @@ metronome:
   verbose: False
   tick_1: "data/MetronomeUp.wav"
   tick_2: "data/Metronome.wav"
-  do_tick: False
+  do_tick: True
 recorder:
   tag: "[#d70000]record[/#d70000]:"
   verbose: False

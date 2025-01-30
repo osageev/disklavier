@@ -237,12 +237,6 @@ if __name__ == "__main__":
         help="bpm to record and play at, in bpm",
     )
     parser.add_argument(
-        "--num_transitions",
-        default=100,
-        type=int,
-        help="number of transitions to run for",
-    )
-    parser.add_argument(
         "--kickstart",
         type=str,
         help="use provided midi file as prompt",

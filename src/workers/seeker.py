@@ -17,7 +17,8 @@ class Seeker(Worker):
     sim_table: pd.DataFrame
     neighbor_table: pd.DataFrame
     trans_table: pd.DataFrame
-    n_track_repeats: int = 0
+    n_transition_interval: int = 8  # 16 bars since segments are 2 bars
+    n_segment_repeats: int = 0
     played_files: list[str] = []
     allow_multiple_plays = False
     transformation = {"transpose": 0, "shift": 0}
@@ -45,58 +46,63 @@ class Seeker(Worker):
         if hasattr(params, "pf_recording"):
             self.pf_recording = params.pf_recording
 
-        if params.mode == "best":
+        if params.mode == "best" or params.mode == "timed-hops":
             self.metric = params.metric
 
         # if params.metric in model_list:
         #     self.load_model()
 
-        # load embeddings
+        # load embeddings and FAISS index
         pf_emb_table = os.path.join(self.p_table, f"{params.metric}.h5")
         console.log(f"{self.tag} looking for embedding table '{pf_emb_table}'")
         if os.path.isfile(pf_emb_table):
-            with console.status("\t\t\t      loading embeddings file..."):
-                # self.emb_table = pd.read_hdf(pf_emb_table)
+            # load embeddings table from h5 to df
+            with console.status("\t\t\t      loading embeddings..."):
+                emb_column_name = (
+                    "histograms" if self.metric == "pitch_histogram" else "embeddings"
+                )
                 with h5py.File(pf_emb_table, "r") as f:
                     self.emb_table = pd.DataFrame(
-                        list([e] for e in f["embeddings"]),
+                        list(
+                            [e, e / np.linalg.norm(e, keepdims=True)]
+                            for e in f[emb_column_name]
+                        ),
                         index=[str(name[0], "utf-8") for name in f["filenames"]],
-                        columns=["embeddings"],
+                        columns=["embeddings", "normed_embeddings"],
                     )
             console.log(
                 f"{self.tag} loaded {len(self.emb_table)}*{len(self.emb_table.columns)} embeddings table"
             )
             console.log(self.emb_table.head())
+            # self.emb_table["normed_embeddings"] = self.emb_table[
+            #     "embeddings"
+            # ] / np.linalg.norm(self.emb_table["embeddings"], axis=1, keepdims=True)
 
+            if self.verbose:
+                console.log(f"{self.tag} normalized embeddings")
+                console.log(self.emb_table["normed_embeddings"].head())
+                console.log(
+                    [
+                        np.linalg.norm(e)
+                        for e in self.emb_table["normed_embeddings"].sample(
+                            100, random_state=self.params.seed
+                        )
+                        if np.linalg.norm(e) != 1
+                    ]
+                )
+
+            # build FAISS index
             console.log(f"{self.tag} building FAISS index...")
-            match self.metric:
-                case "clamp":
-                    self.emb_table["normed_embeddings"] = self.emb_table[
-                        "embeddings"
-                    ].apply(lambda x: x / np.linalg.norm(x))
-                    embedding_dim = 768
-                case "specdiff":
-                    self.emb_table["normed_embeddings"] = self.emb_table[
-                        "embeddings"
-                    ].apply(lambda x: x / np.linalg.norm(x))
-                    embedding_dim = 768
-                case _:
-                    self.emb_table["normed_embeddings"] = self.emb_table.iloc[
-                        :, 0:12
-                    ].apply(lambda row: row.tolist(), axis=1)
-                    embedding_dim = 12
-
-            console.log(self.emb_table[["normed_embeddings"]].head())
-
-            self.faiss_index = faiss.IndexFlatIP(embedding_dim)
+            # eventually will probably have to replace this with a MATCH CASE statement
+            self.faiss_index = faiss.IndexFlatL2(
+                12 if self.metric == "pitch_histogram" else 768
+            )
             self.faiss_index.add(
                 np.array(
                     self.emb_table["normed_embeddings"].to_list(), dtype=np.float32
                 )
             )  # type: ignore
-            console.log(
-                f"{self.tag} FAISS index built ({np.array(self.emb_table["normed_embeddings"].to_list(), dtype=np.float32).shape})"
-            )
+            console.log(f"{self.tag} FAISS index built ({self.faiss_index.ntotal})")
         else:
             console.log(f"{self.tag} error loading embeddings table, exiting...")
             exit()  # TODO: handle this better (return an error, let main handle it)
@@ -123,7 +129,9 @@ class Seeker(Worker):
         similarity = 0.0
         match self.mode:
             case "best":
-                next_file, similarity = self._get_best()
+                next_file, similarity = self._get_best(hop=False)
+            case "timed_hops":
+                next_file, similarity = self._get_best(hop=True)
             case "easy":
                 next_file = self._get_easy()
             case "playlist":
@@ -174,7 +182,7 @@ class Seeker(Worker):
         random_file = self._get_random()
         return os.path.join(self.p_dataset, random_file)
 
-    def _get_best(self) -> tuple[str, float]:
+    def _get_best(self, hop: bool = False) -> tuple[str, float]:
         if self.verbose:
             console.log(
                 f"{self.tag} finding most similar file to '{self.played_files[-1]}'"
@@ -184,14 +192,21 @@ class Seeker(Worker):
             f"{self.tag} {len(self.played_files)} played files:\n{self.played_files}"
         )
         # handle parsing file names with and without augmentation
-        if len(os.path.basename(self.played_files[-1])[:-4].split("_")) == 3:
+        if (
+            len(os.path.splitext(os.path.basename(self.played_files[-1]))[0].split("_"))
+            == 3
+        ):
             track, segment, transformation = os.path.basename(self.played_files[-1])[
                 :-4
             ].split("_")
-            self.transformation["transpose"] = int(transformation[1:2])
-            self.transformation["shift"] = int(transformation[4:5])
+            print(transformation)
+            self.transformation["transpose"] = int(transformation[1:3])
+            self.transformation["shift"] = int(transformation[4:6])
         else:
             track, segment = os.path.basename(self.played_files[-1])[:-4].split("_")
+            console.log(
+                f"{self.tag} len {len(os.path.splitext(os.path.basename(self.played_files[-1]))[0].split("_"))} from {os.path.splitext(os.path.basename(self.played_files[-1]))[0].split("_")}"
+            )
         current_transformation = f"t{self.transformation['transpose']:02d}s{self.transformation['shift']:02d}"
         q_key = f"{track}_{segment}_{current_transformation}"
 
@@ -230,28 +245,38 @@ class Seeker(Worker):
                 [self.emb_table.loc[q_key, "normed_embeddings"]],
                 dtype=np.float32,
             )
+        q_embedding /= np.linalg.norm(q_embedding, axis=1, keepdims=True)
 
-        console.log(f"{self.tag} querying with key '{q_key}'")
+        if self.verbose:
+            console.log(f"{self.tag} querying with key '{q_key}'")
         similarities, indices = self.faiss_index.search(q_embedding, 5000)  # type: ignore
-        # console.log(f"{self.tag} indices {indices[:10]}\nsimilarities {similarities[:10]}")
+        if self.verbose:
+            console.log(
+                f"{self.tag} indices {indices[:10]}\nsimilarities {similarities[:10]}"
+            )
         # NO SHIFT
         indices, similarities = zip(
             *[
                 (i, s)
                 for i, s in zip(indices[0], similarities[0])
-                if str(self.emb_table.index[i]).endswith("s00")
+                # if str(self.emb_table.index[i]).endswith("s00")
             ]
         )
         nearest_neighbors = {}
         for i, s in zip(indices, similarities):
             nearest_neighbors[str(self.emb_table.index[i])] = float(s)
 
+        nearest_neighbors = sorted(
+            nearest_neighbors.items(), key=lambda item: (-item[1], item[0])
+        )
+
         if self.verbose:
             console.log(
                 f"{self.tag} got nearest neighbors to '{q_key}':",
-                sorted(
-                    nearest_neighbors.items(), key=lambda item: item[1], reverse=True
-                )[:10],
+                nearest_neighbors[:10],
+                # sorted(
+                #     nearest_neighbors.items(), key=lambda item: item[1], reverse=True
+                # )[:10],
             )
 
         next_file = self._get_neighbor()
@@ -262,29 +287,30 @@ class Seeker(Worker):
             if track == "player-recording":
                 next_file = f"{segment_name}.mid"
                 break
-            # check if file has already been played
+            # dont replay files
             if segment_name in played_files:
                 continue
 
             next_segment_name = self.base_file(segment_name)
             next_track = next_segment_name.split("_")[0]
             last_track = self.played_files[-1].split("_")[0]
-            # switch to different track after 2 segments
-            # if len(self.played_files) % 2 == 0:
-            # played_tracks = [file.split("_")[0] for file in self.played_files]
-            # if next_track in played_tracks:
-            #     console.log(
-            #         f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
-            #     )
-            #     continue
-            # else:
-            #     next_file = f"{segment_name}.mid"
-            #     break
+            # switch to different track after self.n_transition_interval segments
+            if hop and self.n_segment_repeats >= self.n_transition_interval:
+                played_tracks = [file.split("_")[0] for file in self.played_files]
+                if next_track in played_tracks:
+                    console.log(
+                        f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
+                    )
+                    continue
+                else:
+                    next_file = f"{segment_name}.mid"
+                    break
             # NO SHIFT
             if (
-                next_segment_name not in played_files
-                and segment_name.endswith("s00")
-                and next_track == last_track
+                next_segment_name
+                not in played_files
+                # and segment_name.endswith("s00")
+                # and next_track == last_track
             ):
                 next_file = f"{segment_name}.mid"
                 break
@@ -297,14 +323,14 @@ class Seeker(Worker):
     def _get_easy(self) -> str:
         if self.verbose:
             console.log(f"{self.tag} played files: {self.played_files}")
-            console.log(f"{self.tag} num_repeats: {self.n_track_repeats}")
-        if self.n_track_repeats < 8:
+            console.log(f"{self.tag} num_repeats: {self.n_segment_repeats}")
+        if self.n_segment_repeats < self.n_segment_repeats:
             console.log(f"{self.tag} transitioning to next segment")
-            self.n_track_repeats += 1
+            self.n_segment_repeats += 1
             return self._get_neighbor()
         else:
             console.log(f"{self.tag} transitioning to next track")
-            self.n_track_repeats = 0
+            self.n_segment_repeats = 0
             return self._get_random()
 
     def _get_neighbor(self) -> str:
@@ -348,8 +374,8 @@ class Seeker(Worker):
         )[0]
 
         # correct for missing augmentation information
-        if "_t" not in random_file:
-            random_file = random_file[:-4] + "_t00s00.mid"
+        # if "_t" not in random_file:
+        #     random_file = random_file[:-4] + "_t00s00.mid"
 
         if self.verbose:
             console.log(f"{self.tag} chose random file '{random_file}'")
@@ -368,7 +394,7 @@ class Seeker(Worker):
                 )
 
         # NO TRANSFORMS -- TODO REMOVE ONCE EMBEDDINGS FOR AUGMENTED DATASET ARE READY
-        random_file = os.path.splitext(random_file)[0][:-6] + "t00s00.mid"
+        # random_file = os.path.splitext(random_file)[0][:-6] + "t00s00.mid"
 
         return str(random_file)
 

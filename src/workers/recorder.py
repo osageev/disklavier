@@ -120,7 +120,7 @@ class Recorder(Worker):
             f"{self.tag} saving recording '{os.path.basename(self.pf_midi_recording)}'"
         )
 
-        midi = mido.MidiFile()
+        midi = mido.MidiFile(ticks_per_beat=N_TICKS_PER_BEAT)
         track = mido.MidiTrack()
         track.append(
             mido.MetaMessage(
@@ -139,7 +139,7 @@ class Recorder(Worker):
             console.log(
                 f"{self.tag} successfully saved recording '{os.path.basename(self.pf_midi_recording)}'"
             )
-            mid = mido.MidiFile(self.pf_midi_recording)
+            # mid = mido.MidiFile(self.pf_midi_recording)
             # mid.print_tracks()
         else:
             console.log(

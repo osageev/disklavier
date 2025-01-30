@@ -197,7 +197,8 @@ class Scheduler(Worker):
         return transitions
 
     def _get_next_transition(self) -> tuple[float, int]:
-        console.log(f"{self.tag} transition times:\n{self.ts_transitions}")
+        if self.verbose:
+            console.log(f"{self.tag} transition times:\n{self.ts_transitions}")
         # ts_offset = self.ts_transitions[self.n_files_queued - 1 if self.recording_mode else 0]
         ts_offset = self.ts_transitions[self.n_files_queued]
         if self.lead_bar:

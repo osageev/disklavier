@@ -82,5 +82,5 @@ class Player(Worker):
         self.midi_port.close()
         console.log(f"{self.tag}[green] playback finished")
         console.log(
-            f"{self.tag}[yellow bold]{self.n_late_notes}[/yellow bold]/{self.n_notes} notes were late (sent > 0.001 s after scheduled)"
+            f"{self.tag} [yellow bold]{self.n_late_notes}[/yellow bold]/{self.n_notes} notes were late (sent > 0.001 s after scheduled)"
         )
