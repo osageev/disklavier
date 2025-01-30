@@ -16,12 +16,16 @@ from models.specdiff import SpectrogramDiffusion
 console = Console(log_time_format="%m-%d %H:%M:%S.%f")
 SUPPORTED_EXTENSIONS = (".mid", ".midi")
 
+
 class UploadHandler(FileSystemEventHandler):
     tag = "[#5f00af]panthr[/#5f00af]:"
 
     def __init__(self, model_name: str):
         # load config
-        pf_model_config = os.path.join("models", "configs", model_name, "config.json")
+        console.log(os.getcwd())
+        pf_model_config = os.path.join(
+            "src", "models", "configs", model_name, "config.json"
+        )
         with open(pf_model_config, "r") as f:
             config = json.load(f)
         console.log(f"{self.tag} initializing model with config:\n", config)
@@ -47,9 +51,9 @@ class UploadHandler(FileSystemEventHandler):
             embedding = self.model.embed(str(event.src_path))
             console.log(f"{self.tag} got embedding {embedding.shape}")
             torch.save(embedding, f"{os.path.splitext(event.src_path)[0]}.pt")
-            console.log(f"{self.tag} wrote embedding to '{os.path.splitext(event.src_path)[0]}.pt'")
-        else:
-            raise TypeError("only the following filetypes are supported:", SUPPORTED_EXTENSIONS)
+            console.log(
+                f"{self.tag} wrote embedding to '{os.path.splitext(event.src_path)[0]}.pt'"
+            )
 
 
 def monitor_folder(args):

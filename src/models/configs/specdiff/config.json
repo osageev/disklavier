@@ -12,5 +12,5 @@
     "num_layers": 12,
     "vocab_size": 1536
   },
-  "encoder_weights_path": "src/ml/models/configs/note_encoder.bin"
+  "encoder_weights_path": "src/models/configs/note_encoder.bin"
 }
