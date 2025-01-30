@@ -7,6 +7,7 @@ import numpy as np
 from utils import console
 
 REMOTE_HOST = "129.173.66.44"
+PORT = 22
 P_REMOTE = "/home/finlay/disklavier/data/outputs"
 tag = "[#5f00af]panthr[/#5f00af]:"
 
@@ -16,10 +17,12 @@ def calc_embedding(file_path: str, user: str = "finlay") -> np.ndarray:
     local_folder = os.path.dirname(file_path)
     remote_file_path = os.path.join(P_REMOTE, os.path.basename(file_path))
     # panther login
+    console.log(f"{tag} connecting to panther at {user}@{REMOTE_HOST}:{PORT}")
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(REMOTE_HOST, 22, user)
+    ssh.connect(REMOTE_HOST, PORT, user)
     sftp = ssh.open_sftp()
+    console.log(f"{tag} connection opened")
 
     # clear old files
     try:
@@ -33,9 +36,10 @@ def calc_embedding(file_path: str, user: str = "finlay") -> np.ndarray:
         )
     # upload
     sftp.put(file_path, remote_file_path)
+    console.log(f"{tag} upload complete, waiting for embedding upload...")
 
     # wait for new tensor
-    pf_tensor_remote = remote_file_path[:-4] + ".pt"
+    pf_tensor_remote = os.path.splitext(remote_file_path)[0] + ".pt"
     while 1:
         try:
             sftp.stat(pf_tensor_remote)
@@ -45,10 +49,12 @@ def calc_embedding(file_path: str, user: str = "finlay") -> np.ndarray:
 
     pf_tensor_local = os.path.join(local_folder, os.path.basename(pf_tensor_remote))
     sftp.get(pf_tensor_remote, pf_tensor_local)
+    console.log(f"{tag} downloaded embedding '{pf_tensor_local}'")
 
     sftp.close()
     ssh.close()
 
     embedding = torch.load(pf_tensor_local, weights_only=True).numpy()
+    console.log(f"{tag} loaded embedding ({embedding.shape})")
 
-    return embedding / np.linalg.norm(embedding)
+    return embedding

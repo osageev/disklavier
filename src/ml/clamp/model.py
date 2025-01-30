@@ -12,6 +12,7 @@ console = Console(log_time_format="%m-%d %H:%M:%S.%f")
 class Clamp:
     tag = "[#87ff87]CLaMP [/#87ff87]:"
     pf_midi2abc = "src/ml/clamp/midi2abc"
+    name = "CLAMP"
 
     def __init__(self, verbose: bool = True):
         self.verbose = verbose
@@ -207,6 +208,9 @@ class Clamp:
         console.log(f"{self.tag} feature generation complete")
 
         return features
+
+    def embed(self, arg):
+        raise NotImplementedError("TODO: move this to proper location")
 
 
 if __name__ == "__main__":

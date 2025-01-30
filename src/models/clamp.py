@@ -434,6 +434,8 @@ class CLaMP(PreTrainedModel):
         music_proj (:obj:`torch.nn.Linear`): A linear layer to project the music encoding to the hidden size of the model.
     """
 
+    name = "CLAMP"
+
     def __init__(self, config, text_model_name="distilroberta-base"):
         super(CLaMP, self).__init__(config)
         self.text_enc = AutoModel.from_pretrained(text_model_name)
@@ -555,3 +557,6 @@ class CLaMP(PreTrainedModel):
         )
 
         return model
+
+    def embed(self):
+        raise NotImplementedError("TODO: move this from ")

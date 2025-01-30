@@ -1,1 +1,1 @@
-model_list = ["clamp"]
+model_list = ["clamp", "specdiff"]
