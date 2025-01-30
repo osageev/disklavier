@@ -81,20 +81,20 @@ class Seeker(Worker):
             if self.verbose:
                 console.log(f"{self.tag} normalized embeddings")
                 console.log(self.emb_table["normed_embeddings"].head())
-                console.log(
-                    [
-                        np.linalg.norm(e)
-                        for e in self.emb_table["normed_embeddings"].sample(
-                            100, random_state=self.params.seed
-                        )
-                        if np.linalg.norm(e) != 1
-                    ]
-                )
+                # console.log(
+                #     [
+                #         np.linalg.norm(e)
+                #         for e in self.emb_table["normed_embeddings"].sample(
+                #             10, random_state=self.params.seed
+                #         )
+                #         if np.linalg.norm(e) != 1
+                #     ]
+                # )
 
             # build FAISS index
             console.log(f"{self.tag} building FAISS index...")
             # eventually will probably have to replace this with a MATCH CASE statement
-            self.faiss_index = faiss.IndexFlatL2(
+            self.faiss_index = faiss.IndexFlatIP(
                 12 if self.metric == "pitch_histogram" else 768
             )
             self.faiss_index.add(
@@ -248,22 +248,23 @@ class Seeker(Worker):
         q_embedding /= np.linalg.norm(q_embedding, axis=1, keepdims=True)
 
         if self.verbose:
-            console.log(f"{self.tag} querying with key '{q_key}'")
-        similarities, indices = self.faiss_index.search(q_embedding, 5000)  # type: ignore
-        if self.verbose:
             console.log(
-                f"{self.tag} indices {indices[:10]}\nsimilarities {similarities[:10]}"
+                f"{self.tag} querying with key '{q_key}' from index {self.emb_table.index.get_loc(q_key)}"
             )
+        distances, indices = self.faiss_index.search(q_embedding, 5000)  # type: ignore
+        if self.verbose:
+            console.log(f"{self.tag} indices:\n\t", indices[:10][0])
+            console.log(f"{self.tag} similarities:\n\t", distances[:10][0])
         # NO SHIFT
-        indices, similarities = zip(
+        indices, distances = zip(
             *[
-                (i, s)
-                for i, s in zip(indices[0], similarities[0])
+                (i, d)
+                for i, d in zip(indices[0], distances[0])
                 # if str(self.emb_table.index[i]).endswith("s00")
             ]
         )
         nearest_neighbors = {}
-        for i, s in zip(indices, similarities):
+        for i, s in zip(indices, distances):
             nearest_neighbors[str(self.emb_table.index[i])] = float(s)
 
         nearest_neighbors = sorted(
@@ -282,7 +283,7 @@ class Seeker(Worker):
         next_file = self._get_neighbor()
         console.log(f"{self.tag} 'random' file is '{next_file}'")
         played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
-        for i_neighbor, similarity in zip(indices, similarities):
+        for i_neighbor, similarity in zip(indices, distances):
             segment_name = str(self.emb_table.index[i_neighbor])
             if track == "player-recording":
                 next_file = f"{segment_name}.mid"
@@ -314,6 +315,10 @@ class Seeker(Worker):
             ):
                 next_file = f"{segment_name}.mid"
                 break
+
+        # add fake transformation string for test dataset
+        if os.path.basename(self.p_dataset) == "test":
+            next_file = os.path.splitext(next_file)[0] + "_t00s00.mid"
 
         console.log(
             f"{self.tag} best match is '{next_file}' with similarity {similarity:.05f}"

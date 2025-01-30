@@ -8,6 +8,7 @@ from .worker import Worker
 
 N_TICKS_PER_BEAT: int = 220
 N_TRANSITIONS_INIT: int = 10
+N_BEATS_TRANSITION_OFFSET: int = 8
 
 
 class Scheduler(Worker):
@@ -57,8 +58,8 @@ class Scheduler(Worker):
                 f"{self.tag}[red] midi file ticks per beat mismatch!\n\tfile has {midi_in.ticks_per_beat} tpb but expected {N_TICKS_PER_BEAT}"
             )
 
-        if tt_offset == 0:
-            tt_abs = -N_TICKS_PER_BEAT
+        # if tt_offset == 0:
+        #     tt_abs = -N_TICKS_PER_BEAT
 
         console.log(
             f"{self.tag} adding file {self.n_files_queued} to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s, so {str(self.td_start + timedelta(seconds=ts_offset))})"
@@ -88,10 +89,10 @@ class Scheduler(Worker):
                         else:
                             tt_abs = tt_upper_bound
                     self.tt_all_messages.append(tt_abs)
-                    if self.verbose:
-                        console.log(
-                            f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
-                        )
+                    # if self.verbose:
+                    #     console.log(
+                    #         f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
+                    #     )
                     q_midi.put((tt_abs, msg))
 
         # update midi log file
@@ -114,10 +115,10 @@ class Scheduler(Worker):
 
         return mido.tick2second(tt_sum, N_TICKS_PER_BEAT, self.tempo)
 
-    def init_outfile(self, pf_midi: str, offset: float = 0) -> bool:
+    def init_outfile(self, pf_midi: str, offset_s: float = 0) -> bool:
         """Initialize a MIDI file to hold a playback recording."""
         if self.verbose:
-            console.log(f"{self.tag} initializing output file with offset {offset} s")
+            console.log(f"{self.tag} initializing output file with offset {offset_s} s")
         midi = mido.MidiFile()
         tick_track = mido.MidiTrack()
 
@@ -139,7 +140,7 @@ class Scheduler(Worker):
 
         # transition messages
         mm_transitions = self._gen_transitions(
-            ts_offset=offset, n_stamps=N_TRANSITIONS_INIT
+            ts_offset=offset_s, n_stamps=N_TRANSITIONS_INIT
         )
         for mm_transition in mm_transitions:
             tick_track.append(mm_transition)
@@ -155,11 +156,30 @@ class Scheduler(Worker):
     def _gen_transitions(
         self, ts_offset: float = 0, n_stamps: int = 100, do_ticks: bool = True
     ) -> list[mido.MetaMessage]:
+        """Generate transition times for 8-beat MIDI files.
+
+        The function calculates transition times for segment changes in a MIDI playback sequence.
+        If the offset is not zero, the first transition occurs at the next multiple of 8 beats.
+
+        Args:
+            ts_offset (float): Time offset in seconds.
+            n_stamps (int): Number of transition timestamps to generate.
+            do_ticks (bool): Whether to include tick messages.
+
+        Returns:
+            list[mido.MetaMessage]: List of MIDI meta messages representing transitions and ticks.
+        """
         self.tt_offset = mido.second2tick(ts_offset, N_TICKS_PER_BEAT, self.tempo)
         ts_interval = self.n_beats_per_segment * 60 / self.bpm
         ts_beat_length = 60 / self.bpm  # time interval for each beat
+
+        # Adjust ts_offset to the next interval
+        if ts_offset % ts_interval != 0:
+            ts_offset = ((ts_offset // ts_interval) + 1) * ts_interval
+
         seg_range = range(n_stamps) if self.recording_mode else range(1, n_stamps + 1)
         self.ts_transitions.extend([ts_offset + i * ts_interval for i in seg_range])
+
         if self.verbose:
             console.log(
                 f"{self.tag} segment interval is {ts_interval} seconds (from {self.td_start})",
@@ -196,11 +216,13 @@ class Scheduler(Worker):
 
         return transitions
 
+
     def _get_next_transition(self) -> tuple[float, int]:
         if self.verbose:
             console.log(f"{self.tag} transition times:\n{self.ts_transitions}")
-        # ts_offset = self.ts_transitions[self.n_files_queued - 1 if self.recording_mode else 0]
-        ts_offset = self.ts_transitions[self.n_files_queued]
+        ts_offset = self.ts_transitions[
+            self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
+        ]
         if self.lead_bar:
             ts_offset -= 60 / self.bpm
             ts_offset = (

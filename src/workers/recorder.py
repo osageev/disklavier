@@ -32,7 +32,7 @@ class Recorder(Worker):
         end_time = 0
         last_note_time = start_time
 
-        midi = mido.MidiFile()
+        midi = mido.MidiFile(ticks_per_beat=N_TICKS_PER_BEAT)
         track = mido.MidiTrack()
         track.append(
             mido.MetaMessage(
