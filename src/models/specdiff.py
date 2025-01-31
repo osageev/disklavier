@@ -31,7 +31,7 @@ class SpectrogramDiffusion:
         console.log(f"{self.tag} generating embedding for '{path}'")
         console.log(f"{self.tag} tokenizing")
         tokens = self.processor(path)
-        console.log(len(tokens), len(tokens[0]))
+        console.log(f"{self.tag} {len(tokens)} {len(tokens[0])}")
         all_tokens = [torch.IntTensor(token) for token in tokens]
         console.log(
             f"{self.tag} generated ({len(all_tokens)}, {all_tokens[0].shape}) tokens"
@@ -41,7 +41,6 @@ class SpectrogramDiffusion:
         embeddings = []
         for i in range(0, len(all_tokens)):
             batch = all_tokens[i].view(1, -1).cuda(self.device)
-            console.log(batch.shape)
             with torch.autocast("cuda"):
                 tokens_mask = batch > 0
                 tokens_embedded, tokens_mask = self.encoder(
