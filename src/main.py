@@ -54,6 +54,7 @@ def main(args, params):
         pf_master_recording,
         p_playlist,
         td_start,
+        params.n_transitions,
         params.initialization == "recording",
     )
     seeker = workers.Seeker(
@@ -103,7 +104,9 @@ def main(args, params):
 
     # run
     q_playback = PriorityQueue()
-    td_start = datetime.now() + timedelta(seconds=1)
+    td_start = datetime.now() + timedelta(
+        seconds=8 if params.initialization == "recording" else 1
+    )
     ts_queue = 0
     n_files = 1
     # offset by recording length if necessary
@@ -126,18 +129,35 @@ def main(args, params):
             0,
         )
 
-        # start playback
+        # also preload first match
+        if params.initialization == "recording":
+            pf_next_file, similarity = seeker.get_next()
+            ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
+            console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
+            n_files += 1
+            write_log(
+                pf_playlist,
+                n_files,
+                datetime.now().strftime("%y-%m-%d %H:%M:%S"),
+                pf_next_file,
+                similarity,
+            )
+
+        # start player
         player.td_start = td_start
         player.td_last_note = td_start
         thread_player = Thread(target=player.play, name="player", args=(q_playback,))
         thread_player.start()
+        # start metronome
         metronome = workers.Metronome(params.metronome, args.bpm, td_start)
         process_metronome = Process(target=metronome.tick, name="metronome")
         process_metronome.start()
 
         # play for set number of transitions
+        # TODO: move this to be managed by scheduler and track scheduler state instead
         while n_files < params.n_transitions:
             if q_playback.qsize() < params.n_min_queue_length:
+                # TODO: get first match sooner if using a recording
                 pf_next_file, similarity = seeker.get_next()
                 ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
                 console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
@@ -181,6 +201,8 @@ def main(args, params):
     process_metronome.kill()
     process_metronome.join(timeout=0.5)
     pygame.mixer.quit()
+    if args.verbose:
+        console.log(f"{tag} metronome stopped")
 
     # print playlist
     table = Table(title="PLAYLIST")
@@ -258,7 +280,9 @@ if __name__ == "__main__":
     console.log(f"{tag} loading with parameters:\n\t{params}")
 
     if not os.path.exists(args.tables):
-        console.log(f"{tag} [red bold]ERROR[/red bold]: table directory not found, exiting...")
+        console.log(
+            f"{tag} [red bold]ERROR[/red bold]: table directory not found, exiting..."
+        )
         exit()  # TODO: handle this better
 
     main(args, params)

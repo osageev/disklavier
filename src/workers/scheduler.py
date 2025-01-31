@@ -7,7 +7,6 @@ from utils import console
 from .worker import Worker
 
 N_TICKS_PER_BEAT: int = 220
-N_TRANSITIONS_INIT: int = 10
 N_BEATS_TRANSITION_OFFSET: int = 8
 
 
@@ -27,6 +26,7 @@ class Scheduler(Worker):
         recording_file_path: str,
         playlist_path: str,
         start_time: datetime,
+        n_transitions: int,
         recording_mode: bool,
     ):
         super().__init__(params, bpm=bpm)
@@ -36,6 +36,7 @@ class Scheduler(Worker):
         self.pf_midi_recording = recording_file_path
         self.p_playlist = playlist_path
         self.td_start = start_time
+        self.n_transitions = n_transitions
         self.recording_mode = recording_mode
 
         console.log(f"{self.tag} initialization complete")
@@ -101,7 +102,7 @@ class Scheduler(Worker):
             > self.ts_transitions[-1]
         ):
 
-            _ = self._gen_transitions(self.ts_transitions[-1], n_stamps=1)
+            _ = self._gen_transitions(self.ts_transitions[-1])
         if self._log_midi(pf_midi):
             console.log(f"{self.tag} successfully updated recording file")
         else:
@@ -140,7 +141,7 @@ class Scheduler(Worker):
 
         # transition messages
         mm_transitions = self._gen_transitions(
-            ts_offset=offset_s, n_stamps=N_TRANSITIONS_INIT
+            ts_offset=offset_s, n_stamps=self.n_transitions
         )
         for mm_transition in mm_transitions:
             tick_track.append(mm_transition)
@@ -154,7 +155,10 @@ class Scheduler(Worker):
         return os.path.isfile(pf_midi)
 
     def _gen_transitions(
-        self, ts_offset: float = 0, n_stamps: int = 100, do_ticks: bool = True
+        self,
+        ts_offset: float = 0,
+        n_stamps: int = 1,
+        do_ticks: bool = True,
     ) -> list[mido.MetaMessage]:
         """Generate transition times for 8-beat MIDI files.
 
@@ -174,7 +178,7 @@ class Scheduler(Worker):
         ts_beat_length = 60 / self.bpm  # time interval for each beat
 
         # Adjust ts_offset to the next interval
-        if ts_offset % ts_interval != 0:
+        if ts_offset % ts_interval < ts_beat_length * N_BEATS_TRANSITION_OFFSET:
             ts_offset = ((ts_offset // ts_interval) + 1) * ts_interval
 
         seg_range = range(n_stamps) if self.recording_mode else range(1, n_stamps + 1)
@@ -184,7 +188,7 @@ class Scheduler(Worker):
             console.log(
                 f"{self.tag} segment interval is {ts_interval} seconds (from {self.td_start})",
                 [
-                    f"{t:6.03f}s -> {str(self.td_start + timedelta(seconds=t))}"
+                    f"{t:07.03f}s -> {str(self.td_start + timedelta(seconds=t))}"
                     for t in self.ts_transitions
                 ],
             )
@@ -216,10 +220,9 @@ class Scheduler(Worker):
 
         return transitions
 
-
     def _get_next_transition(self) -> tuple[float, int]:
         if self.verbose:
-            console.log(f"{self.tag} transition times:\n{self.ts_transitions}")
+            console.log(f"{self.tag} transition times:\n\t{self.ts_transitions}")
         ts_offset = self.ts_transitions[
             self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
         ]

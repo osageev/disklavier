@@ -1,6 +1,5 @@
 import os
 import re
-import json
 import time
 from threading import Event
 from rich.console import Console
@@ -12,10 +11,14 @@ console = Console(record=True, log_time_format="%m-%d %H:%M:%S.%f")
 
 
 def tick(
-    bpm: int, stop_event: Event, p: str = "[cyan]metro[/cyan] : ", do_print: bool = True
+    bpm: int,
+    stop_event: Event,
+    p: str = "[cyan]metro[/cyan] : ",
+    pf_tick: str = "data/m_tick.wav",
+    do_print: bool = True,
 ):
     pygame.mixer.init()
-    tick_sound = pygame.mixer.Sound("data/m_tick.wav")
+    tick_sound = pygame.mixer.Sound(pf_tick)
     start_time = time.time()
     last_beat = start_time
 

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from .worker import Worker
 from utils import console
 
+
 class Metronome(Worker):
     def __init__(self, params, bpm: int, t_start: datetime):
         super().__init__(params, bpm=bpm)

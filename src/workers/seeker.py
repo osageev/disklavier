@@ -217,17 +217,14 @@ class Seeker(Worker):
 
         if track == "player-recording":
             match self.metric:
-                case "clamp":
+                case "clamp" | "specdiff":
                     console.log(
-                        f"{self.tag} getting clamp embedding for '{self.pf_recording}'"
+                        f"{self.tag} getting [bold]{self.metric}[/bold] embedding for '{self.pf_recording}'"
                     )
                     q_embedding = panther.calc_embedding(self.pf_recording)
-                    console.log(f"{self.tag} got clamp embedding {q_embedding.shape}")
-                case "specdiff":
                     console.log(
-                        f"{self.tag} getting spectrogram diffusion embedding for '{self.pf_recording}'"
+                        f"{self.tag} got [bold]{self.metric}[/bold] embedding {q_embedding.shape}"
                     )
-                    raise NotImplementedError("nah")
                 case _:
                     if self.verbose:
                         console.log(f"{self.tag} defaulting to pitch histogram metric")
@@ -236,10 +233,6 @@ class Seeker(Worker):
                     ).get_pitch_class_histogram(True, True)
                     q_embedding = q_embedding.reshape(1, -1)
                     console.log(f"{self.tag} {q_embedding}")
-            if self.verbose:
-                console.log(
-                    f"{self.tag} calculated embedding for recording: {q_embedding.shape}"
-                )
         else:
             q_embedding = np.array(
                 [self.emb_table.loc[q_key, "normed_embeddings"]],
@@ -247,24 +240,24 @@ class Seeker(Worker):
             )
         q_embedding /= np.linalg.norm(q_embedding, axis=1, keepdims=True)
 
-        if self.verbose:
+        if self.verbose and track != "player-recording":
             console.log(
                 f"{self.tag} querying with key '{q_key}' from index {self.emb_table.index.get_loc(q_key)}"
             )
-        distances, indices = self.faiss_index.search(q_embedding, 5000)  # type: ignore
+        similarities, indices = self.faiss_index.search(q_embedding, 1000)  # type: ignore
         if self.verbose:
-            console.log(f"{self.tag} indices:\n\t", indices[:10][0])
-            console.log(f"{self.tag} similarities:\n\t", distances[:10][0])
+            console.log(f"{self.tag} indices:\n\t", indices[0][:10])
+            console.log(f"{self.tag} similarities:\n\t", similarities[0][:10])
         # NO SHIFT
-        indices, distances = zip(
+        indices, similarities = zip(
             *[
                 (i, d)
-                for i, d in zip(indices[0], distances[0])
-                # if str(self.emb_table.index[i]).endswith("s00")
+                for i, d in zip(indices[0], similarities[0])
+                if str(self.emb_table.index[i]).endswith("s00")
             ]
         )
         nearest_neighbors = {}
-        for i, s in zip(indices, distances):
+        for i, s in zip(indices, similarities):
             nearest_neighbors[str(self.emb_table.index[i])] = float(s)
 
         nearest_neighbors = sorted(
@@ -280,10 +273,13 @@ class Seeker(Worker):
                 # )[:10],
             )
 
-        next_file = self._get_neighbor()
+        if track == "player-recording":
+            next_file = self._get_random()
+        else:
+            next_file = self._get_neighbor()
         console.log(f"{self.tag} 'random' file is '{next_file}'")
         played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
-        for i_neighbor, similarity in zip(indices, distances):
+        for i_neighbor, similarity in zip(indices, similarities):
             segment_name = str(self.emb_table.index[i_neighbor])
             if track == "player-recording":
                 next_file = f"{segment_name}.mid"
@@ -306,11 +302,10 @@ class Seeker(Worker):
                 else:
                     next_file = f"{segment_name}.mid"
                     break
-            # NO SHIFT
+            # no shift because it sounds bad
             if (
-                next_segment_name
-                not in played_files
-                # and segment_name.endswith("s00")
+                next_segment_name not in played_files
+                and segment_name.endswith("s00")
                 # and next_track == last_track
             ):
                 next_file = f"{segment_name}.mid"
@@ -379,11 +374,8 @@ class Seeker(Worker):
         )[0]
 
         # correct for missing augmentation information
-        # if "_t" not in random_file:
-        #     random_file = random_file[:-4] + "_t00s00.mid"
-
-        if self.verbose:
-            console.log(f"{self.tag} chose random file '{random_file}'")
+        if len(random_file.split('_')) < 3:
+            random_file = random_file[:-4] + "_t00s00.mid"
 
         # only play files once
         if not self.allow_multiple_plays:
@@ -398,8 +390,11 @@ class Seeker(Worker):
                     ]
                 )
 
-        # NO TRANSFORMS -- TODO REMOVE ONCE EMBEDDINGS FOR AUGMENTED DATASET ARE READY
-        # random_file = os.path.splitext(random_file)[0][:-6] + "t00s00.mid"
+        # NO SHIFT -- too risky
+        random_file = os.path.splitext(random_file)[0][:-3] + "s00.mid"
+
+        if self.verbose:
+            console.log(f"{self.tag} chose random file '{random_file}'")
 
         return str(random_file)
 
