@@ -8,7 +8,7 @@ from utils import console
 
 REMOTE_HOST = "129.173.66.44"
 PORT = 22
-P_REMOTE = "/home/finlay/disklavier/data/outputs"
+P_REMOTE = "/home/finlay/disklavier/data/outputs/uploads"
 tag = "[#5f00af]panthr[/#5f00af]:"
 
 
@@ -28,7 +28,7 @@ def calc_embedding(file_path: str, user: str = "finlay") -> np.ndarray:
     try:
         sftp.stat(remote_file_path)
         sftp.remove(remote_file_path)
-        sftp.remove(remote_file_path[:-4] + ".pt")
+        sftp.remove(os.path.splitext(remote_file_path)[0] + ".pt")
         console.log(f"{tag} Existing file '{remote_file_path}' deleted.")
     except FileNotFoundError:
         console.log(
@@ -54,7 +54,7 @@ def calc_embedding(file_path: str, user: str = "finlay") -> np.ndarray:
     sftp.close()
     ssh.close()
 
-    embedding = torch.load(pf_tensor_local, weights_only=True).numpy()
-    console.log(f"{tag} loaded embedding ({embedding.shape})")
+    embedding = torch.load(pf_tensor_local, weights_only=True).numpy().reshape(1, -1)
+    console.log(f"{tag} loaded embedding {embedding.shape}")
 
     return embedding

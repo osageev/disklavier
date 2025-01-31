@@ -1,6 +1,6 @@
 import os
 import mido
-from datetime import datetime, timedelta
+from datetime import datetime
 import mido
 from threading import Thread, Event
 
@@ -14,6 +14,7 @@ from typing import List
 class Recorder(Worker):
     recorded_notes: List[mido.Message] = []
     is_recording: bool = False
+    n_ticks: int = 0
 
     def __init__(
         self,
@@ -44,7 +45,7 @@ class Recorder(Worker):
 
         with mido.open_input(self.params.midi_port) as inport:  # type: ignore
             console.log(
-                f"{self.tag} listening on port '{self.params.midi_port}' at {midi.ticks_per_beat} tpb"
+                f"{self.tag} listening on port '{self.params.midi_port}' at {midi.ticks_per_beat} ticks per beat"
             )
             for msg in inport:
                 # record pedal signal
@@ -85,10 +86,15 @@ class Recorder(Worker):
                         self.stop_tick_event = Event()
                         self.metro_thread = Thread(
                             target=tick,
-                            args=(self.bpm, self.stop_tick_event, self.params.tag),
+                            args=(
+                                self.bpm,
+                                self.stop_tick_event,
+                                self.params.tag,
+                            ),
                             name="recorder metronome",
                         )
                         self.metro_thread.start()
+                        self.n_ticks += 1
 
                 # record note on/off
                 elif self.is_recording and msg.type in ["note_on", "note_off"]:
