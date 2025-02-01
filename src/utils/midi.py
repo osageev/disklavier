@@ -1,8 +1,7 @@
 import os
 from pathlib import Path
-import mido
-from mido import bpm2tempo, MidiFile, MetaMessage, MidiTrack
 from pretty_midi import PrettyMIDI, Instrument, Note
+from mido import bpm2tempo, MidiFile, MetaMessage, MidiTrack
 
 from typing import Dict
 
@@ -37,15 +36,19 @@ def change_tempo(in_path: str, out_path: str, tempo: int):
     midi.save(out_path)
 
 
-def transform(file_path: str, out_dir: str, bpm: int, transformations: Dict, num_beats: int = 8) -> str:
+def transform(
+    file_path: str, out_dir: str, bpm: int, transformations: Dict, num_beats: int = 8
+) -> str:
     f_output = f"{Path(file_path).stem}_t{transformations["transpose"]:02d}s{transformations["shift"]:02d}.mid"
     pf_out = os.path.join(out_dir, f_output)
-    MidiFile(file_path).save(pf_out) # in case transpose is 0
+    MidiFile(file_path).save(pf_out)  # in case transpose is 0
 
     if transformations["transpose"] != 0:
         midi_transformed = PrettyMIDI(initial_tempo=bpm)
         for instrument in PrettyMIDI(pf_out).instruments:
-            transposed_instrument = Instrument(program=instrument.program, name=f_output[:-4])
+            transposed_instrument = Instrument(
+                program=instrument.program, name=f_output[:-4]
+            )
             for note in instrument.notes:
                 transposed_instrument.notes.append(
                     Note(
@@ -57,7 +60,7 @@ def transform(file_path: str, out_dir: str, bpm: int, transformations: Dict, num
                 )
             midi_transformed.instruments.append(transposed_instrument)
         midi_transformed.write(pf_out)
-        
+
     if transformations["shift"] != 0:
         midi_shifted = PrettyMIDI(initial_tempo=bpm)
         seconds_per_beat = 60 / bpm
@@ -82,7 +85,7 @@ def transform(file_path: str, out_dir: str, bpm: int, transformations: Dict, num
                         velocity=note.velocity,
                         pitch=note.pitch,
                         start=shifted_start,
-                        end=shifted_end
+                        end=shifted_end,
                     )
                 )
 
@@ -93,4 +96,3 @@ def transform(file_path: str, out_dir: str, bpm: int, transformations: Dict, num
     change_tempo(pf_out, pf_out, bpm)
 
     return pf_out
-
