@@ -4,6 +4,6 @@ cd "$(dirname "$0")"/.. || exit
 python src/main.py\
     --dataset "data/datasets/$DATASET_NAME/augmented"\
     --params "params/disklavier.yaml"\
-    --output "data/outputs"\
+    --output "data/outputs/logs"\
     --tables "data/tables/$DATASET_NAME"\
-    --verbose --bpm "$1"
+    --bpm "$1"

@@ -2,9 +2,6 @@ import os
 import csv
 import time
 import json
-
-os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
-import pygame
 from rich.table import Table
 from threading import Thread
 from omegaconf import OmegaConf
@@ -12,6 +9,9 @@ from queue import PriorityQueue
 from argparse import ArgumentParser
 from multiprocessing import Process
 from datetime import datetime, timedelta
+
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
+import pygame
 
 import workers
 from utils import console
@@ -27,13 +27,19 @@ def main(args, params):
     # filesystem setup
     p_log = os.path.join(
         args.output,
-        "logs",
         f"{ts_start}_{params.seeker.metric}_{params.seeker.seed}_{params.initialization}",
     )
     p_playlist = os.path.join(p_log, "playlist")
     pf_playlist = os.path.join(p_log, f"playlist_{ts_start}.csv")
     pf_master_recording = os.path.join(p_log, f"master-recording_{ts_start}.mid")
     pf_player_recording = os.path.join(p_log, f"player-recording_{ts_start}.mid")
+    if args.replay and params.initialization == "recording":
+        import shutil
+
+        shutil.move(params.kickstart_path, pf_player_recording)
+        console.log(
+            f"{tag} moved old recording to current folder '{pf_player_recording}'"
+        )
     params.seeker.pf_recording = pf_player_recording
 
     if not os.path.exists(args.output):
@@ -60,7 +66,7 @@ def main(args, params):
     seeker = workers.Seeker(
         params.seeker,
         args.tables,
-        args.dataset,
+        args.dataset_path,
         p_playlist,
         args.bpm,
     )
@@ -73,12 +79,20 @@ def main(args, params):
     # data setup
     match params.initialization:
         case "recording":  # collect user recording
-            ts_recording_len = recorder.run()
+            if args.replay:  # use old recording
+                from pretty_midi import PrettyMIDI
+
+                ts_recording_len = PrettyMIDI(pf_player_recording).get_end_time()
+                console.log(
+                    f"{tag} calculated time of last recording {ts_recording_len}"
+                )
+            else:
+                ts_recording_len = recorder.run()
             pf_seed = pf_player_recording
         case "kickstart":  # use specified file as seed
             try:
                 if params.kickstart_path:
-                    pf_seed = os.path.join(args.dataset, params.kickstart_path)
+                    pf_seed = os.path.join(args.dataset_path, params.kickstart_path)
                     console.log(f"{tag} [cyan]KICKSTART[/cyan] - '{pf_seed}'")
             except AttributeError:
                 console.log(
@@ -207,13 +221,14 @@ def main(args, params):
     # print playlist
     table = Table(title="PLAYLIST")
     with open(pf_playlist, mode="r") as file:
-        headers = file.readline().strip().split(",")  # Read the header line
+        headers = file.readline().strip().split(",")
         for header in headers:
-            table.add_column(header)  # Add columns to the table
+            table.add_column(header)
 
         for line in file:
-            row = line.strip().split(",")  # Read each subsequent line
-            table.add_row(*row)  # Add the row to the table
+            row = line.strip().split(",")
+            row[2] = os.path.basename(row[2]) # only print filenames
+            table.add_row(*row)
     console.print(table)
 
     # run complete, save and exit
@@ -229,39 +244,47 @@ def write_log(filename: str, *args):
 
 
 if __name__ == "__main__":
-    # load arguments and parameters
+    # load/build arguments and parameters
     parser = ArgumentParser(description="Argparser description")
-    parser.add_argument("--dataset", type=str, default=None, help="path to MIDI files")
     parser.add_argument(
-        "--params", type=str, default=None, help="path to parameter file"
+        "-d", "--dataset", type=str, default=None, help="name of dataset"
     )
     parser.add_argument(
-        "--output",
+        "--dataset_path", type=str, default=None, help="path to MIDI files"
+    )
+    parser.add_argument(
+        "-p",
+        "--params",
         type=str,
         default=None,
+        help="name of parameter file (must be located at 'params/NAME.yaml')",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default="data/outputs/logs",
         help="directory in which to store outputs (logs, recordings, etc...)",
     )
     parser.add_argument(
+        "-t",
         "--tables",
         type=str,
         default=None,
         help="directory in which precomputed tables are stored",
     )
     parser.add_argument(
-        "-t",
-        "--tick",
-        action="store_true",
-        help="play metronome during playback",
+        "-m",
+        "--metric",
+        type=str,
+        default=None,
+        help="option to override metric in yaml file",
     )
     parser.add_argument(
+        "-b",
         "--bpm",
         type=int,
         help="bpm to record and play at, in bpm",
-    )
-    parser.add_argument(
-        "--kickstart",
-        type=str,
-        help="use provided midi file as prompt",
     )
     parser.add_argument(
         "-v",
@@ -269,12 +292,55 @@ if __name__ == "__main__":
         action="store_true",
         help="enable verbose output",
     )
+    parser.add_argument(
+        "-r",
+        "--replay",
+        action="store_true",
+        help="run again using last seed file",
+    )
     args = parser.parse_args()
-    params = OmegaConf.load(args.params)
+    params = OmegaConf.load(f"params/{args.params}.yaml")
+
+    if args.dataset_path == None:
+        args.dataset_path = f"data/datasets/{args.dataset}/augmented"
+    if args.tables == None:
+        args.tables = f"data/tables/{args.dataset}"
 
     # copy these so that they only have to be specified once
     params.scheduler.n_beats_per_segment = params.n_beats_per_segment
     params.metronome.n_beats_per_segment = params.n_beats_per_segment
+
+    if args.replay:
+        # get path to last seed file
+        entries = os.listdir(args.output)
+        folders = [
+            entry
+            for entry in entries
+            if os.path.isdir(os.path.join(args.output, entry))
+        ]
+        folders.sort()
+        last_folder = folders[-1]
+        console.log(f"{tag} last run is in folder '{last_folder}'")
+        last_timestamp, _, _, last_initialization = last_folder.split("_")
+        pf_last_playlist = os.path.join(
+            args.output, last_folder, f"playlist_{last_timestamp}.csv"
+        )
+        pf_last_seed = None
+        with open(pf_last_playlist, newline="") as csvfile:
+            import csv
+
+            first_row = next(csv.DictReader(csvfile), None)
+            pf_last_seed = (
+                first_row["file path"]
+                if first_row and "file path" in first_row
+                else None
+            )
+
+        if pf_last_seed is None:
+            raise FileNotFoundError("couldn't load seed file path")
+
+        params.initialization = last_initialization
+        params.kickstart_path = pf_last_seed
 
     console.log(f"{tag} loading with arguments:\n\t{args}")
     console.log(f"{tag} loading with parameters:\n\t{params}")

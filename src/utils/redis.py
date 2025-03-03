@@ -15,7 +15,7 @@ from typing import List
 
 
 class Comparison:
-    def __init__(self, sim, shift, trans, row, col, metric="pitch_histogram"):
+    def __init__(self, sim, shift, trans, row, col, metric="pitch-histogram"):
         self.sim = float(sim)
         self.shift = int(shift)
         self.trans = int(trans)
@@ -85,7 +85,7 @@ def load_vectors(
 
 
 def build_similarity_table(
-    all_files: List[str], output_path: str, metric: str = "pitch_histogram"
+    all_files: List[str], output_path: str, metric: str = "pitch-histogram"
 ):
     r = redis.Redis(host="localhost", port=6379, db=0)
     s_table = pd.DataFrame(index=all_files, columns=all_files)
@@ -170,7 +170,7 @@ def build_neighbor_table(all_files: List[str], output_path: str) -> None:
 
 
 def build_transformation_table(
-    all_files: List[str], output_path: str, metric: str = "pitch_histogram"
+    all_files: List[str], output_path: str, metric: str = "pitch-histogram"
 ) -> None:
     r = redis.Redis(host="localhost", port=6379, db=0)
     column_names = [f"{t:02d}{s:02d}" for t, s in product(range(12), range(8))]

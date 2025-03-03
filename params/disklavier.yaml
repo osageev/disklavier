@@ -1,7 +1,7 @@
 n_beats_per_segment: 8
 n_transitions: 8
 n_min_queue_length: 50
-initialization: "recording" # kickstart random recording
+initialization: "random" # kickstart random recording
 kickstart_path: "20240401-065-03_0228-0236_t00s00.mid" # midi or path to matches.json
 scheduler:
   tag: "[green]schedl[/green]:"
@@ -10,9 +10,9 @@ scheduler:
 seeker:
   tag: "[yellow]seeker[/yellow]:"
   verbose: True
-  seed: 9423587
+  seed: 32800
   mode: "best" # best easy repeat random sequential playlist
-  metric: "specdiff" # pitch_histogram clamp specdiff
+  metric: "clf-speed" # pitch-histogram specdiff clf-4note clf-speed clf-tpose
 player:
   tag: "[blue]player[/blue]:"
   verbose: False

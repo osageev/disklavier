@@ -5,26 +5,28 @@ initialization: "random" # kickstart random recording
 kickstart_path: "c4v100-060-03_0000-0005.mid" # midi or path to matches.json
 scheduler:
   tag: "[green]schedl[/green]:"
-  verbose: False
+  verbose: True
   lead_bar: True
 seeker:
   tag: "[yellow]seeker[/yellow]:"
   verbose: True
   seed: 1010
   mode: "best" # best easy repeat random sequential playlist
-  metric: "specdiff" # pitch_histogram clamp specdiff
+  metric: "clf-4note" # pitch-histogram clamp specdiff clf-tpose
 player:
   tag: "[blue]player[/blue]:"
   verbose: False
   midi_port: 'to Max 1'
 metronome:
   tag: "[magenta]metro[/magenta] :"
-  verbose: False
+  verbose: True
   tick_1: "data/MetronomeUp.wav"
   tick_2: "data/Metronome.wav"
   do_tick: True
 recorder:
   tag: "[#d70000]record[/#d70000]:"
   verbose: False
+  tick_1: "data/MetronomeUp.wav"
+  tick_2: "data/Metronome.wav"
   midi_port: 'from Max 1'
   record: 67 # left pedal

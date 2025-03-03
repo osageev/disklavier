@@ -11,22 +11,42 @@ from .worker import Worker
 from utils import console, panther
 
 SUPPORTED_EXTENSIONS = (".mid", ".midi")
+EMBEDDING_SIZES = {
+    "pitch-histogram": 12,
+    "specdiff": 768,
+    "clf-4note": 128,
+    "clf-speed": 128,
+    "clf-tpose": 128,
+}
 
 
 class Seeker(Worker):
+    # required tables
     sim_table: pd.DataFrame
     neighbor_table: pd.DataFrame
-    trans_table: pd.DataFrame
+    neighbor_col_priorities = ["next", "next_2", "prev", "prev_2"]
+    # forced track change interval
     n_transition_interval: int = 8  # 16 bars since segments are 2 bars
+    # number of repeats for easy mode
     n_segment_repeats: int = 0
+    # playback trackers
     played_files: list[str] = []
     allow_multiple_plays = False
+    # transformation tracker
     transformation = {"transpose": 0, "shift": 0}
-    neighbor_col_priorities = ["next", "next_2", "prev", "prev_2"]
+    # playlist mode position tracker
     matches_pos = 0
+    # TODO: i forget what this does tbh
     matches_mode = "cplx"
     playlist = {}
+    # force pitch match after finding next segment
     pitch_match = False
+    # supported ml models for post-processing embeddings
+    model_list = [
+        "clf_4note",
+        "clf_speed",
+        "clf_tpose",
+    ]
 
     def __init__(
         self,
@@ -37,29 +57,26 @@ class Seeker(Worker):
         bpm: int,
     ):
         super().__init__(params, bpm=bpm)
-        self.mode = params.mode
         self.p_table = table_path
         self.p_dataset = dataset_path
         self.p_playlist = playlist_path
         self.rng = np.random.default_rng(self.params.seed)
 
-        if hasattr(params, "pf_recording"):
-            self.pf_recording = params.pf_recording
-
-        if params.mode == "best" or params.mode == "timed-hops":
-            self.metric = params.metric
-
-        # if params.metric in model_list:
-        #     self.load_model()
+        if hasattr(self.params, "pf_recording"):
+            self.pf_recording = self.params.pf_recording
+        if self.params.metric in self.model_list:
+            self.model = self.load_model()
 
         # load embeddings and FAISS index
-        pf_emb_table = os.path.join(self.p_table, f"{params.metric}.h5")
+        pf_emb_table = os.path.join(self.p_table, f"{self.params.metric}.h5")
         console.log(f"{self.tag} looking for embedding table '{pf_emb_table}'")
         if os.path.isfile(pf_emb_table):
-            # load embeddings table from h5 to df
+            # load embeddings table from h5 to pd df
             with console.status("\t\t\t      loading embeddings..."):
                 emb_column_name = (
-                    "histograms" if self.metric == "pitch_histogram" else "embeddings"
+                    "histograms"
+                    if self.params.metric == "pitch-histogram"
+                    else "embeddings"
                 )
                 with h5py.File(pf_emb_table, "r") as f:
                     self.emb_table = pd.DataFrame(
@@ -73,12 +90,12 @@ class Seeker(Worker):
             console.log(
                 f"{self.tag} loaded {len(self.emb_table)}*{len(self.emb_table.columns)} embeddings table"
             )
-            console.log(self.emb_table.head())
             # self.emb_table["normed_embeddings"] = self.emb_table[
             #     "embeddings"
             # ] / np.linalg.norm(self.emb_table["embeddings"], axis=1, keepdims=True)
 
             if self.verbose:
+                console.log(self.emb_table.head())
                 console.log(f"{self.tag} normalized embeddings")
                 console.log(self.emb_table["normed_embeddings"].head())
                 # console.log(
@@ -94,9 +111,7 @@ class Seeker(Worker):
             # build FAISS index
             console.log(f"{self.tag} building FAISS index...")
             # eventually will probably have to replace this with a MATCH CASE statement
-            self.faiss_index = faiss.IndexFlatIP(
-                12 if self.metric == "pitch_histogram" else 768
-            )
+            self.faiss_index = faiss.IndexFlatIP(EMBEDDING_SIZES[self.params.metric])
             self.faiss_index.add(
                 np.array(
                     self.emb_table["normed_embeddings"].to_list(), dtype=np.float32
@@ -127,7 +142,7 @@ class Seeker(Worker):
 
     def get_next(self) -> tuple[str, float]:
         similarity = 0.0
-        match self.mode:
+        match self.params.mode:
             case "best":
                 next_file, similarity = self._get_best(hop=False)
             case "timed_hops":
@@ -143,7 +158,7 @@ class Seeker(Worker):
             case "random" | "shuffle" | _:
                 next_file = self._get_random()
 
-        if self.pitch_match and len(self.played_files):
+        if self.pitch_match and len(self.played_files) > 0:
             console.log(
                 f"{self.tag} pitch matching '{self.base_file(next_file)}' to '{self.played_files[-1]}'"
             )
@@ -215,15 +230,16 @@ class Seeker(Worker):
                 f"{self.tag} extracted '{self.played_files[-1]}' -> '{track}' and '{segment}' and '{current_transformation}'"
             )
 
+        # load query embedding
         if track == "player-recording":
-            match self.metric:
+            match self.params.metric:
                 case "clamp" | "specdiff":
                     console.log(
-                        f"{self.tag} getting [bold]{self.metric}[/bold] embedding for '{self.pf_recording}'"
+                        f"{self.tag} getting [bold]{self.params.metric}[/bold] embedding for '{self.pf_recording}'"
                     )
                     q_embedding = panther.calc_embedding(self.pf_recording)
                     console.log(
-                        f"{self.tag} got [bold]{self.metric}[/bold] embedding {q_embedding.shape}"
+                        f"{self.tag} got [bold]{self.params.metric}[/bold] embedding {q_embedding.shape}"
                     )
                 case _:
                     if self.verbose:
@@ -240,6 +256,7 @@ class Seeker(Worker):
             )
         q_embedding /= np.linalg.norm(q_embedding, axis=1, keepdims=True)
 
+        # query index
         if self.verbose and track != "player-recording":
             console.log(
                 f"{self.tag} querying with key '{q_key}' from index {self.emb_table.index.get_loc(q_key)}"
@@ -248,31 +265,19 @@ class Seeker(Worker):
         if self.verbose:
             console.log(f"{self.tag} indices:\n\t", indices[0][:10])
             console.log(f"{self.tag} similarities:\n\t", similarities[0][:10])
-        # NO SHIFT
+
+        # reformat and filter shifted files
         indices, similarities = zip(
             *[
                 (i, d)
                 for i, d in zip(indices[0], similarities[0])
-                if str(self.emb_table.index[i]).endswith("s00")
+                if str(self.emb_table.index[i]).endswith(
+                    "s00"
+                )  # NO SHIFT - it often sounds bad
             ]
         )
-        nearest_neighbors = {}
-        for i, s in zip(indices, similarities):
-            nearest_neighbors[str(self.emb_table.index[i])] = float(s)
 
-        nearest_neighbors = sorted(
-            nearest_neighbors.items(), key=lambda item: (-item[1], item[0])
-        )
-
-        if self.verbose:
-            console.log(
-                f"{self.tag} got nearest neighbors to '{q_key}':",
-                nearest_neighbors[:10],
-                # sorted(
-                #     nearest_neighbors.items(), key=lambda item: item[1], reverse=True
-                # )[:10],
-            )
-
+        # find most similar valid match
         if track == "player-recording":
             next_file = self._get_random()
         else:
@@ -374,7 +379,7 @@ class Seeker(Worker):
         )[0]
 
         # correct for missing augmentation information
-        if len(random_file.split('_')) < 3:
+        if len(random_file.split("_")) < 3:
             random_file = random_file[:-4] + "_t00s00.mid"
 
         # only play files once
@@ -457,7 +462,7 @@ class Seeker(Worker):
             yield f"files:{filename[:-4]}_t00s00.mid"
 
     def load_model(self):
-        match self.metric:
+        match self.params.metric:
             case "clamp":
                 raise NotImplementedError("CLaMP model is no longer supported")
                 import torch
@@ -468,11 +473,23 @@ class Seeker(Worker):
                 else:
                     console.log(f"{self.tag} No GPU available, using the CPU instead")
                     device = torch.device("cpu")
-                self.model = clamp.CLaMP.from_pretrained(clamp.CLAMP_MODEL_NAME)
+                self.params.model = clamp.CLaMP.from_pretrained(clamp.CLAMP_MODEL_NAME)
                 if self.verbose:
-                    console.log(f"{self.tag} Loaded model:\n{self.model.eval}")
-                self.model = self.model.to(device)  # type: ignore
+                    console.log(f"{self.tag} Loaded model:\n{self.params.model.eval}")
+                self.params.model = self.params.model.to(device)  # type: ignore
+            case "cdl-4note" | "clf-speed" | "clf-tpose":
+                import torch
+                from utils.models import Classifier
+
+                clf = Classifier(768, [128], 120)
+                clf.load_state_dict(
+                    torch.load(
+                        os.path.join("data", "models", self.params.metric + ".pth")
+                    )
+                )
+
+                return clf
             case _:
                 raise TypeError(
-                    f"{self.tag} Unsupported model specified: {self.metric}"
+                    f"{self.tag} Unsupported model specified: {self.params.metric}"
                 )
