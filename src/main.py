@@ -14,8 +14,7 @@ os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 import pygame
 
 import workers
-from utils import console
-
+from utils import console, midi
 
 tag = "[white]main[/white]  :"
 
@@ -134,7 +133,7 @@ def main(args, params):
         console.log(f"{tag} [red]error initializing recording, exiting")
         raise FileExistsError("Couldn't initialize MIDI recording file")
     try:
-        ts_queue += scheduler.enqueue_midi(pf_seed, q_playback)  # type: ignore
+        ts_queue += scheduler.enqueue_midi(pf_seed, q_playback)
         write_log(
             pf_playlist,
             n_files,
@@ -210,6 +209,9 @@ def main(args, params):
                 pass
         thread_player.join(timeout=0.1)
 
+    scheduler.raw_notes_file.close()
+    _ = scheduler.queue_to_midi()
+
     if args.verbose:
         console.log(f"{tag} stopping metronome")
     process_metronome.kill()
@@ -227,7 +229,7 @@ def main(args, params):
 
         for line in file:
             row = line.strip().split(",")
-            row[2] = os.path.basename(row[2]) # only print filenames
+            row[2] = os.path.basename(row[2])  # only print filenames
             table.add_row(*row)
     console.print(table)
 

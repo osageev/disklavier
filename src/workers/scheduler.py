@@ -4,6 +4,7 @@ from queue import PriorityQueue
 from datetime import datetime, timedelta
 
 from utils import console
+from utils.midi import csv_to_midi
 from .worker import Worker
 
 N_TICKS_PER_BEAT: int = 220
@@ -39,6 +40,13 @@ class Scheduler(Worker):
         self.n_transitions = n_transitions
         self.recording_mode = recording_mode
 
+        # initialize queue file
+        self.raw_notes_filepath = os.path.join(
+            os.path.dirname(recording_file_path), "queue_dump.csv"
+        )
+        self.raw_notes_file = open(self.raw_notes_filepath, "w")
+        self.raw_notes_file.write("file,type,note,velocity,time\n")
+
         console.log(f"{self.tag} initialization complete")
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
@@ -58,9 +66,6 @@ class Scheduler(Worker):
             console.log(
                 f"{self.tag}[red] midi file ticks per beat mismatch!\n\tfile has {midi_in.ticks_per_beat} tpb but expected {N_TICKS_PER_BEAT}"
             )
-
-        # if tt_offset == 0:
-        #     tt_abs = -N_TICKS_PER_BEAT
 
         console.log(
             f"{self.tag} adding file {self.n_files_queued} to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s, so {str(self.td_start + timedelta(seconds=ts_offset))})"
@@ -95,18 +100,16 @@ class Scheduler(Worker):
                     #         f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
                     #     )
                     q_midi.put((tt_abs, msg))
+                    self.raw_notes_file.write(
+                        f"{os.path.basename(pf_midi)},{msg.type},{msg.note},{msg.velocity},{tt_abs}\n"
+                    )
 
-        # update midi log file
         if (
             mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo)
             > self.ts_transitions[-1]
         ):
 
             _ = self._gen_transitions(self.ts_transitions[-1])
-        if self._log_midi(pf_midi):
-            console.log(f"{self.tag} successfully updated recording file")
-        else:
-            console.log(f"{self.tag} [orange]error updating recording file")
 
         self.n_files_queued += 1
 
@@ -222,7 +225,7 @@ class Scheduler(Worker):
 
     def _get_next_transition(self) -> tuple[float, int]:
         if self.verbose:
-            console.log(f"{self.tag} transition times:\n\t{self.ts_transitions}")
+            console.log(f"{self.tag} transition times:\n\t{self.ts_transitions[-5:]}")
         ts_offset = self.ts_transitions[
             self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
         ]
@@ -236,45 +239,15 @@ class Scheduler(Worker):
 
     def _log_midi(self, pf_midi: str) -> bool:
         midi_in = mido.MidiFile(pf_midi)
-        midi_out = mido.MidiFile(
-            self.pf_midi_recording, ticks_per_beat=N_TICKS_PER_BEAT
+        out_path = os.path.join(self.p_playlist, os.path.basename(pf_midi))
+
+        console.log(f"{self.tag} copying midi to '{out_path}'")
+        midi_in.save(out_path)
+
+        return os.path.isfile(out_path)
+
+    def queue_to_midi(self) -> bool:
+        return csv_to_midi(
+            self.raw_notes_filepath,
+            os.path.join(os.path.dirname(self.raw_notes_filepath), "playback.mid"),
         )
-        ts_offset, _ = self._get_next_transition()
-
-        # also copy midi file to playlist folder
-        console.log(
-            f"{self.tag} copying midi to '{os.path.join(self.p_playlist, os.path.basename(pf_midi))}'"
-        )
-        midi_in.save(os.path.join(self.p_playlist, os.path.basename(pf_midi)))
-
-        # create playback track if it doesn't already exist
-        play_track = None
-        for track in midi_out.tracks:
-            if track.name == "playback":
-                play_track = track
-                break
-
-        if play_track is None:
-            play_track = midi_out.add_track("playback")
-
-        # copy over midi to track
-        for track in midi_in.tracks:
-            for i, msg in enumerate(track):
-                # reset first message time to account for offset
-                if i == 0:
-                    if len(track) > 0:
-                        msg.time += mido.second2tick(
-                            ts_offset - midi_out.length, N_TICKS_PER_BEAT, self.tempo
-                        )
-                    else:
-                        msg.time -= N_TICKS_PER_BEAT
-                if msg.type == "note_on" or msg.type == "note_off":
-                    play_track.append(msg)
-
-        # clear out old MIDI file and rewrite (TODO: risky? what if recorder writes at same time?)
-        # console.log(f"{self.tag} writing out MIDI to log:")
-        # midi_out.print_tracks()
-        os.remove(self.pf_midi_recording)
-        midi_out.save(self.pf_midi_recording)
-
-        return os.path.isfile(self.pf_midi_recording)
