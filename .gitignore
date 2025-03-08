@@ -2,6 +2,8 @@ data/playlist
 data/datasets
 data/outputs
 data/ableton
+data/models
+data/tables
 notebooks/tmp
 inputs/*
 src/ml/outputs/checkpoints

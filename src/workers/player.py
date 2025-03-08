@@ -4,8 +4,8 @@ from queue import PriorityQueue
 from datetime import datetime, timedelta
 
 from utils import console
+from utils.midi import TICKS_PER_BEAT
 from .worker import Worker
-from .scheduler import N_TICKS_PER_BEAT
 
 
 class Player(Worker):
@@ -32,7 +32,7 @@ class Player(Worker):
         )
         while queue.qsize() > 0:
             tt_abs, msg = queue.get()
-            ts_abs = mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo)
+            ts_abs = mido.tick2second(tt_abs, TICKS_PER_BEAT, self.tempo)
             if self.verbose:
                 console.log(
                     f"{self.tag} absolute time is {tt_abs} ticks (delta is {ts_abs:.03f} seconds)"
@@ -40,7 +40,7 @@ class Player(Worker):
 
             # if self.verbose:
             #     ts_abs_message_time = mido.tick2second(
-            #         tt_abs, N_TICKS_PER_BEAT, self.tempo
+            #         tt_abs, TICKS_PER_BEAT, self.tempo
             #     )
             #     console.log(
             #         f"{self.tag} \ttotal time should be {self.td_start.strftime('%H:%M:%S.%f')} + {ts_abs_message_time:.02f} = {(self.td_start + timedelta(seconds=ts_abs_message_time)).strftime(('%H:%M:%S.%f'))}"

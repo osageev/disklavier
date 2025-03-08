@@ -5,7 +5,9 @@ from mido import bpm2tempo, MidiFile, MetaMessage, MidiTrack, Message
 
 from typing import Dict
 
-from utils import console
+from utils import basename, console
+
+TICKS_PER_BEAT = 220
 
 
 def change_tempo(in_path: str, out_path: str, tempo: int):
@@ -100,7 +102,7 @@ def transform(
     return pf_out
 
 
-def csv_to_midi(csv_path: str, midi_output_path: str) -> bool:
+def csv_to_midi(csv_path: str, midi_output_path: str, verbose: bool = False) -> bool:
     """
     Convert a CSV file containing piano note data to a MIDI file.
 
@@ -110,6 +112,8 @@ def csv_to_midi(csv_path: str, midi_output_path: str) -> bool:
         Path to the CSV file with piano note data.
     midi_output_path : str
         Path where the MIDI file will be saved.
+    verbose : bool
+        Whether to print verbose output.
 
     Returns
     -------
@@ -134,14 +138,19 @@ def csv_to_midi(csv_path: str, midi_output_path: str) -> bool:
         console.log("[yellow]Warning: No notes found in CSV file")
         return False
 
+    messages.sort(key=lambda msg: msg.time)
+    if verbose:
+        console.log(messages[:5])
+        console.log(messages[-5:])
+
     # convert absolute timing to relative timing
-    console.log(messages)
     for i in range(len(messages) - 1, 0, -1):
         messages[i].time = messages[i].time - messages[i - 1].time
-    messages[0].time = 0
+    # messages[0].time = 0
 
-    midi = MidiFile(ticks_per_beat=220)
+    midi = MidiFile(ticks_per_beat=TICKS_PER_BEAT)
     track = MidiTrack()
+    track.name = basename(midi_output_path)
 
     # add messages to track
     for msg in messages:
@@ -150,9 +159,39 @@ def csv_to_midi(csv_path: str, midi_output_path: str) -> bool:
 
     midi.save(midi_output_path)
 
-    console.log(f"[green]MIDI file created: {midi_output_path}")
-    console.log("[bold]MIDI File Contents:[/bold]")
-
-    midi.print_tracks()
+    console.log(f"[green]MIDI file created: '{midi_output_path}'")
+    if verbose:
+        console.log("[bold]MIDI File Contents:[/bold]")
+        midi.print_tracks()
 
     return os.path.isfile(midi_output_path)
+
+
+def combine_midi_files(input_files: list[str], output_path: str) -> bool:
+    """
+    Combine multiple MIDI files into a single MIDI file, preserving separate tracks.
+
+    Parameters
+    ----------
+    input_files : list[str]
+        List of paths to input MIDI files.
+    output_path : str
+        Path where the combined MIDI file will be saved.
+
+    Returns
+    -------
+    bool
+        True if the combined MIDI file was created successfully, False otherwise.
+    """
+    combined = MidiFile(ticks_per_beat=TICKS_PER_BEAT)
+
+    # add all tracks from all files
+    for file_path in input_files:
+        midi = MidiFile(file_path)
+        for track in midi.tracks:
+            combined.tracks.append(track)
+
+    combined.save(output_path)
+    console.log(f"[green]combined MIDI file created: '{output_path}'")
+
+    return os.path.isfile(output_path)

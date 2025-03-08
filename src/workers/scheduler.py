@@ -4,10 +4,9 @@ from queue import PriorityQueue
 from datetime import datetime, timedelta
 
 from utils import console
-from utils.midi import csv_to_midi
+from utils.midi import csv_to_midi, TICKS_PER_BEAT
 from .worker import Worker
 
-N_TICKS_PER_BEAT: int = 220
 N_BEATS_TRANSITION_OFFSET: int = 8
 
 
@@ -24,7 +23,6 @@ class Scheduler(Worker):
         params,
         bpm: int,
         log_path: str,
-        recording_file_path: str,
         playlist_path: str,
         start_time: datetime,
         n_transitions: int,
@@ -34,7 +32,6 @@ class Scheduler(Worker):
         self.lead_bar = params.lead_bar
         self.n_beats_per_segment = params.n_beats_per_segment
         self.pf_log = log_path
-        self.pf_midi_recording = recording_file_path
         self.p_playlist = playlist_path
         self.td_start = start_time
         self.n_transitions = n_transitions
@@ -42,7 +39,7 @@ class Scheduler(Worker):
 
         # initialize queue file
         self.raw_notes_filepath = os.path.join(
-            os.path.dirname(recording_file_path), "queue_dump.csv"
+            os.path.dirname(self.pf_log), "queue_dump.csv"
         )
         self.raw_notes_file = open(self.raw_notes_filepath, "w")
         self.raw_notes_file.write("file,type,note,velocity,time\n")
@@ -62,9 +59,9 @@ class Scheduler(Worker):
         tt_abs: int = tt_offset  # track the absolute time since system start
         tt_sum: int = 0  # track the sum of all notes in the segment
 
-        if midi_in.ticks_per_beat != N_TICKS_PER_BEAT:
+        if midi_in.ticks_per_beat != TICKS_PER_BEAT:
             console.log(
-                f"{self.tag}[red] midi file ticks per beat mismatch!\n\tfile has {midi_in.ticks_per_beat} tpb but expected {N_TICKS_PER_BEAT}"
+                f"{self.tag}[red] midi file ticks per beat mismatch!\n\tfile has {midi_in.ticks_per_beat} tpb but expected {TICKS_PER_BEAT}"
             )
 
         console.log(
@@ -105,7 +102,7 @@ class Scheduler(Worker):
                     )
 
         if (
-            mido.tick2second(tt_abs, N_TICKS_PER_BEAT, self.tempo)
+            mido.tick2second(tt_abs, TICKS_PER_BEAT, self.tempo)
             > self.ts_transitions[-1]
         ):
 
@@ -114,12 +111,12 @@ class Scheduler(Worker):
         self.n_files_queued += 1
 
         console.log(
-            f"{self.tag} added {mido.tick2second(tt_sum, N_TICKS_PER_BEAT, self.tempo):.03f} seconds of music to queue"
+            f"{self.tag} added {mido.tick2second(tt_sum, TICKS_PER_BEAT, self.tempo):.03f} seconds of music to queue"
         )
 
-        return mido.tick2second(tt_sum, N_TICKS_PER_BEAT, self.tempo)
+        return mido.tick2second(tt_sum, TICKS_PER_BEAT, self.tempo)
 
-    def init_outfile(self, pf_midi: str, offset_s: float = 0) -> bool:
+    def init_schedule(self, pf_midi: str, offset_s: float = 0) -> bool:
         """Initialize a MIDI file to hold a playback recording."""
         if self.verbose:
             console.log(f"{self.tag} initializing output file with offset {offset_s} s")
@@ -163,28 +160,23 @@ class Scheduler(Worker):
         n_stamps: int = 1,
         do_ticks: bool = True,
     ) -> list[mido.MetaMessage]:
-        """Generate transition times for 8-beat MIDI files.
-
-        The function calculates transition times for segment changes in a MIDI playback sequence.
-        If the offset is not zero, the first transition occurs at the next multiple of 8 beats.
-
-        Args:
-            ts_offset (float): Time offset in seconds.
-            n_stamps (int): Number of transition timestamps to generate.
-            do_ticks (bool): Whether to include tick messages.
-
-        Returns:
-            list[mido.MetaMessage]: List of MIDI meta messages representing transitions and ticks.
-        """
-        self.tt_offset = mido.second2tick(ts_offset, N_TICKS_PER_BEAT, self.tempo)
+        """Generate transition times for 8-beat MIDI files."""
+        self.tt_offset = mido.second2tick(ts_offset, TICKS_PER_BEAT, self.tempo)
         ts_interval = self.n_beats_per_segment * 60 / self.bpm
         ts_beat_length = 60 / self.bpm  # time interval for each beat
 
         # Adjust ts_offset to the next interval
+        console.log(
+            f"{self.tag} ts_offset: {ts_offset}, ts_interval: {ts_interval}, ts_beat_length: {ts_beat_length}"
+        )
+        console.log(f"{self.tag} ts_offset % ts_interval: {ts_offset % ts_interval}")
+        console.log(
+            f"{self.tag} ts_beat_length * N_BEATS_TRANSITION_OFFSET: {ts_beat_length * N_BEATS_TRANSITION_OFFSET}"
+        )
         if ts_offset % ts_interval < ts_beat_length * N_BEATS_TRANSITION_OFFSET:
             ts_offset = ((ts_offset // ts_interval) + 1) * ts_interval
-
-        seg_range = range(n_stamps) if self.recording_mode else range(1, n_stamps + 1)
+        console.log(f"{self.tag} ts_offset: {ts_offset}")
+        seg_range = range(n_stamps) #if self.recording_mode else range(1, n_stamps + 1)
         self.ts_transitions.extend([ts_offset + i * ts_interval for i in seg_range])
 
         if self.verbose:
@@ -204,7 +196,7 @@ class Scheduler(Worker):
                 mido.MetaMessage(
                     "text",
                     text=f"transition {i} ({ts_transition:.02f}s)",
-                    time=mido.second2tick(ts_transition, N_TICKS_PER_BEAT, self.tempo),
+                    time=mido.second2tick(ts_transition, TICKS_PER_BEAT, self.tempo),
                 )
             )
             # tick messages
@@ -216,7 +208,7 @@ class Scheduler(Worker):
                             "text",
                             text=f"tick {i}-{beat + 1} ({tick_time:.02f}s)",
                             time=mido.second2tick(
-                                ts_beat_length, N_TICKS_PER_BEAT, self.tempo
+                                ts_beat_length, TICKS_PER_BEAT, self.tempo
                             ),
                         )
                     )
@@ -235,7 +227,7 @@ class Scheduler(Worker):
                 ts_offset if ts_offset > 0 else 0
             )  # prevent potential negative offset on first segment
 
-        return ts_offset, mido.second2tick(ts_offset, N_TICKS_PER_BEAT, self.tempo)
+        return ts_offset, mido.second2tick(ts_offset, TICKS_PER_BEAT, self.tempo)
 
     def _log_midi(self, pf_midi: str) -> bool:
         midi_in = mido.MidiFile(pf_midi)
@@ -246,8 +238,9 @@ class Scheduler(Worker):
 
         return os.path.isfile(out_path)
 
-    def queue_to_midi(self) -> bool:
+    def queue_to_midi(self, out_path: str) -> bool:
         return csv_to_midi(
             self.raw_notes_filepath,
-            os.path.join(os.path.dirname(self.raw_notes_filepath), "playback.mid"),
+            out_path,
+            verbose=self.verbose,
         )
