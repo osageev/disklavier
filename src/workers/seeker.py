@@ -35,8 +35,6 @@ class Seeker(Worker):
     # playback trackers
     played_files: list[str] = []
     allow_multiple_plays = False
-    # transformation tracker
-    transformation = {"transpose": 0, "shift": 0}
     # playlist mode position tracker
     matches_pos = 0
     # TODO: i forget what this does tbh, rewrite entire playlist mode
@@ -209,31 +207,15 @@ class Seeker(Worker):
                 f"{self.tag} {len(self.played_files)} played files:\n{self.played_files}"
             )
 
-        # handle parsing file names with and without augmentation
-        # TODO: remove this and global transformation tracking until it is relevant again
-        if (
-            len(basename(self.played_files[-1]).split("_"))
-            == 3
-        ):
-            track, segment, transformation = basename(self.played_files[-1]).split("_")
-            self.transformation["transpose"] = int(transformation[1:3])
-            self.transformation["shift"] = int(transformation[4:6])
-        else:
-            
-            track, segment = basename(self.played_files[-1]).split("_")
-            console.log(
-                f"{self.tag} len {len(basename(self.played_files[-1]).split("_"))} from {basename(self.played_files[-1]).split("_")}"
-            )
-        current_transformation = f"t{self.transformation['transpose']:02d}s{self.transformation['shift']:02d}"
-        query_file = f"{track}_{segment}_{current_transformation}"
+        query_file = basename(self.played_files[-1])
 
         if self.verbose:
             console.log(
-                f"{self.tag} extracted '{self.played_files[-1]}' -> '{track}' and '{segment}' and '{current_transformation}'"
+                f"{self.tag} extracted '{self.played_files[-1]}' -> '{query_file}'"
             )
 
         # load query embedding
-        if track == "player-recording":
+        if "player-recording" in query_file:
             match self.params.metric:
                 case "clamp" | "specdiff":
                     console.log(
@@ -252,6 +234,7 @@ class Seeker(Worker):
                     query_embedding = query_embedding.reshape(1, -1)
                     console.log(f"{self.tag} {query_embedding}")
         else:
+            # TODO: try to use this instead of the embedding table
             # query_embedding = np.array(
             #     self.faiss_index.reconstruct(self.filenames.index(query_file)),
             #     dtype=np.float32,
@@ -263,7 +246,7 @@ class Seeker(Worker):
         query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
 
         # query index
-        if self.verbose and track != "player-recording":
+        if self.verbose and "player-recording" not in query_file:
             console.log(
                 f"{self.tag} querying with key '{query_file}' from index {self.emb_table.index.get_loc(query_file)}"
             )
@@ -282,14 +265,14 @@ class Seeker(Worker):
         )
 
         # find most similar valid match
-        if track == "player-recording":
+        if "player-recording" in query_file:
             next_file = self._get_random()
         else:
             next_file = self._get_neighbor()
         played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
         for i_neighbor, similarity in zip(indices, similarities):
             segment_name = str(self.emb_table.index[i_neighbor])
-            if track == "player-recording":
+            if "player-recording" in query_file:
                 next_file = f"{segment_name}.mid"
                 break
             # dont replay files
@@ -392,14 +375,13 @@ class Seeker(Worker):
         seed_key = os.path.splitext(seed_file)[0]
 
         # Get the embedding for the seed file
-        seed_embedding = np.array(
-            [self.emb_table.loc[seed_key, "normed_embeddings"]],
-            dtype=np.float32,
-        )
+        # seed_embedding = np.array(
+        #     [self.emb_table.loc[seed_key, "normed_embeddings"]],
+        #     dtype=np.float32,
+        # )
 
         seed_embedding = np.array(
             [self.faiss_index.reconstruct(self.filenames.index(seed_key))],
-            dtype=np.float32,
         )  # type: ignore
 
         # find nearest segments using FAISS
@@ -587,8 +569,9 @@ class Seeker(Worker):
         return pf_out
 
     def base_file(self, filename: str) -> str:
+        if "player-recording" in filename:
+            return filename
         pieces = os.path.basename(filename).split("_")
-        # return f"{pieces[0]}_{pieces[1]}_{pieces[2][:-4]}.mid"
         return f"{pieces[0]}_{pieces[1]}.mid"
 
     def construct_keys(self):

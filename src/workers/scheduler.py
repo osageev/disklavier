@@ -3,7 +3,7 @@ import mido
 from queue import PriorityQueue
 from datetime import datetime, timedelta
 
-from utils import console
+from utils import basename, console
 from utils.midi import csv_to_midi, TICKS_PER_BEAT
 from .worker import Worker
 
@@ -52,7 +52,7 @@ class Scheduler(Worker):
         midi_in = mido.MidiFile(pf_midi)
         midi_track = os.path.basename(pf_midi).split("_")[0]
         # number of seconds/ticks from the start of playback to start playing the file
-        if self.recording_mode and midi_track == "player-recording":
+        if self.recording_mode and basename(pf_midi) == "player-recording":
             ts_offset, tt_offset = 0, 0
         else:
             ts_offset, tt_offset = self._get_next_transition()
@@ -166,17 +166,11 @@ class Scheduler(Worker):
         ts_beat_length = 60 / self.bpm  # time interval for each beat
 
         # Adjust ts_offset to the next interval
-        console.log(
-            f"{self.tag} ts_offset: {ts_offset}, ts_interval: {ts_interval}, ts_beat_length: {ts_beat_length}"
-        )
-        console.log(f"{self.tag} ts_offset % ts_interval: {ts_offset % ts_interval}")
-        console.log(
-            f"{self.tag} ts_beat_length * N_BEATS_TRANSITION_OFFSET: {ts_beat_length * N_BEATS_TRANSITION_OFFSET}"
-        )
         if ts_offset % ts_interval < ts_beat_length * N_BEATS_TRANSITION_OFFSET:
             ts_offset = ((ts_offset // ts_interval) + 1) * ts_interval
-        console.log(f"{self.tag} ts_offset: {ts_offset}")
-        seg_range = range(n_stamps) #if self.recording_mode else range(1, n_stamps + 1)
+        seg_range = range(
+            n_stamps
+        )  # if self.recording_mode else range(1, n_stamps + 1)
         self.ts_transitions.extend([ts_offset + i * ts_interval for i in seg_range])
 
         if self.verbose:
