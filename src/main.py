@@ -91,7 +91,7 @@ def main(args, params):
         case "kickstart":  # use specified file as seed
             try:
                 if params.kickstart_path:
-                    pf_seed = os.path.join(args.dataset_path, params.kickstart_path)
+                    pf_seed = params.kickstart_path
                     console.log(f"{tag} [cyan]KICKSTART[/cyan] - '{pf_seed}'")
             except AttributeError:
                 console.log(
@@ -113,7 +113,7 @@ def main(args, params):
                 console.log(f"{tag} added '{pf_seed}' to playlist from matches file")
                 continue
 
-    seeker.played_files.append(os.path.basename(pf_seed))
+    seeker.played_files.append(pf_seed)
 
     q_playback = PriorityQueue()
     # at least 1 second offset to buy us some time

@@ -77,46 +77,16 @@ class Seeker(Worker):
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
 
-        # load embeddings and FAISS index
-        pf_emb_table = os.path.join(self.p_table, f"{self.params.metric}.h5")
-        console.log(f"{self.tag} looking for embedding table '{pf_emb_table}'")
-        if os.path.isfile(pf_emb_table):
-            # load embeddings table from h5 to pd df
-            with console.status("\t\t\t      loading embeddings..."):
-                emb_column_name = (
-                    "histograms"
-                    if self.params.metric == "pitch-histogram"
-                    else "embeddings"
-                )
-                with h5py.File(pf_emb_table, "r") as f:
-                    # Convert h5py datasets to numpy arrays first to make them iterable
-                    emb_array = np.array(f[emb_column_name])
-                    filenames_array = np.array(f["filenames"])
-
-                    self.emb_table = pd.DataFrame(
-                        list(
-                            [e, e / np.linalg.norm(e, keepdims=True)] for e in emb_array
-                        ),
-                        index=[str(name[0], "utf-8") for name in filenames_array],
-                        columns=["embeddings", "normed_embeddings"],
-                    )
-            console.log(
-                f"{self.tag} loaded {len(self.emb_table)}*{len(self.emb_table.columns)} embeddings table"
-            )
-
-            if self.verbose:
-                console.log(self.emb_table.head())
-        else:
-            console.log(f"{self.tag} error loading embeddings table, exiting...")
-            exit()  # TODO: handle this better (return an error, let main handle it)
-
-        # build FAISS index
+        # load FAISS index
         console.log(f"{self.tag} building FAISS index...")
-        self.filenames = [
-            basename(f)
-            for f in os.listdir(self.p_dataset)
-            if f.endswith(SUPPORTED_EXTENSIONS)
-        ]
+        self.filenames = sorted(
+            [
+                basename(f)
+                for f in os.listdir(self.p_dataset)
+                if f.endswith(SUPPORTED_EXTENSIONS)
+            ]
+        )
+
         self.faiss_index = faiss.read_index(
             os.path.join(self.p_table, f"{self.params.metric}.faiss")
         )
@@ -175,7 +145,7 @@ class Seeker(Worker):
                 shift = next_file.split("_")[-1][4:]  # also contains .mid
                 transposed_file = f"{next_file[:-11]}_t{pitch:02d}s{shift}"
                 shifted_pch = PrettyMIDI(transposed_file).get_pitch_class_histogram(
-                    True, True
+                    use_duration=True, use_velocity=True, normalize=True
                 )
                 similarity = float(1 - cosine(shifted_pch, base_pch))
                 if similarity > best_match["sim"]:
@@ -234,22 +204,28 @@ class Seeker(Worker):
                     query_embedding = query_embedding.reshape(1, -1)
                     console.log(f"{self.tag} {query_embedding}")
         else:
-            # TODO: try to use this instead of the embedding table
-            # query_embedding = np.array(
-            #     self.faiss_index.reconstruct(self.filenames.index(query_file)),
-            #     dtype=np.float32,
-            # )
+            try:
+                embedding = self.faiss_index.reconstruct(self.filenames.index(query_file))  # type: ignore
+            except ValueError as e:
+                console.log(
+                    f"{self.tag} [yellow] unable to find embedding for '{query_file}', calculating manually from '{self.played_files[-1]}'"
+                )
+                embedding = panther.calc_embedding(self.played_files[-1])
+                self.faiss_index.add(embedding)  # type: ignore
+                self.filenames.append(query_file)
+                console.log(f"{self.tag} added '{query_file}' to index")
             query_embedding = np.array(
-                [self.emb_table.loc[query_file, "normed_embeddings"]],
+                embedding,
                 dtype=np.float32,
-            )
+            ).reshape(1, -1)
+        # ensure that embedding is normalized
+        # TODO: move embedding normalization to dataset generation
+        console.log(f"{self.tag} normalizing embedding {query_embedding.shape}")
         query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
 
         # query index
         if self.verbose and "player-recording" not in query_file:
-            console.log(
-                f"{self.tag} querying with key '{query_file}' from index {self.emb_table.index.get_loc(query_file)}"
-            )
+            console.log(f"{self.tag} querying with key '{query_file}'")
         similarities, indices = self.faiss_index.search(query_embedding, 1000)  # type: ignore
         if self.verbose:
             console.log(f"{self.tag} indices:\n\t", indices[0][:10])
@@ -260,7 +236,7 @@ class Seeker(Worker):
             *[
                 (i, d)
                 for i, d in zip(indices[0], similarities[0])
-                if str(self.emb_table.index[i]).endswith("s00")
+                if str(self.filenames[i]).endswith("s00")
             ]
         )
 
@@ -270,8 +246,11 @@ class Seeker(Worker):
         else:
             next_file = self._get_neighbor()
         played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
-        for i_neighbor, similarity in zip(indices, similarities):
-            segment_name = str(self.emb_table.index[i_neighbor])
+        for idx, similarity in zip(indices, similarities):
+            segment_name = str(self.filenames[idx])
+            console.log(
+                f"{self.tag} checking candidate '{segment_name}' with similarity {similarity:.05f}"
+            )
             if "player-recording" in query_file:
                 next_file = f"{segment_name}.mid"
                 break
@@ -373,13 +352,6 @@ class Seeker(Worker):
         console.log(f"{self.tag} using seed file '{seed_file}' for graph navigation")
         seed_track = seed_file.split("_")[0]
         seed_key = os.path.splitext(seed_file)[0]
-
-        # Get the embedding for the seed file
-        # seed_embedding = np.array(
-        #     [self.emb_table.loc[seed_key, "normed_embeddings"]],
-        #     dtype=np.float32,
-        # )
-
         seed_embedding = np.array(
             [self.faiss_index.reconstruct(self.filenames.index(seed_key))],
         )  # type: ignore
@@ -393,7 +365,7 @@ class Seeker(Worker):
         # find top 10 nearest segments from different tracks
         top_segments = []
         for idx, similarity in zip(indices[0], similarities[0]):
-            segment_name = str(self.emb_table.index[idx])
+            segment_name = str(self.filenames[idx])
             segment_track = segment_name.split("_")[0]
 
             # Skip segments from the same track
