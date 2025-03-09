@@ -17,10 +17,12 @@ import workers
 from utils import console, midi
 
 tag = "[white]main[/white]  :"
+RECORDING_START_DELAY = 6
+
 
 def main(args, params):
-    td_start = datetime.now()
-    ts_start = td_start.strftime("%y%m%d-%H%M%S")
+    td_system_start = datetime.now()
+    ts_start = td_system_start.strftime("%y%m%d-%H%M%S")
 
     # filesystem setup
     p_log = os.path.join(
@@ -58,7 +60,7 @@ def main(args, params):
         args.bpm,
         p_log,
         p_playlist,
-        td_start,
+        td_system_start,
         params.n_transitions,
         params.initialization == "recording",
     )
@@ -69,12 +71,16 @@ def main(args, params):
         p_playlist,
         args.bpm,
     )
-    player = workers.Player(params.player, args.bpm, td_start)
-    recorder = workers.Recorder(
+    player = workers.Player(params.player, args.bpm, td_system_start)
+    recorder = workers.MidiRecorder(
         params.recorder,
         args.bpm,
         pf_player_recording,
     )
+    audio_recorder = workers.AudioRecorder(params.audio, args.bpm, p_log)
+    audio_stop_event = None
+    recorder_stop_event = None
+
     # data setup
     match params.initialization:
         case "recording":  # collect user recording
@@ -86,7 +92,7 @@ def main(args, params):
                     f"{tag} calculated time of last recording {ts_recording_len}"
                 )
             else:
-                ts_recording_len = recorder.run()
+                ts_recording_len = recorder.manual_record()
             pf_seed = pf_player_recording
         case "kickstart":  # use specified file as seed
             try:
@@ -118,12 +124,17 @@ def main(args, params):
     q_playback = PriorityQueue()
     # at least 1 second offset to buy us some time
     td_start = datetime.now() + timedelta(
-        seconds=8 if params.initialization == "recording" else 1
+        seconds=RECORDING_START_DELAY if params.initialization == "recording" else 1
     )
     ts_queue = 0
     n_files = 1
-    # offset by recording length if necessary
+
     scheduler.td_start = td_start
+
+    # start audio recording in a separate thread
+    # TODO: fix ~1-beat delay in audio recording startup
+    audio_stop_event = audio_recorder.start_recording(td_start)
+
     if scheduler.init_schedule(
         pf_schedule,
         ts_recording_len if params.initialization == "recording" else 0,
@@ -131,6 +142,8 @@ def main(args, params):
         console.log(f"{tag} successfully initialized recording")
     else:
         console.log(f"{tag} [red]error initializing recording, exiting")
+        if audio_stop_event is not None:
+            audio_recorder.stop_recording()
         raise FileExistsError("Couldn't initialize MIDI recording file")
 
     # run
@@ -164,13 +177,10 @@ def main(args, params):
         thread_player = Thread(target=player.play, name="player", args=(q_playback,))
         thread_player.start()
 
-        # start recording
-        thread_recorder = Thread(
-            target=recorder.passive_record,
-            name="recorder",
-            args=(td_start,),
-        )
-        thread_recorder.start()
+        # start midi recording
+        recorder_stop_event = recorder.start_recording(td_start)
+        # connect recorder to player for velocity updates
+        player.set_recorder(recorder)
 
         # start metronome
         metronome = workers.Metronome(params.metronome, args.bpm, td_start)
@@ -208,17 +218,6 @@ def main(args, params):
         while q_playback.qsize() > 0:
             time.sleep(0.1)
         thread_player.join(timeout=0.1)
-
-        # save and process midi files
-        console.log(f"{tag} stopping passive recording...")
-        recorder.save_midi()
-        recorder.is_recording = False
-        thread_recorder.join(timeout=0.1)
-        scheduler.raw_notes_file.close()
-        _ = scheduler.queue_to_midi(pf_system_recording)
-        _ = midi.combine_midi_files(
-            [pf_schedule, pf_player_recording, pf_system_recording], pf_master_recording
-        )
     except KeyboardInterrupt:
         console.log(f"{tag}[yellow] CTRL + C detected, saving and exiting...")
         # dump queue to stop player
@@ -227,10 +226,12 @@ def main(args, params):
                 _ = q_playback.get()
             except:
                 if args.verbose:
-                    console.log(f"{tag} [yellow]ouch!")
+                    console.log(f"{tag} [yellow]ouch! tried to dump queue but failed")
                 pass
         thread_player.join(timeout=0.1)
 
+    # run complete, save and exit
+    # kill metronome
     if args.verbose:
         console.log(f"{tag} stopping metronome")
     process_metronome.kill()
@@ -238,6 +239,26 @@ def main(args, params):
     pygame.mixer.quit()
     if args.verbose:
         console.log(f"{tag} metronome stopped")
+
+    # close raw notes file
+    scheduler.raw_notes_file.close()
+
+    # Stop audio recording if it's running
+    if audio_stop_event is not None:
+        console.log(f"{tag} stopping audio recording")
+        audio_recorder.stop_recording()
+
+    # Stop MIDI passive recording if its running
+    if recorder_stop_event is not None:
+        console.log(f"{tag} stopping MIDI recording")
+        recorder.stop_recording()
+        recorder.save_midi()
+
+    # convert queue to midi
+    _ = scheduler.queue_to_midi(pf_system_recording)
+    _ = midi.combine_midi_files(
+        [pf_system_recording, pf_player_recording, pf_schedule], pf_master_recording
+    )
 
     # print playlist
     table = Table(title="PLAYLIST")
@@ -252,9 +273,14 @@ def main(args, params):
             table.add_row(*row)
     console.print(table)
 
-    # run complete, save and exit
+    # plot piano roll if master recording exists
+    if os.path.exists(pf_master_recording):
+        console.log(f"{tag} generating piano roll visualization")
+        midi.generate_piano_roll(pf_master_recording)
+
     console.save_text(os.path.join(p_log, f"{ts_start}.log"))
     console.log(f"{tag}[green bold] session complete, exiting")
+    return 0
 
 
 def write_log(filename: str, *args):

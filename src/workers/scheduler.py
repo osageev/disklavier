@@ -38,9 +38,7 @@ class Scheduler(Worker):
         self.recording_mode = recording_mode
 
         # initialize queue file
-        self.raw_notes_filepath = os.path.join(
-            os.path.dirname(self.pf_log), "queue_dump.csv"
-        )
+        self.raw_notes_filepath = os.path.join(self.pf_log, "queue_dump.csv")
         self.raw_notes_file = open(self.raw_notes_filepath, "w")
         self.raw_notes_file.write("file,type,note,velocity,time\n")
 
@@ -96,6 +94,9 @@ class Scheduler(Worker):
                     #         f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
                     #     )
                     q_midi.put((tt_abs, msg))
+                    # edge case, but it does happen sometimes that multiple recorded notes start at 0, resulting in one note getting bumped to time -1
+                    if tt_abs < 0:
+                        tt_abs = 0
                     self.raw_notes_file.write(
                         f"{os.path.basename(pf_midi)},{msg.type},{msg.note},{msg.velocity},{tt_abs}\n"
                     )
@@ -113,6 +114,8 @@ class Scheduler(Worker):
             f"{self.tag} added {mido.tick2second(tt_sum, TICKS_PER_BEAT, self.tempo):.03f} seconds of music to queue"
         )
 
+        _ = self._copy_midi(pf_midi)
+
         return mido.tick2second(tt_sum, TICKS_PER_BEAT, self.tempo)
 
     def init_schedule(self, pf_midi: str, offset_s: float = 0) -> bool:
@@ -124,7 +127,7 @@ class Scheduler(Worker):
 
         # default timing messages
         tick_track.append(
-            mido.MetaMessage("track_name", name=os.path.basename(pf_midi), time=0)
+            mido.MetaMessage("track_name", name=basename(pf_midi), time=0)
         )
         tick_track.append(
             mido.MetaMessage(
@@ -188,12 +191,13 @@ class Scheduler(Worker):
             transitions.append(
                 mido.MetaMessage(
                     "text",
-                    text=f"transition {i} ({ts_transition:.02f}s)",
+                    text=f"transition {i+1} ({ts_transition:.02f}s)",
                     time=mido.second2tick(ts_transition, TICKS_PER_BEAT, self.tempo),
                 )
             )
             # tick messages
             if do_ticks:
+                transitions[-1].time = 0  # transition occurs at tick time
                 for beat in range(self.n_beats_per_segment):
                     tick_time = ts_transition + (beat * ts_beat_length)
                     transitions.append(
@@ -222,12 +226,24 @@ class Scheduler(Worker):
 
         return ts_offset, mido.second2tick(ts_offset, TICKS_PER_BEAT, self.tempo)
 
-    def _log_midi(self, pf_midi: str) -> bool:
-        midi_in = mido.MidiFile(pf_midi)
-        out_path = os.path.join(self.p_playlist, os.path.basename(pf_midi))
+    def _copy_midi(self, pf_midi: str) -> bool:
+        """Copy the MIDI file to the playlist folder.
 
-        console.log(f"{self.tag} copying midi to '{out_path}'")
-        midi_in.save(out_path)
+        Parameters
+        ----------
+        pf_midi : str
+            Path to the MIDI file to copy.
+
+        Returns
+        -------
+        bool
+            True if the MIDI file was copied successfully, False otherwise.
+        """
+        midi = mido.MidiFile(pf_midi)
+        out_path = os.path.join(self.p_playlist, os.path.basename(pf_midi))
+        if self.verbose:
+            console.log(f"{self.tag} copying midi to '{out_path}'")
+        midi.save(out_path)
 
         return os.path.isfile(out_path)
 

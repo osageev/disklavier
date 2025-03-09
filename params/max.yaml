@@ -1,9 +1,8 @@
 n_beats_per_segment: 8
-n_transitions: 8
+n_transitions: 4
 n_min_queue_length: 50
 initialization: "kickstart" # kickstart random recording
 kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid" # path to midi or matches.json
-# kickstart_path: "data/datasets/20250110/augmented/20240123-070-03_0205-0212_t01s00.mid" # path to midi or matches.json
 scheduler:
   tag: "[green]schedl[/green]:"
   verbose: True

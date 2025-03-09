@@ -248,9 +248,6 @@ class Seeker(Worker):
         played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
         for idx, similarity in zip(indices, similarities):
             segment_name = str(self.filenames[idx])
-            console.log(
-                f"{self.tag} checking candidate '{segment_name}' with similarity {similarity:.05f}"
-            )
             if "player-recording" in query_file:
                 next_file = f"{segment_name}.mid"
                 break
@@ -352,9 +349,8 @@ class Seeker(Worker):
         console.log(f"{self.tag} using seed file '{seed_file}' for graph navigation")
         seed_track = seed_file.split("_")[0]
         seed_key = os.path.splitext(seed_file)[0]
-        seed_embedding = np.array(
-            [self.faiss_index.reconstruct(self.filenames.index(seed_key))],
-        )  # type: ignore
+        e = [self.faiss_index.reconstruct(self.filenames.index(seed_key))]  # type: ignore
+        seed_embedding = np.array(e)
 
         # find nearest segments using FAISS
         console.log(

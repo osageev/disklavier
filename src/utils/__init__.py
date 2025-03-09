@@ -64,5 +64,6 @@ def extract_transformations(filename: str) -> tuple[str, dict[str, int]]:
         {"transpose": transpose, "shift": shift},
     )
 
+
 def basename(filename: str) -> str:
     return os.path.splitext(os.path.basename(filename))[0]

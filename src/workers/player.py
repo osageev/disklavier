@@ -14,6 +14,13 @@ class Player(Worker):
     n_notes = 0
     n_late_notes = 0
 
+    # velocity tracking
+    _recorder = None
+    _avg_velocity: float = 0.0
+    _min_velocity: int = 0
+    _max_velocity: int = 0
+    _velocity_adjustment_factor: float = 1.0
+
     def __init__(self, params, bpm: int, t_start: datetime):
         super().__init__(params, bpm=bpm)
         self.midi_port = mido.open_output(params.midi_port)  # type: ignore
@@ -26,11 +33,99 @@ class Player(Worker):
             f"{self.tag} initialization complete, start time is {self.td_start.strftime('%H:%M:%S.%f')[:-3]}"
         )
 
+    def set_recorder(self, recorder):
+        """
+        Set the reference to the MidiRecorder.
+
+        Parameters
+        ----------
+        recorder : MidiRecorder
+            Reference to the MidiRecorder instance.
+        """
+        self._recorder = recorder
+        console.log(f"{self.tag} connected to recorder for velocity updates")
+
+    def check_velocity_updates(self) -> bool:
+        """
+        Check for velocity updates from the recorder.
+
+        Returns
+        -------
+        bool
+            True if velocity data was updated, False otherwise.
+        """
+        if self._recorder is None:
+            console.log(f"{self.tag} no recorder connected")
+            return False
+        else:
+            self._avg_velocity = self._recorder.avg_velocity
+            self._min_velocity = self._recorder.min_velocity
+            self._max_velocity = self._recorder.max_velocity
+
+            if self.verbose:
+                console.log(
+                    f"{self.tag} updated velocity stats: avg={self._avg_velocity:.2f}, min={self._min_velocity}, max={self._max_velocity}"
+                )
+            return True
+
+    def adjust_playback_based_on_velocity(self):
+        if self._avg_velocity > 0:
+            console.log(
+                f"{self.tag} adjusting playback based on velocity: avg={self._avg_velocity:.2f}, min={self._min_velocity}, max={self._max_velocity}"
+            )
+
+            # Store velocity for future message adjustments
+            self._velocity_adjustment_factor = (
+                self._calculate_velocity_adjustment_factor()
+            )
+
+    def _calculate_velocity_adjustment_factor(self):
+        """
+        Calculate velocity adjustment factor based on current velocity stats.
+
+        Returns
+        -------
+        float
+            Factor to scale message velocities.
+        """
+        # TODO: move this to class variables
+        # Define velocity ranges
+        min_expected_velocity = 30
+        max_expected_velocity = 110
+
+        # Define adjustment ranges
+        min_adjustment = 0.2  # for soft playing
+        max_adjustment = 1.5  # for hard playing
+
+        # Default for middle-range velocity
+        if self._avg_velocity == 0:
+            return 1.0
+
+        # Calculate adjustment factor
+        normalized_velocity = (self._avg_velocity - min_expected_velocity) / (
+            max_expected_velocity - min_expected_velocity
+        )
+        normalized_velocity = max(0.0, min(1.0, normalized_velocity))  # clamp to [0, 1]
+
+        adjustment_factor = min_adjustment + normalized_velocity * (
+            max_adjustment - min_adjustment
+        )
+
+        return adjustment_factor
+
     def play(self, queue: PriorityQueue):
         console.log(
             f"{self.tag} start time is {self.td_start.strftime('%H:%M:%S.%f')[:-3]}"
         )
+
         while queue.qsize() > 0:
+            # Check for velocity updates from recorder
+            velocity_updated = self.check_velocity_updates()
+
+            # Adjust playback based on velocity if needed
+            if velocity_updated:
+                self.adjust_playback_based_on_velocity()
+
             tt_abs, msg = queue.get()
             ts_abs = mido.tick2second(tt_abs, TICKS_PER_BEAT, self.tempo)
             if self.verbose:
@@ -70,6 +165,22 @@ class Player(Worker):
                 console.log(
                     f"{self.tag} playing ({msg})\t{queue.qsize():03d} events queued"
                 )
+
+            # Adjust message velocity based on player intensity
+            if msg.type == "note_on" and msg.velocity > 0:
+                original_velocity = msg.velocity
+                adjusted_velocity = min(
+                    127,
+                    max(1, int(original_velocity * self._velocity_adjustment_factor)),
+                )
+
+                if adjusted_velocity != original_velocity and self.verbose:
+                    console.log(
+                        f"{self.tag} adjusting note velocity from {original_velocity} to {adjusted_velocity} (factor: {self._velocity_adjustment_factor:.2f})"
+                    )
+
+                msg = msg.copy(velocity=adjusted_velocity)
+
             self.midi_port.send(msg)
             self.n_notes += 1
             queue.task_done()

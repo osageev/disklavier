@@ -1,9 +1,8 @@
 import os
 import mido
-from datetime import datetime
-import mido
-from threading import Thread, Event
 import time
+from datetime import datetime
+from threading import Thread, Event
 
 from .worker import Worker
 from utils import console, tick
@@ -12,15 +11,55 @@ from utils.midi import TICKS_PER_BEAT
 from typing import List, Optional
 
 
-class Recorder(Worker):
-    """
-    Records MIDI input and saves it to a file.
-    """
-
+class MidiRecorder(Worker):
     recorded_notes: List[mido.Message] = []
     is_recording: bool = False
     n_ticks: int = 0
-    velocity_display = None
+    stop_event: Optional[Event] = None
+    midi_thread: Thread
+    ts_window_duration: float = 1.0
+
+    # published velocity statistics
+    _avg_velocity: float = 0.0
+    _min_velocity: int = 0
+    _max_velocity: int = 0
+    _velocity_window: List[tuple] = []
+
+    @property
+    def avg_velocity(self) -> float:
+        """
+        Get the average velocity of notes in the current window.
+
+        Returns
+        -------
+        float
+            Average velocity of notes.
+        """
+        return self._avg_velocity
+
+    @property
+    def min_velocity(self) -> int:
+        """
+        Get the minimum velocity of notes in the current window.
+
+        Returns
+        -------
+        int
+            Minimum velocity of notes.
+        """
+        return self._min_velocity
+
+    @property
+    def max_velocity(self) -> int:
+        """
+        Get the maximum velocity of notes in the current window.
+
+        Returns
+        -------
+        int
+            Maximum velocity of notes.
+        """
+        return self._max_velocity
 
     def __init__(
         self,
@@ -30,11 +69,12 @@ class Recorder(Worker):
     ):
         super().__init__(params, bpm=bpm)
         self.pf_midi_recording = recording_file_path
+        self.ts_window_duration = 60.0 / self.bpm  # 1 beat in seconds
 
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
 
-    def run(self) -> float:
+    def manual_record(self) -> float:
         """
         Records MIDI input and saves it to a file.
 
@@ -49,6 +89,7 @@ class Recorder(Worker):
 
         midi = mido.MidiFile(ticks_per_beat=TICKS_PER_BEAT)
         track = mido.MidiTrack()
+        track.append(mido.MetaMessage("track_name", name="player", time=0))
         track.append(
             mido.MetaMessage(
                 type="set_tempo",
@@ -83,6 +124,7 @@ class Recorder(Worker):
                             # write out recording
                             midi.tracks.append(track)
                             midi.save(self.pf_midi_recording)
+                            self.recorded_notes = []
 
                             console.log(
                                 f"{self.tag} saved recording '{self.pf_midi_recording}'"
@@ -120,13 +162,15 @@ class Recorder(Worker):
                             console.log(
                                 f"{self.tag} first note received at {start_time.strftime('%H:%M:%S.%f')}"
                             )
-                        msg.time = 0
+                        msg = msg.copy(time=0)
                     else:
-                        msg.time = int(
-                            (current_time - last_note_time).total_seconds()
-                            * TICKS_PER_BEAT
-                            * self.bpm
-                            / 60
+                        msg = msg.copy(
+                            time=int(
+                                (current_time - last_note_time).total_seconds()
+                                * TICKS_PER_BEAT
+                                * self.bpm
+                                / 60
+                            )
                         )
                     track.append(msg)
                     self.recorded_notes.append(msg)
@@ -134,101 +178,98 @@ class Recorder(Worker):
                     last_note_time = current_time
         return -1.0
 
-    def passive_record(self, td_start: Optional[datetime] = None) -> None:
+    def _passive_record(self, td_start: datetime, stop_event: Event) -> None:
         """
         Passively records notes from the MIDI input.
 
         Parameters
         ----------
-        td_start : Optional[datetime]
+        td_start : datetime
             Start time to calculate message times relative to.
+        stop_event : Event
+            Event that signals when to stop recording.
         """
-
-        if td_start is None:
-            td_start = datetime.now()
-
-        last_msg_time = td_start
+        # wait until td_start
+        wait_time = (td_start - datetime.now()).total_seconds()
+        if wait_time > 0:
+            console.log(
+                f"{self.tag} waiting {wait_time:.2f}s until midi recording start"
+            )
+            time.sleep(wait_time)
 
         # initialize velocity tracking variables
-        velocity_window = []  # list of (timestamp, velocity) tuples
-        window_duration_seconds = 8 * 60.0 / self.bpm  # 8 beats in seconds
-
-        # track the last time we printed stats
-        last_stats_print_time = time.time()
-        last_display_update_time = time.time()
-        display_update_interval = 0.5  # Update display every half second
+        self._velocity_window = []  # list of (timestamp, velocity) tuples
 
         if self.verbose:
             console.log(f"{self.tag} listening on port '{self.params.midi_port}'")
         self.is_recording = True
 
+        last_msg_time = td_start
         with mido.open_input(self.params.midi_port) as inport:  # type: ignore
             for msg in inport:
-                if not self.is_recording:
-                    break
-
+                # record note
                 current_time = datetime.now()
                 # calculate time in ticks since last message
                 time_diff = (current_time - last_msg_time).total_seconds()
-                msg.time = int(time_diff * TICKS_PER_BEAT * self.bpm / 60)
+                msg = msg.copy(time=int(time_diff * TICKS_PER_BEAT * self.bpm / 60))
                 self.recorded_notes.append(msg)
                 last_msg_time = current_time
 
-                # track velocity for note_on messages in non-note-only mode too
+                # update velocity stats
                 if msg.type == "note_on" and msg.velocity > 0:
-                    # add current note to velocity window with timestamp
-                    velocity_window.append((current_time.timestamp(), msg.velocity))
+                    self._update_velocity_stats(current_time.timestamp(), msg)
 
-                    # remove velocities older than the window duration
-                    current_timestamp = current_time.timestamp()
-                    window_start_timestamp = current_timestamp - window_duration_seconds
-                    velocity_window = [
-                        item
-                        for item in velocity_window
-                        if item[0] >= window_start_timestamp
-                    ]
+                # check stop conditions
+                if not self.is_recording:
+                    break
+                if stop_event is not None and stop_event.is_set():
+                    self.is_recording = False
+                    break
 
-                    # calculate velocity stats if we have data
-                    if velocity_window:
-                        velocities = [v[1] for v in velocity_window]
-                        avg_velocity = sum(velocities) / len(velocities)
-                        min_velocity = min(velocities)
-                        max_velocity = max(velocities)
+        console.log(f"{self.tag} stopped recording ({len(self.recorded_notes)} notes)")
 
-                        # Update the display occasionally to avoid flooding the terminal
-                        current_time_seconds = time.time()
-                        time_since_last_display = (
-                            current_time_seconds - last_display_update_time
-                        )
+    def _update_velocity_stats(self, current_time: float, msg: mido.Message) -> None:
+        """
+        Update velocity statistics based on current velocity window.
 
-                    # print update if its time
-                    current_time_seconds = time.time()
-                    time_since_last_print = current_time_seconds - last_stats_print_time
-                    if time_since_last_print >= window_duration_seconds:
-                        # print velocity stats if we have data
-                        if velocity_window:
-                            console.log(
-                                f"{self.tag} Velocity over last 8 beats: avg={avg_velocity:.2f}, min={min_velocity}, max={max_velocity}"
-                            )
-                        else:
-                            console.log(
-                                f"{self.tag} No notes played in the last 8 beats"
-                            )
+        Parameters
+        ----------
+        current_time : datetime
+            Current time of the recording.
+        msg : mido.Message
+            Current MIDI message.
+        """
 
-                        # update the last print time
-                        last_stats_print_time = current_time_seconds
+        # add current note to velocity window with timestamp
+        v = msg.velocity  # type: ignore
+        self._velocity_window.append((current_time, v))
 
-        console.log(f"{self.tag} stopped recording")
+        # remove velocities older than the window duration
+        window_start_timestamp = current_time - self.ts_window_duration
+        self._velocity_window = [
+            item for item in self._velocity_window if item[0] >= window_start_timestamp
+        ]
+        if self._velocity_window:
+            velocities = [v[1] for v in self._velocity_window]
+            self._avg_velocity = sum(velocities) / len(velocities)
+            self._min_velocity = min(velocities)
+            self._max_velocity = max(velocities)
+        else:
+            # No data in the window
+            self._avg_velocity = 0.0
+            self._min_velocity = 0
+            self._max_velocity = 0
 
-        # Close the display
-        if self.velocity_display:
-            self.velocity_display.close()
+        # print velocity stats if we have data
+        if self._velocity_window:
+            console.log(
+                f"{self.tag} velocity stat updated: avg={self._avg_velocity:.2f}, min={self._min_velocity}, max={self._max_velocity}"
+            )
+        else:
+            console.log(f"{self.tag} no notes played in the last beat")
 
     def save_midi(self) -> bool:
         """Saves the recorded notes to a MIDI file."""
-        # Close the velocity display if it exists
-        if self.velocity_display:
-            self.velocity_display.close()
 
         if self.verbose:
             console.log(
@@ -265,3 +306,51 @@ class Recorder(Worker):
         self.recorded_notes = []
 
         return os.path.exists(self.pf_midi_recording)
+
+    def start_recording(self, td_start: datetime) -> Event:
+        """
+        Starts midi recording in a separate thread.
+
+        Parameters
+        ----------
+        td_start : datetime
+            Start time for the recording.
+
+        Returns
+        -------
+        Event
+            The stop event that can be used to signal the recording to stop.
+        """
+        self.stop_event = Event()
+        self.midi_thread = Thread(
+            target=self._passive_record,
+            args=(td_start, self.stop_event),
+            name="midi recorder",
+            daemon=True,
+        )
+        self.midi_thread.start()
+        return self.stop_event
+
+    def stop_recording(self) -> bool:
+        """
+        Stops the midi recording thread.
+
+        Returns
+        -------
+        bool
+            True if recording was successfully stopped, False otherwise.
+        """
+        if self.is_recording and self.stop_event is not None:
+            console.log(f"{self.tag} stopping midi recording")
+            self.stop_event.set()
+            if self.midi_thread is not None:
+                self.midi_thread.join(0.1)
+            self.is_recording = False
+            if self.midi_thread.is_alive():
+                console.log(f"{self.tag} midi recording thread is still running")
+            return True
+        else:
+            console.log(f"{self.tag} midi recording not active")
+            console.log(f"{self.tag} \tis_recording: {self.is_recording}")
+            console.log(f"{self.tag} \tstop_event: {self.stop_event}")
+            return False
