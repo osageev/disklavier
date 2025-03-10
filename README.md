@@ -29,3 +29,18 @@ These are mainly for standard types, things like, e.g. a `mido.MidiFile` will ge
    2. average on local machine
    3. search index as one big chunk
    4. use best result
+
+
+## TODO List
+
+- ./src/workers/seeker.py:40:    # TODO: i forget what this does tbh, rewrite entire playlist mode
+- ./src/workers/seeker.py:107:            exit()  # TODO: handle this better (return an error, let main handle it)
+- ./src/workers/seeker.py:222:        # TODO: move embedding normalization to dataset generation
+- ./src/workers/seeker.py:299:              # TODO: modify this to get nearest neighbor from different track
+- ./src/workers/seeker.py:491:        # TODO: modify this to work from current playlist paradigm
+- ./src/workers/player.py:91:        # TODO: move this to class variables
+- ./src/build_dataset.py:116:    max_up = 108 - highest_note  # TODO double-check this IRL
+- ./src/main.py:135:    # TODO: fix ~1-beat delay in audio recording startup
+- ./src/main.py:191:        # TODO: move this to be managed by scheduler and track scheduler state instead
+- ./src/main.py:194:                # TODO: get first match sooner if using a recording
+- ./src/main.py:399:        exit()  # TODO: handle this better
