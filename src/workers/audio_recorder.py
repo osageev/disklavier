@@ -28,7 +28,7 @@ class AudioRecorder(Worker):
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
 
-    def record_audio(self, td_start: datetime, stop_event: Event) -> None:
+    def run(self, td_start: datetime, stop_event: Event) -> None:
         """
         Records audio from the specified start time until the stop event is set.
 
@@ -39,13 +39,13 @@ class AudioRecorder(Worker):
         stop_event : Event
             Event that signals when to stop recording.
         """
-        output_file = os.path.join(self.output_dir, f"audio-recording.wav")
+        pf_output = os.path.join(self.output_dir, f"audio-recording.wav")
 
         # wait until td_start
-        wait_time = (td_start - datetime.now()).total_seconds()
-        if wait_time > 0:
-            console.log(f"{self.tag} waiting {wait_time:.2f}s until recording start")
-            time.sleep(wait_time)
+        t_wait = (td_start - datetime.now()).total_seconds()
+        if t_wait > 0:
+            console.log(f"{self.tag} waiting {t_wait:.2f}s until recording start")
+            time.sleep(t_wait)
 
         console.log(f"{self.tag} starting audio recording")
         self.is_recording = True
@@ -63,13 +63,13 @@ class AudioRecorder(Worker):
             channels=self.params.channels,
             callback=callback,
         ):
-            console.log(f"{self.tag} recording to {output_file}")
+            console.log(f"{self.tag} recording to '{pf_output}'")
             stop_event.wait()
 
         if len(recorded_data) > 0:
             recorded_array = np.concatenate(recorded_data)
-            sf.write(output_file, recorded_array, self.params.sample_rate)
-            console.log(f"{self.tag} saved audio recording to {output_file}")
+            sf.write(pf_output, recorded_array, self.params.sample_rate)
+            console.log(f"{self.tag} saved audio recording to {pf_output}")
         else:
             console.log(f"{self.tag} no audio recorded")
 
@@ -91,7 +91,7 @@ class AudioRecorder(Worker):
         """
         self.stop_event = Event()
         self.audio_thread = Thread(
-            target=self.record_audio,
+            target=self.run,
             args=(td_start, self.stop_event),
             name="audio recorder",
             daemon=True,

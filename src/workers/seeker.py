@@ -132,7 +132,7 @@ class Seeker(Worker):
             console.log(
                 f"{self.tag} pitch matching '{self.base_file(next_file)}' to '{self.played_files[-1]}'"
             )
-            if self.played_files[-1].split("_")[0] == "player-recording":
+            if "player" in self.played_files[-1].split("_")[0]:
                 base_pch = PrettyMIDI(
                     os.path.join(self.pf_recording)
                 ).get_pitch_class_histogram(True, True)
@@ -185,7 +185,7 @@ class Seeker(Worker):
             )
 
         # load query embedding
-        if "player-recording" in query_file:
+        if "player" in query_file:
             match self.params.metric:
                 case "clamp" | "specdiff":
                     console.log(
@@ -220,11 +220,10 @@ class Seeker(Worker):
             ).reshape(1, -1)
         # ensure that embedding is normalized
         # TODO: move embedding normalization to dataset generation
-        console.log(f"{self.tag} normalizing embedding {query_embedding.shape}")
         query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
 
         # query index
-        if self.verbose and "player-recording" not in query_file:
+        if self.verbose and "player" not in query_file:
             console.log(f"{self.tag} querying with key '{query_file}'")
         similarities, indices = self.faiss_index.search(query_embedding, 1000)  # type: ignore
         if self.verbose:
@@ -241,14 +240,14 @@ class Seeker(Worker):
         )
 
         # find most similar valid match
-        if "player-recording" in query_file:
+        if "player" in query_file:
             next_file = self._get_random()
         else:
             next_file = self._get_neighbor()
         played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
         for idx, similarity in zip(indices, similarities):
             segment_name = str(self.filenames[idx])
-            if "player-recording" in query_file:
+            if "player" in query_file:
                 next_file = f"{segment_name}.mid"
                 break
             # dont replay files
@@ -537,7 +536,7 @@ class Seeker(Worker):
         return pf_out
 
     def base_file(self, filename: str) -> str:
-        if "player-recording" in filename:
+        if "player" in filename:
             return filename
         pieces = os.path.basename(filename).split("_")
         return f"{pieces[0]}_{pieces[1]}.mid"

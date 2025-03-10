@@ -74,7 +74,7 @@ class MidiRecorder(Worker):
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
 
-    def manual_record(self) -> float:
+    def run(self) -> float:
         """
         Records MIDI input and saves it to a file.
 
@@ -268,12 +268,12 @@ class MidiRecorder(Worker):
         else:
             console.log(f"{self.tag} no notes played in the last beat")
 
-    def save_midi(self) -> bool:
+    def save_midi(self, pf_recording: str) -> bool:
         """Saves the recorded notes to a MIDI file."""
 
         if self.verbose:
             console.log(
-                f"{self.tag} saving recording '{os.path.basename(self.pf_midi_recording)}'"
+                f"{self.tag} saving recording '{os.path.basename(pf_recording)}'"
             )
 
         midi = mido.MidiFile(ticks_per_beat=TICKS_PER_BEAT)
@@ -290,17 +290,17 @@ class MidiRecorder(Worker):
             track.append(msg)
         midi.tracks.append(track)
 
-        midi.save(self.pf_midi_recording)
+        midi.save(pf_recording)
 
-        if os.path.exists(self.pf_midi_recording):
+        if os.path.exists(pf_recording):
             console.log(
-                f"{self.tag} successfully saved recording '{os.path.basename(self.pf_midi_recording)}'"
+                f"{self.tag} successfully saved recording '{os.path.basename(pf_recording)}'"
             )
             if self.verbose:
-                mido.MidiFile(self.pf_midi_recording).print_tracks()
+                mido.MidiFile(pf_recording).print_tracks()
         else:
             console.log(
-                f"{self.tag} failed to save recording '{os.path.basename(self.pf_midi_recording)}'"
+                f"{self.tag} failed to save recording '{os.path.basename(pf_recording)}'"
             )
 
         self.recorded_notes = []

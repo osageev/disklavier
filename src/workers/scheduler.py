@@ -49,7 +49,7 @@ class Scheduler(Worker):
     def enqueue_midi(self, pf_midi: str, q_midi: PriorityQueue) -> float:
         midi_in = mido.MidiFile(pf_midi)
         # number of seconds/ticks from the start of playback to start playing the file
-        if self.recording_mode and basename(pf_midi) == "player-recording":
+        if self.recording_mode and "player" in basename(pf_midi):
             ts_offset, tt_offset = 0, 0
         else:
             ts_offset, tt_offset = self._get_next_transition()

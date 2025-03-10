@@ -204,6 +204,7 @@ def combine_midi_files(input_files: list[str], output_path: str) -> bool:
 def generate_piano_roll(midi_path, output_path=None, figsize=(12, 8), dpi=100):
     """
     Generate a piano roll visualization from a MIDI file.
+    TODO: have live velocity changes be reflected here
 
     Parameters
     ----------

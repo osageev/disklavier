@@ -25,25 +25,12 @@ def main(args, params):
     ts_start = td_system_start.strftime("%y%m%d-%H%M%S")
 
     # filesystem setup
+    # create session output directories
     p_log = os.path.join(
         args.output,
         f"{ts_start}_{params.seeker.metric}_{params.seeker.seed}_{params.initialization}",
     )
     p_playlist = os.path.join(p_log, "playlist")
-    pf_playlist = os.path.join(p_log, f"playlist_{ts_start}.csv")
-    pf_master_recording = os.path.join(p_log, f"master-recording.mid")
-    pf_system_recording = os.path.join(p_log, f"system-recording.mid")
-    pf_player_recording = os.path.join(p_log, f"player-recording.mid")
-    pf_schedule = os.path.join(p_log, f"schedule.mid")
-    if args.replay and params.initialization == "recording":
-        import shutil
-
-        shutil.move(params.kickstart_path, pf_player_recording)
-        console.log(
-            f"{tag} moved old recording to current folder '{pf_player_recording}'"
-        )
-    params.seeker.pf_recording = pf_player_recording
-
     if not os.path.exists(args.output):
         os.makedirs(args.output)
     if not os.path.exists(p_log):
@@ -51,6 +38,26 @@ def main(args, params):
             console.log(f"{tag} creating new logging folder at '{p_log}'")
         os.makedirs(p_log)
         os.makedirs(p_playlist)  # folder for copy of MIDI files
+
+    # specify recording files
+    pf_master_recording = os.path.join(p_log, f"master-recording.mid")
+    pf_system_recording = os.path.join(p_log, f"system-recording.mid")
+    pf_player_query = os.path.join(p_log, f"player-query.mid")
+    pf_player_accompaniment = os.path.join(p_log, f"player-accompaniment.mid")
+    pf_schedule = os.path.join(p_log, f"schedule.mid")
+
+    # copy old recording if replaying
+    if args.replay and params.initialization == "recording":
+        import shutil
+
+        shutil.copy2(params.kickstart_path, pf_player_query)
+        console.log(
+            f"{tag} moved old recording to current folder '{pf_player_query}'"
+        )
+    params.seeker.pf_recording = pf_player_query
+
+    # initialize playlist file
+    pf_playlist = os.path.join(p_log, f"playlist_{ts_start}.csv")
     write_log(pf_playlist, "position", "start time", "file path", "similarity")
     console.log(f"{tag} filesystem set up complete")
 
@@ -72,14 +79,14 @@ def main(args, params):
         args.bpm,
     )
     player = workers.Player(params.player, args.bpm, td_system_start)
-    recorder = workers.MidiRecorder(
+    midi_recorder = workers.MidiRecorder(
         params.recorder,
         args.bpm,
-        pf_player_recording,
+        pf_player_query,
     )
+    midi_stop_event = None
     audio_recorder = workers.AudioRecorder(params.audio, args.bpm, p_log)
     audio_stop_event = None
-    recorder_stop_event = None
 
     # data setup
     match params.initialization:
@@ -87,13 +94,15 @@ def main(args, params):
             if args.replay:  # use old recording
                 from pretty_midi import PrettyMIDI
 
-                ts_recording_len = PrettyMIDI(pf_player_recording).get_end_time()
+                ts_recording_len = PrettyMIDI(pf_player_query).get_end_time()
                 console.log(
                     f"{tag} calculated time of last recording {ts_recording_len}"
                 )
+                if ts_recording_len == 0:
+                    raise ValueError("no recording found")
             else:
-                ts_recording_len = recorder.manual_record()
-            pf_seed = pf_player_recording
+                ts_recording_len = midi_recorder.run()
+            pf_seed = pf_player_query
         case "kickstart":  # use specified file as seed
             try:
                 if params.kickstart_path:
@@ -110,14 +119,8 @@ def main(args, params):
             console.log(f"{tag} [cyan]RANDOM INIT[/cyan] - '{pf_seed}'")
 
     if params.seeker.mode == "playlist":
-        with open("data/matches.json", "r") as f:
-            seeker.playlist = json.load(f)
-        console.log(f"{tag} loaded playlist from 'data/matches.json'")
-        for i, (q, ms) in enumerate(seeker.playlist.items()):
-            if i == seeker.matches_pos:
-                pf_seed = os.path.join(seeker.p_dataset, f"{q}.mid")
-                console.log(f"{tag} added '{pf_seed}' to playlist from matches file")
-                continue
+        # TODO: implement playlist mode using generated csvs
+        raise NotImplementedError("playlist mode not implemented")
 
     seeker.played_files.append(pf_seed)
 
@@ -126,8 +129,8 @@ def main(args, params):
     td_start = datetime.now() + timedelta(
         seconds=RECORDING_START_DELAY if params.initialization == "recording" else 1
     )
-    ts_queue = 0
-    n_files = 1
+    ts_queue = 0  # time in queue in seconds
+    n_files = 1  # number of files played so far
 
     scheduler.td_start = td_start
 
@@ -135,6 +138,7 @@ def main(args, params):
     # TODO: fix ~1-beat delay in audio recording startup
     audio_stop_event = audio_recorder.start_recording(td_start)
 
+    # calculate first few transitions
     if scheduler.init_schedule(
         pf_schedule,
         ts_recording_len if params.initialization == "recording" else 0,
@@ -178,9 +182,9 @@ def main(args, params):
         thread_player.start()
 
         # start midi recording
-        recorder_stop_event = recorder.start_recording(td_start)
+        midi_stop_event = midi_recorder.start_recording(td_start)
         # connect recorder to player for velocity updates
-        player.set_recorder(recorder)
+        player.set_recorder(midi_recorder)
 
         # start metronome
         metronome = workers.Metronome(params.metronome, args.bpm, td_start)
@@ -191,7 +195,6 @@ def main(args, params):
         # TODO: move this to be managed by scheduler and track scheduler state instead
         while n_files < params.n_transitions:
             if q_playback.qsize() < params.n_min_queue_length:
-                # TODO: get first match sooner if using a recording
                 pf_next_file, similarity = seeker.get_next()
                 ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
                 console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
@@ -249,15 +252,15 @@ def main(args, params):
         audio_recorder.stop_recording()
 
     # Stop MIDI passive recording if its running
-    if recorder_stop_event is not None:
+    if midi_stop_event is not None:
         console.log(f"{tag} stopping MIDI recording")
-        recorder.stop_recording()
-        recorder.save_midi()
+        midi_recorder.stop_recording()
+        midi_recorder.save_midi(pf_player_accompaniment)
 
     # convert queue to midi
     _ = scheduler.queue_to_midi(pf_system_recording)
     _ = midi.combine_midi_files(
-        [pf_system_recording, pf_player_recording, pf_schedule], pf_master_recording
+        [pf_system_recording, pf_player_accompaniment, pf_schedule], pf_master_recording
     )
 
     # print playlist
@@ -294,7 +297,7 @@ if __name__ == "__main__":
     # load/build arguments and parameters
     parser = ArgumentParser(description="Argparser description")
     parser.add_argument(
-        "-d", "--dataset", type=str, default=None, help="name of dataset"
+        "-d", "--dataset", type=str, default=None, help="name of the dataset"
     )
     parser.add_argument(
         "--dataset_path", type=str, default=None, help="path to MIDI files"
@@ -304,7 +307,7 @@ if __name__ == "__main__":
         "--params",
         type=str,
         default=None,
-        help="name of parameter file (must be located at 'params/NAME.yaml')",
+        help="name of parameter file (must be located at 'params/[NAME].yaml')",
     )
     parser.add_argument(
         "-o",
@@ -321,11 +324,16 @@ if __name__ == "__main__":
         help="directory in which precomputed tables are stored",
     )
     parser.add_argument(
-        "-m",
         "--metric",
         type=str,
         default=None,
-        help="option to override metric in yaml file",
+        help="option to override seeker metric in yaml file",
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default=None,
+        help="option to override seeker mode in yaml file",
     )
     parser.add_argument(
         "-b",
@@ -348,10 +356,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
     params = OmegaConf.load(f"params/{args.params}.yaml")
 
+    # handle overrides
     if args.dataset_path == None:
         args.dataset_path = f"data/datasets/{args.dataset}/augmented"
     if args.tables == None:
         args.tables = f"data/tables/{args.dataset}"
+    if args.metric != None:
+        console.log(f"{tag} overriding seeker metric to '{args.metric}'")
+        params.seeker.metric = args.metric
+    if args.mode != None:
+        console.log(f"{tag} overriding seeker mode to '{args.mode}'")
+        params.seeker.mode = args.mode
 
     # copy these so that they only have to be specified once
     params.scheduler.n_beats_per_segment = params.n_beats_per_segment
@@ -368,6 +383,7 @@ if __name__ == "__main__":
         folders.sort()
         last_folder = folders[-1]
         console.log(f"{tag} last run is in folder '{last_folder}'")
+
         last_timestamp, _, _, last_initialization = last_folder.split("_")
         pf_last_playlist = os.path.join(
             args.output, last_folder, f"playlist_{last_timestamp}.csv"
@@ -396,6 +412,6 @@ if __name__ == "__main__":
         console.log(
             f"{tag} [red bold]ERROR[/red bold]: table directory not found, exiting..."
         )
-        exit()  # TODO: handle this better
+        raise FileNotFoundError("table directory not found")
 
     main(args, params)
