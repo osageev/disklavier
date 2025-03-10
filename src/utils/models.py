@@ -15,3 +15,25 @@ class Classifier(nn.Module):
 
     def forward(self, x):
         return self.network(x)
+
+    def get_hidden(self, x, layer_idx):
+        """
+        Get the output of a specific hidden layer.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+        layer_idx : int
+            Index of the hidden layer to get output from.
+
+        Returns
+        -------
+        torch.Tensor
+            Output from the specified hidden layer.
+        """
+        # process input through the network up to the specified layer
+        for i in range(layer_idx + 1):
+            x = self.network[i](x)
+
+        return x

@@ -51,10 +51,8 @@ def main(args, params):
         import shutil
 
         shutil.copy2(params.kickstart_path, pf_player_query)
-        console.log(
-            f"{tag} moved old recording to current folder '{pf_player_query}'"
-        )
-    params.seeker.pf_recording = pf_player_query
+        console.log(f"{tag} moved old recording to current folder '{pf_player_query}'")
+        params.seeker.pf_recording = pf_player_query
 
     # initialize playlist file
     pf_playlist = os.path.join(p_log, f"playlist_{ts_start}.csv")
@@ -72,11 +70,7 @@ def main(args, params):
         params.initialization == "recording",
     )
     seeker = workers.Seeker(
-        params.seeker,
-        args.tables,
-        args.dataset_path,
-        p_playlist,
-        args.bpm,
+        params.seeker, args.tables, args.dataset_path, p_playlist, args.bpm
     )
     player = workers.Player(params.player, args.bpm, td_system_start)
     midi_recorder = workers.MidiRecorder(

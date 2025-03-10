@@ -1,5 +1,5 @@
 import os
-import h5py
+import torch
 import faiss
 import numpy as np
 import pandas as pd
@@ -11,6 +11,7 @@ import networkx as nx
 
 from .worker import Worker
 from utils import basename, console, panther
+from utils.models import Classifier
 
 SUPPORTED_EXTENSIONS = (".mid", ".midi")
 EMBEDDING_SIZES = {
@@ -43,10 +44,11 @@ class Seeker(Worker):
     # force pitch match after finding next segment
     pitch_match = False
     # supported ml models for post-processing embeddings
+    model = None
     model_list = [
-        "clf_4note",
-        "clf_speed",
-        "clf_tpose",
+        "clf-4note",
+        "clf-speed",
+        "clf-tpose",
     ]
     # path tracking variables
     current_path = []
@@ -69,6 +71,7 @@ class Seeker(Worker):
         self.current_path = []
         self.current_path_position = 0
 
+        # TODO: stop doing this
         if hasattr(self.params, "pf_recording"):
             self.pf_recording = self.params.pf_recording
         if self.params.metric in self.model_list:
@@ -78,7 +81,9 @@ class Seeker(Worker):
             console.log(f"{self.tag} settings:\n{self.__dict__}")
 
         # load FAISS index
-        console.log(f"{self.tag} building FAISS index...")
+        console.log(
+            f"{self.tag} loading FAISS index from '{self.p_table}/{self.params.metric}.faiss'"
+        )
         self.filenames = sorted(
             [
                 basename(f)
@@ -185,39 +190,59 @@ class Seeker(Worker):
             )
 
         # load query embedding
-        if "player" in query_file:
+        # first, look in existing index
+        # then, if no embedding is found, calculate manually
+        try:
+            embedding = self.faiss_index.reconstruct(self.filenames.index(query_file))  # type: ignore
+        except ValueError as e:
+            if hasattr(self, "pf_recording"):
+                pf_new = self.pf_recording
+            else:
+                pf_new = self.played_files[-1]
+            console.log(
+                f"{self.tag}[yellow] unable to find embedding for '{query_file}', calculating manually from '{pf_new}'"
+            )
             match self.params.metric:
-                case "clamp" | "specdiff":
+                case "specdiff" | "clf-4note" | "clf-speed" | "clf-tpose":
                     console.log(
-                        f"{self.tag} getting [bold]{self.params.metric}[/bold] embedding for '{self.pf_recording}'"
+                        f"{self.tag} getting [italic bold]{self.params.metric}[/italic bold] embedding for '{pf_new}'"
                     )
-                    query_embedding = panther.calc_embedding(self.pf_recording)
+                    embedding = panther.calc_embedding(pf_new, model=self.params.metric)
                     console.log(
-                        f"{self.tag} got [bold]{self.params.metric}[/bold] embedding {query_embedding.shape}"
+                        f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
                     )
-                case _:
+
+                    if self.params.metric != "specdiff" and self.model is not None:
+                        console.log(
+                            f"{self.tag} applying {self.params.metric} model to embedding"
+                        )
+                        embedding = self.model.get_hidden(torch.from_numpy(embedding), 1).detach().numpy()
+                        console.log(
+                            f"{self.tag} got {self.params.metric} embedding {embedding.shape}"
+                        )
+                case "clamp":
+                    raise NotImplementedError("CLaMP model is not currently supported")
+                case "pitch-histogram":
                     if self.verbose:
-                        console.log(f"{self.tag} defaulting to pitch histogram metric")
-                    query_embedding = PrettyMIDI(
-                        self.pf_recording
-                    ).get_pitch_class_histogram(True, True)
-                    query_embedding = query_embedding.reshape(1, -1)
-                    console.log(f"{self.tag} {query_embedding}")
-        else:
-            try:
-                embedding = self.faiss_index.reconstruct(self.filenames.index(query_file))  # type: ignore
-            except ValueError as e:
-                console.log(
-                    f"{self.tag} [yellow] unable to find embedding for '{query_file}', calculating manually from '{self.played_files[-1]}'"
-                )
-                embedding = panther.calc_embedding(self.played_files[-1])
-                self.faiss_index.add(embedding)  # type: ignore
-                self.filenames.append(query_file)
-                console.log(f"{self.tag} added '{query_file}' to index")
-            query_embedding = np.array(
-                embedding,
-                dtype=np.float32,
-            ).reshape(1, -1)
+                        console.log(f"{self.tag} using pitch histogram metric")
+                    embedding = PrettyMIDI(self.pf_recording).get_pitch_class_histogram(
+                        True, True
+                    )
+                    embedding = embedding.reshape(1, -1)
+                    console.log(f"{self.tag} {embedding}")
+                case _:
+                    console.log(f"{self.tag} unsupported metric: {self.params.metric}")
+                    raise ValueError(
+                        f"{self.tag} unsupported metric: {self.params.metric}"
+                    )
+
+            self.faiss_index.add(embedding)  # type: ignore
+            self.filenames.append(query_file)
+            console.log(f"{self.tag} added '{query_file}' to index")
+        query_embedding = np.array(
+            embedding,
+            dtype=np.float32,
+        ).reshape(1, -1)
         # ensure that embedding is normalized
         # TODO: move embedding normalization to dataset generation
         query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
@@ -301,6 +326,7 @@ class Seeker(Worker):
         current_file = os.path.basename(self.played_files[-1])
 
         # transforms not needed
+        # TODO: panther breaks this
         if len(current_file.split("_")) > 2:
             track, segment, _ = current_file.split("_")
             current_file = f"{track}_{segment}.mid"
@@ -549,8 +575,6 @@ class Seeker(Worker):
         match self.params.metric:
             case "clamp":
                 raise NotImplementedError("CLaMP model is no longer supported")
-                import torch
-
                 if torch.cuda.is_available():
                     device = torch.device("cuda")
                     console.log(f"{self.tag} Using GPU {torch.cuda.get_device_name(0)}")
@@ -561,16 +585,16 @@ class Seeker(Worker):
                 if self.verbose:
                     console.log(f"{self.tag} Loaded model:\n{self.params.model.eval}")
                 self.params.model = self.params.model.to(device)  # type: ignore
-            case "cdl-4note" | "clf-speed" | "clf-tpose":
-                import torch
-                from utils.models import Classifier
-
+            case "clf-4note" | "clf-speed" | "clf-tpose":
                 clf = Classifier(768, [128], 120)
                 clf.load_state_dict(
                     torch.load(
-                        os.path.join("data", "models", self.params.metric + ".pth")
+                        os.path.join("data", "models", self.params.metric + ".pth"),
+                        weights_only=True,
+                        map_location=torch.device("cpu"),
                     )
                 )
+                clf.eval()
 
                 return clf
             case _:

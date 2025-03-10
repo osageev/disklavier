@@ -48,7 +48,8 @@ echo -e "\n\n## TODO List\n" >> "$TEMP_TODO_FILE"
 
 # Search for Python files while excluding ".venv" and ".vscode" directories.
 echo "Searching for Python files..."
-FILES=($(find . -type f -name "*.py" -not -path "*/.venv/*" -not -path "*/.vscode/*"))
+# FILES=($(find . -type f -name "*.py" -not -path "*/.venv/*" -not -path "*/.vscode/*"))
+mapfile -t FILES < <(find . -type f -name "*.py" -not -path "*/.venv/*" -not -path "*/.vscode/*")
 TOTAL_FILES=${#FILES[@]}
 echo "Found $TOTAL_FILES Python file(s)."
 

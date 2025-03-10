@@ -1,7 +1,7 @@
 n_beats_per_segment: 8
 n_transitions: 4
 n_min_queue_length: 50
-initialization: "kickstart" # kickstart random recording
+initialization: "random" # kickstart random recording
 kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid" # path to midi or matches.json
 scheduler:
   tag: "[green]schedl[/green]:"
@@ -12,7 +12,7 @@ seeker:
   verbose: True
   seed: 4
   mode: "best" # best easy repeat random sequential playlist graph
-  metric: "specdiff" # pitch-histogram clamp specdiff clf-tpose
+  metric: "clf-speed" # pitch-histogram specdiff clf-4note clf-speed clf-tpose
 player:
   tag: "[blue]player[/blue]:"
   verbose: False
@@ -30,3 +30,8 @@ recorder:
   tick_2: "data/Metronome.wav"
   midi_port: 'from Max 1'
   record: 67 # left pedal
+audio:
+  tag: "[#af005f]audio [/#af005f]:"
+  verbose: True
+  sample_rate: 44100
+  channels: 1
