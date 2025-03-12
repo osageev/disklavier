@@ -28,7 +28,7 @@ def main(args, params):
     # create session output directories
     p_log = os.path.join(
         args.output,
-        f"{ts_start}_{params.seeker.metric}_{params.seeker.seed}_{params.initialization}",
+        f"{ts_start}_{params.seeker.metric}_{params.initialization}_{params.seeker.seed}",
     )
     p_playlist = os.path.join(p_log, "playlist")
     if not os.path.exists(args.output):
@@ -152,10 +152,11 @@ def main(args, params):
             n_files,
             datetime.now().strftime("%y-%m-%d %H:%M:%S"),
             pf_seed,
-            0,
+            "----",
         )
 
-        # also preload first match
+        # preload first match
+        # TODO: check if this is necessary
         if params.initialization == "recording":
             pf_next_file, similarity = seeker.get_next()
             ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)

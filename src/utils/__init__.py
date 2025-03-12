@@ -36,20 +36,25 @@ def tick(
     return
 
 
-def extract_transformations(filename: str) -> tuple[str, dict[str, int]]:
+def get_transformations(filename: str) -> tuple[str, dict[str, int]]:
     """
     Parses the filename, strips out the transformation section, and returns the modified filename
     and the transformations as a dictionary. Transformations are formatted as `_t{transpose}s{shift}`,
     where `transpose` and `shift` are integers on the range [0, 11] and [0, 7], respectively.
-    They are both zero padded to two digits.
+    They are both zero padded to two digits. The function works with filenames both with and without
+    the .mid extension.
 
-    Args:
-        filename (str): The input filename with the transformation section.
+    Parameters
+    ----------
+    filename : str
+        The input filename with the transformation section, with or without .mid extension.
 
-    Returns:
-        tuple: A tuple containing the modified filename and the transformations dictionary.
+    Returns
+    -------
+    tuple
+        A tuple containing the modified filename and the transformations dictionary.
     """
-    pattern = r"_(t\d+s\d+)\.mid$"  # regex to match the transformation section
+    pattern = r"_(t\d+s\d+)(?:\.mid)?$"  # regex to match the transformation section, extension optional
     match = re.search(pattern, filename)
     if not match:
         raise ValueError(

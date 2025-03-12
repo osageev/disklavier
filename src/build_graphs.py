@@ -14,7 +14,7 @@ embeddings_file = f"data/tables/{dataset}/{metric}.h5"
 index_file = f"data/tables/{dataset}/{metric}.faiss"
 augmented_dir = f"data/datasets/{dataset}/augmented"
 graph_dir = f"data/datasets/{dataset}/graphs"
-top_k = 100
+top_k = 1000
 
 print("loading files")
 with h5py.File(embeddings_file, "r") as f:
@@ -36,7 +36,7 @@ for track, files in tqdm(grouped_files.items()):
     print(f"building graphs for track {track}")
 
     # extract embeddings for current group of files
-    emb_group = np.stack([df.loc[file, "embeddings"] for file in files])
+    emb_group = np.stack([df.loc[file, "embeddings"] for file in files])  # type: ignore
     # compute cosine similarity matrix (dot product works since embeddings are normalized)
     similarity = emb_group.dot(emb_group.T)
     # exclude self-similarity by setting the diagonal to -infinity
@@ -52,12 +52,12 @@ for track, files in tqdm(grouped_files.items()):
                 weight = 1 - similarity[i, j]
                 edges.append((files[i], files[j], float(weight)))
 
-    G = nx.Graph(name=track)
-    G.add_nodes_from(files)
-    G.add_weighted_edges_from(edges)
+    graph = nx.Graph(name=track)
+    graph.add_nodes_from(files)
+    graph.add_weighted_edges_from(edges)
 
     with open(f"{graph_dir}/{track}.json", "w") as f:
-        json.dump(nx.node_link_data(G), f)
-    del G
+        json.dump(nx.node_link_data(graph), f)
+    del graph
 
 print("DONE")

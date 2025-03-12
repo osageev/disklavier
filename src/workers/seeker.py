@@ -10,8 +10,9 @@ import json
 import networkx as nx
 
 from .worker import Worker
-from utils import basename, console, panther
+from utils import basename, console, panther, modes
 from utils.models import Classifier
+from utils.modes import find_path
 
 SUPPORTED_EXTENSIONS = (".mid", ".midi")
 EMBEDDING_SIZES = {
@@ -37,10 +38,10 @@ class Seeker(Worker):
     played_files: list[str] = []
     allow_multiple_plays = False
     # playlist mode position tracker
-    matches_pos = 0
+    matches_pos: int = 0
     # TODO: i forget what this does tbh, rewrite entire playlist mode
-    matches_mode = "cplx"
-    playlist = {}
+    matches_mode: str = "cplx"
+    playlist: dict[str, dict[str, list[tuple[str, float]]]] = {}
     # force pitch match after finding next segment
     pitch_match = False
     # supported ml models for post-processing embeddings
@@ -51,8 +52,11 @@ class Seeker(Worker):
         "clf-tpose",
     ]
     # path tracking variables
-    current_path = []
-    current_path_position = 0
+    current_path: list[tuple[str, float]] = []
+    path_position: int = 0
+    num_segs_diff_tracks: int = 5
+    # filename to index mapping
+    filename_to_index: dict[str, int] = {}
 
     def __init__(
         self,
@@ -67,10 +71,6 @@ class Seeker(Worker):
         self.p_dataset = dataset_path
         self.p_playlist = playlist_path
         self.rng = np.random.default_rng(self.params.seed)
-        # path tracking variables
-        self.current_path = []
-        self.current_path_position = 0
-
         # TODO: stop doing this
         if hasattr(self.params, "pf_recording"):
             self.pf_recording = self.params.pf_recording
@@ -90,6 +90,13 @@ class Seeker(Worker):
                 for f in os.listdir(self.p_dataset)
                 if f.endswith(SUPPORTED_EXTENSIONS)
             ]
+        )
+
+        # create a filename to index mapping for O(1) lookups
+        console.log(f"{self.tag} creating filename to index mapping")
+        self.filename_to_index = {name: idx for idx, name in enumerate(self.filenames)}
+        console.log(
+            f"{self.tag} created mapping with {len(self.filename_to_index)} entries"
         )
 
         self.faiss_index = faiss.read_index(
@@ -114,6 +121,14 @@ class Seeker(Worker):
         console.log(f"{self.tag} initialization complete")
 
     def get_next(self) -> tuple[str, float]:
+        """
+        Get the next segment to play, based on the current mode.
+
+        Returns
+        -------
+        tuple[str, float]
+            Path to MIDI file to play next, and similarity measure.
+        """
         similarity = 0.0
         match self.params.mode:
             case "best":
@@ -166,6 +181,9 @@ class Seeker(Worker):
         self.played_files.append(os.path.basename(next_file))
 
         full_path = os.path.join(self.p_dataset, next_file)
+        console.log(
+            f"{self.tag} returning file '{full_path}' with similarity {similarity:.05f}"
+        )
         return full_path, similarity
 
     def get_random(self) -> str:
@@ -193,8 +211,15 @@ class Seeker(Worker):
         # first, look in existing index
         # then, if no embedding is found, calculate manually
         try:
-            embedding = self.faiss_index.reconstruct(self.filenames.index(query_file))  # type: ignore
-        except ValueError as e:
+            # Use dictionary lookup instead of list.index() with fallback
+            try:
+                embedding = self.faiss_index.reconstruct(self.filename_to_index[query_file])  # type: ignore
+            except KeyError:
+                console.log(
+                    f"{self.tag} [yellow]Warning: '{query_file}' not found in filename_to_index, using list.index() fallback[/yellow]"
+                )
+                embedding = self.faiss_index.reconstruct(self.filenames.index(query_file))  # type: ignore
+        except (ValueError, KeyError) as e:
             if hasattr(self, "pf_recording"):
                 pf_new = self.pf_recording
             else:
@@ -216,7 +241,11 @@ class Seeker(Worker):
                         console.log(
                             f"{self.tag} applying {self.params.metric} model to embedding"
                         )
-                        embedding = self.model.get_hidden(torch.from_numpy(embedding), 1).detach().numpy()
+                        embedding = (
+                            self.model.get_hidden(torch.from_numpy(embedding), 1)
+                            .detach()
+                            .numpy()
+                        )
                         console.log(
                             f"{self.tag} got {self.params.metric} embedding {embedding.shape}"
                         )
@@ -236,8 +265,10 @@ class Seeker(Worker):
                         f"{self.tag} unsupported metric: {self.params.metric}"
                     )
 
+            # Add the new embedding to the index and update filenames list and dictionary
             self.faiss_index.add(embedding)  # type: ignore
             self.filenames.append(query_file)
+            self.filename_to_index[query_file] = len(self.filenames) - 1
             console.log(f"{self.tag} added '{query_file}' to index")
         query_embedding = np.array(
             embedding,
@@ -269,6 +300,7 @@ class Seeker(Worker):
             next_file = self._get_random()
         else:
             next_file = self._get_neighbor()
+        # TODO: fix this
         played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
         for idx, similarity in zip(indices, similarities):
             segment_name = str(self.filenames[idx])
@@ -358,24 +390,32 @@ class Seeker(Worker):
         Find the nearest segment with a different track using FAISS,
         load the relevant networkx graph, and plot the path.
 
-        TODO: move the initial build to before playback even starts. build the entire graph, then just update the path as segments are played.
-
         Returns
         -------
         tuple[str, float]
             The next segment in the path to play and its similarity value.
         """
-        if len(self.current_path) > 0:
-            next_file, next_sim = self.current_path[self.current_path_position]
-            self.current_path_position += 1
+
+        # path already calculated, progress along the path
+        if (
+            len(self.current_path) > 0
+            and self.path_position < len(self.current_path) - 1
+        ):
+            self.path_position += 1
+            next_file, next_sim = self.current_path[self.path_position]
+            console.log(
+                f"{self.tag} returning file [{self.path_position}/{len(self.current_path)}] '{next_file}' with similarity {next_sim:.05f}"
+            )
+            console.log(self.current_path)
             return next_file, next_sim
 
         seed_file = self.played_files[-1]
+        seed_key = basename(seed_file)
+        seed_track = seed_key.split("_")[0]
         console.log(f"{self.tag} using seed file '{seed_file}' for graph navigation")
-        seed_track = seed_file.split("_")[0]
-        seed_key = os.path.splitext(seed_file)[0]
-        e = [self.faiss_index.reconstruct(self.filenames.index(seed_key))]  # type: ignore
-        seed_embedding = np.array(e)
+
+        e = self.faiss_index.reconstruct(self.filename_to_index[seed_key])  # type: ignore
+        seed_embedding = np.array([e])
 
         # find nearest segments using FAISS
         console.log(
@@ -383,85 +423,145 @@ class Seeker(Worker):
         )
         similarities, indices = self.faiss_index.search(seed_embedding, 1000)  # type: ignore
 
-        # find top 10 nearest segments from different tracks
+        # find top whatever nearest segments from different tracks (one per track)
+        # TODO: alternate mode: find whatever segments from different tracks which have the highest similarities to segments from the same track as the seed file
         top_segments = []
+        seen_tracks = set()
+
+        # exclude the last three tracks we've played from consideration
+        # this way, played tracks CAN be revisited, but only after a few segments
+        for played_file in reversed(self.played_files[-3:]):
+            track = played_file.split("_")[0]
+            seen_tracks.add(track)
+
         for idx, similarity in zip(indices[0], similarities[0]):
             segment_name = str(self.filenames[idx])
             segment_track = segment_name.split("_")[0]
 
-            # Skip segments from the same track
-            if segment_track == seed_track:
+            if segment_track == seed_track or segment_track in seen_tracks:
                 continue
 
-            # Store segments from different tracks
             top_segments.append((segment_name, float(similarity)))
+            seen_tracks.add(segment_track)
 
-            # Only keep top 10
-            if len(top_segments) >= 10:
+            # only keep top whatever
+            if len(top_segments) >= self.num_segs_diff_tracks:
                 break
 
-        console.log(
-            f"{self.tag} found {len(top_segments)} nearest segments from different tracks"
-        )
+        for i, (target_segment, target_similarity) in enumerate(top_segments):
+            console.log(
+                f"{self.tag} target {i+1}/10: '{target_segment}' with similarity {target_similarity:.4f}"
+            )
 
         # load relevant graph files
+        # TODO: build this path programmatically
         graph_path = os.path.join(
             "data", "datasets", "20250110", "graphs", f"{seed_track}.json"
         )
         console.log(f"{self.tag} loading source graph from '{graph_path}'")
         with open(graph_path, "r") as f:
-            graph = nx.node_link_graph(json.load(f))
+            graph_json = json.load(f)
+
+        graph = nx.node_link_graph(graph_json)
 
         # Try each of the top segments until a path is found
         for i, (target_segment, target_similarity) in enumerate(top_segments):
             console.log(
-                f"{self.tag} trying target {i+1}/10: '{target_segment}' with similarity {target_similarity:.4f}"
+                f"{self.tag} finding path from '{seed_key}' to target {i+1}/10: '{target_segment}' with similarity {target_similarity:.4f}"
             )
 
             # add target node to graph if not already present
             if target_segment not in graph:
                 graph.add_node(target_segment)
-
-                # add edges connecting nodes to target segment
                 nodes = [node for node in graph.nodes() if node != target_segment]
-                node_indices = [self.filenames.index(node) for node in nodes]
-                node_embs = np.vstack([self.faiss_index.reconstruct(idx) for idx in node_indices])  # type: ignore
-                target_emb = self.faiss_index.reconstruct(self.filenames.index(target_segment))  # type: ignore
-                similarities = np.array([cosine(emb, target_emb) for emb in node_embs])
 
-                for node, sim in zip(nodes, similarities):
-                    graph.add_edge(node, target_segment, weight=1.0 - sim)
+                # get node embeddings
+                try:
+                    node_indices = [self.filename_to_index[node] for node in nodes]
+                except KeyError as e:
+                    # If a key is not found, add it to the mapping and log the error
+                    missing_node = str(e).strip("'")
+                    console.log(
+                        f"{self.tag} [yellow]Warning: Node '{missing_node}' not found in filename_to_index, rebuilding mapping[/yellow]"
+                    )
+                    # Rebuild the mapping
+                    self.filename_to_index = {
+                        name: idx for idx, name in enumerate(self.filenames)
+                    }
+                    # Try again with the updated mapping
+                    node_indices = [
+                        self.filename_to_index.get(node, self.filenames.index(node))
+                        for node in nodes
+                    ]
+                node_embs = np.vstack(
+                    [self.faiss_index.reconstruct(idx) for idx in node_indices]  # type: ignore
+                )
+
+                target_emb = self.faiss_index.reconstruct(self.filename_to_index[target_segment])  # type: ignore
+                weights = np.array([cosine(emb, target_emb) for emb in node_embs])
+                weighted_edges = [
+                    (n, target_segment, float(w)) for n, w in zip(nodes, weights)
+                ]
+                graph.add_weighted_edges_from(weighted_edges)
+            else:
+                console.log(
+                    f"{self.tag} [yellow]target '{target_segment}' already in graph???[/yellow]"
+                )
 
             # find shortest path
-            console.log(
-                f"{self.tag} finding path from '{seed_key}' to '{target_segment}'"
-            )
             try:
-                path = nx.shortest_path(
-                    graph, source=seed_key, target=target_segment, weight="weight"
-                )
+                res = find_path(
+                    graph, seed_key, target_segment, self.played_files, max_visits=1, allow_transpose=True, allow_shift=True)
+                if res:
+                    path, cost = res
+                    console.log(f"{self.tag} found path with cost {cost:.4f}")
+                    console.log(f"{self.tag} {path}")
+                else:
+                    console.log(f"{self.tag} no path found to target {i+1}/10")
+                    continue
 
-                # Store the path nodes and edge weights
                 edge_weights = []
                 for start_node, end_node in list(zip(path[:-1], path[1:])):
-                    edge_weights.append(1.0 - graph[start_node][end_node]["weight"])
+                    edge_weights.append(graph[start_node][end_node]["weight"])
+
+                if len(self.current_path) > 0:
+                    if self.current_path[-1][1] == -1.0:
+                        self.current_path[-1] = (
+                            self.current_path[-1][0],
+                            edge_weights[0],
+                        )
+
+                    path = path[1:]
+                    edge_weights = edge_weights[1:]
 
                 # Store path and weights in the class
-                self.current_path = list(zip(path, edge_weights))
-                self.current_path_position = 1
-                console.log(f"{self.tag} found path with {len(path)} nodes")
-                console.log(f"{self.tag} {'  -->  '.join(path)}")
-                console.log(
-                    f"{self.tag} {'  -->  '.join([str(w) for w in edge_weights])}"
+                self.current_path.extend(
+                    list(zip([p + ".mid" for p in path], edge_weights))
                 )
+                # add target node to the path with placeholder similarity of -1
+                target_file = target_segment + ".mid"
+                self.current_path.append((target_file, -1.0))
+                self.path_position += 1
+                if self.verbose:
+                    console.log(
+                        f"{self.tag} found path between '{seed_key}' and '{target_segment}' with {len(path)} nodes:"
+                    )
+                    for i, (node, sim) in enumerate(zip(path, edge_weights)):
+                        console.log(
+                            f"{self.tag}\t\t'{node}' --( {sim:.4f} )--> '{path[i+1]}'"
+                        )
 
-                console.log(
-                    f"{self.tag} next file in path: '{self.current_path[self.current_path_position][0]}' with similarity {self.current_path[self.current_path_position][1]:.4f}"
+                sim = float(
+                    1
+                    - cosine(
+                        self.faiss_index.reconstruct(self.filename_to_index[self.current_path[self.path_position][0][:-4]]),  # type: ignore
+                        self.faiss_index.reconstruct(self.filename_to_index[basename(self.played_files[-1])]),  # type: ignore
+                    )
                 )
 
                 return (
-                    self.current_path[self.current_path_position][0] + ".mid",
-                    self.current_path[self.current_path_position][1],
+                    self.current_path[self.path_position][0],
+                    sim,  # 1 - self.current_path[self.path_position][1],
                 )
 
             except nx.NetworkXNoPath:
@@ -478,9 +578,10 @@ class Seeker(Worker):
         return random_file, 0.0
 
     def _get_random(self) -> str:
-        console.log(
-            f"{self.tag} choosing randomly from '{self.p_dataset}':\n{[m for m in os.listdir(self.p_dataset)][:5]}"
-        )
+        if self.verbose:
+            console.log(
+                f"{self.tag} choosing randomly from '{self.p_dataset}':\n{[m for m in os.listdir(self.p_dataset)][:5]}"
+            )
         random_file = self.rng.choice(
             [m for m in os.listdir(self.p_dataset) if m.endswith(SUPPORTED_EXTENSIONS)],
             1,
