@@ -144,7 +144,10 @@ class Seeker(Worker):
             case "sequential":
                 next_file = self._get_neighbor()
             case "graph":
-                next_file, similarity = self._get_graph()
+                if "player" in self.played_files[-1]:
+                    next_file, similarity = self._get_best(hop=False)
+                else:
+                    next_file, similarity = self._get_graph()
             case "random" | "shuffle" | _:
                 next_file = self._get_random()
 
@@ -511,7 +514,14 @@ class Seeker(Worker):
             # find shortest path
             try:
                 res = find_path(
-                    graph, seed_key, target_segment, self.played_files, max_visits=1, allow_transpose=True, allow_shift=True)
+                    graph,
+                    seed_key,
+                    target_segment,
+                    self.played_files,
+                    max_visits=1,
+                    allow_transpose=True,
+                    allow_shift=True,
+                )
                 if res:
                     path, cost = res
                     console.log(f"{self.tag} found path with cost {cost:.4f}")

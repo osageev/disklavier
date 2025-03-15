@@ -1,7 +1,7 @@
 n_beats_per_segment: 8
-n_transitions: 8
+n_transitions: 12
 n_min_queue_length: 50
-initialization: "random" # kickstart random recording
+initialization: "recording" # kickstart random recording
 kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid" # path to midi or matches.json
 scheduler:
   tag: "[green]schedl[/green]:"
@@ -12,7 +12,7 @@ seeker:
   verbose: True
   seed: 456
   mode: "graph" # best easy repeat random sequential playlist graph
-  metric: "specdiff" # pitch-histogram specdiff clf-4note clf-speed clf-tpose
+  metric: "clf-4note" # pitch-histogram specdiff clf-4note clf-speed clf-tpose
 player:
   tag: "[blue]player[/blue]:"
   verbose: False

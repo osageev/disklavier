@@ -69,7 +69,7 @@ class Player(Worker):
             return True
 
     def adjust_playback_based_on_velocity(self):
-        if self._avg_velocity > 0:
+        if self._avg_velocity > 0 and self.verbose:
             console.log(
                 f"{self.tag} adjusting playback based on velocity: avg={self._avg_velocity:.2f}, min={self._min_velocity}, max={self._max_velocity}"
             )
@@ -89,19 +89,16 @@ class Player(Worker):
             Factor to scale message velocities.
         """
         # TODO: move this to class variables
-        # Define velocity ranges
-        min_expected_velocity = 30
-        max_expected_velocity = 110
+        min_expected_velocity = 10
+        max_expected_velocity = 100
+        min_adjustment = 0.1  # minimum adjustment factor
+        max_adjustment = 1.8  # maximum adjustment factor
 
-        # Define adjustment ranges
-        min_adjustment = 0.2  # for soft playing
-        max_adjustment = 1.5  # for hard playing
-
-        # Default for middle-range velocity
+        # default for middle-range velocity
         if self._avg_velocity == 0:
             return 1.0
 
-        # Calculate adjustment factor
+        # calculate adjustment factor
         normalized_velocity = (self._avg_velocity - min_expected_velocity) / (
             max_expected_velocity - min_expected_velocity
         )
@@ -110,6 +107,8 @@ class Player(Worker):
         adjustment_factor = min_adjustment + normalized_velocity * (
             max_adjustment - min_adjustment
         )
+
+        console.log(f"{self.tag} adjustment factor: {adjustment_factor:.2f}")
 
         return adjustment_factor
 
@@ -174,6 +173,7 @@ class Player(Worker):
                     max(1, int(original_velocity * self._velocity_adjustment_factor)),
                 )
 
+                # TODO: only print this once per adjustment
                 if adjusted_velocity != original_velocity and self.verbose:
                     console.log(
                         f"{self.tag} adjusting note velocity from {original_velocity} to {adjusted_velocity} (factor: {self._velocity_adjustment_factor:.2f})"
