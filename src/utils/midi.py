@@ -1,15 +1,82 @@
 import os
 import mido
+import numpy as np
 import pretty_midi
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from typing import Dict
+from typing import Dict, Tuple, List
 
 from . import basename, console
 
 TICKS_PER_BEAT = 220
+
+
+def get_bpm(file_path: str) -> int:
+    """
+    Extracts the bpm from a MIDI file. If there are multiple `set_tempo` messages,
+    the last one is used. A time signature of 4/4 is assumed.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the MIDI file.
+
+    Returns
+    -------
+    int
+        The BPM. Default is 120 BPM if not explicitly set.
+    """
+    try:
+        tempo = int(os.path.basename(file_path).split("-")[1])
+    except ValueError:
+        tempo = 120
+        midi_file = mido.MidiFile(file_path)
+        for track in midi_file.tracks:
+            for message in track:
+                if message.type == "set_tempo":
+                    tempo = mido.tempo2bpm(message.tempo)
+
+    return tempo
+
+
+def set_bpm(file_path: str, bpm: int) -> bool:
+    """
+    Sets the tempo of a MIDI file to a specified target tempo, provided as a bpm.
+
+    Parameters
+    ----------
+    file_path : str
+        The path to the MIDI file whose tempo is to be adjusted.
+    bpm : int
+        The target tempo in beats per minute (BPM) to set for the MIDI file.
+
+    Returns
+    -------
+    bool
+        True if the tempo was successfully set and matches the target bpm, False otherwise.
+    """
+    midi = mido.MidiFile(file_path)
+
+    # remove existing set_tempo messages from all tracks
+    for track in midi.tracks:
+        tempo_indices = []
+        for i, msg in enumerate(track):
+            if msg.type == "set_tempo":
+                tempo_indices.append(i)
+
+        # remove in reverse order to avoid index shifting
+        for index in sorted(tempo_indices, reverse=True):
+            del track[index]
+
+    # insert new tempo message at the beginning of the first track
+    midi.tracks[0].insert(
+        0, mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(bpm), time=0)
+    )
+    midi.save(file_path)
+
+    return get_bpm(file_path) == bpm
 
 
 def change_tempo(in_path: str, out_path: str, tempo: int):
@@ -45,16 +112,17 @@ def change_tempo(in_path: str, out_path: str, tempo: int):
 def transform(
     file_path: str, out_dir: str, bpm: int, transformations: Dict, num_beats: int = 8
 ) -> str:
-    f_output = f"{Path(file_path).stem}_t{transformations["transpose"]:02d}s{transformations["shift"]:02d}.mid"
-    pf_out = os.path.join(out_dir, f_output)
-    mido.MidiFile(file_path).save(pf_out)  # in case transpose is 0
-
+    new_filename = f"{Path(file_path).stem}_t{transformations["transpose"]:02d}s{transformations["shift"]:02d}"
+    out_path = os.path.join(out_dir, f"{new_filename}.mid")
+    mido.MidiFile(file_path).save(out_path)  # in case transpose is 0
     if transformations["transpose"] != 0:
-        midi_transformed = pretty_midi.PrettyMIDI(initial_tempo=bpm)
-        for instrument in pretty_midi.PrettyMIDI(pf_out).instruments:
+        t_midi = pretty_midi.PrettyMIDI(initial_tempo=bpm)
+
+        for instrument in pretty_midi.PrettyMIDI(out_path).instruments:
             transposed_instrument = pretty_midi.Instrument(
-                program=instrument.program, name=f_output[:-4]
+                program=instrument.program, name=new_filename
             )
+
             for note in instrument.notes:
                 transposed_instrument.notes.append(
                     pretty_midi.Note(
@@ -64,18 +132,20 @@ def transform(
                         end=note.end,
                     )
                 )
-            midi_transformed.instruments.append(transposed_instrument)
-        midi_transformed.write(pf_out)
+
+            t_midi.instruments.append(transposed_instrument)
+
+        t_midi.write(out_path)
 
     if transformations["shift"] != 0:
-        midi_shifted = pretty_midi.PrettyMIDI(initial_tempo=bpm)
+        midi_pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
         seconds_per_beat = 60 / bpm
         shift_seconds = transformations["shift"] * seconds_per_beat
         loop_point = (num_beats + 1) * seconds_per_beat
 
-        for instrument in pretty_midi.PrettyMIDI(pf_out).instruments:
+        for instrument in pretty_midi.PrettyMIDI(out_path).instruments:
             shifted_instrument = pretty_midi.Instrument(
-                program=instrument.program, name=f_output[:-4]
+                program=instrument.program, name=new_filename
             )
             for note in instrument.notes:
                 dur = note.end - note.start
@@ -95,13 +165,13 @@ def transform(
                     )
                 )
 
-            midi_shifted.instruments.append(shifted_instrument)
+            midi_pm.instruments.append(shifted_instrument)
 
-        midi_shifted.write(pf_out)
+        midi_pm.write(out_path)
 
-    change_tempo(pf_out, pf_out, bpm)
+    set_bpm(out_path, bpm)
 
-    return pf_out
+    return out_path
 
 
 def csv_to_midi(csv_path: str, midi_output_path: str, verbose: bool = False) -> bool:
@@ -288,3 +358,144 @@ def generate_piano_roll(midi_path, output_path=None, figsize=(12, 8), dpi=100):
     except Exception as e:
         console.log(f"\t[red]error generating piano roll: {e}[/red]")
         return None
+
+
+def get_note_min_max(input_file_path) -> Tuple[int, int]:
+    """
+    Returns the values of the highest and lowest notes in a MIDI file.
+
+    Parameters
+    ----------
+    input_file_path : str
+        Path to the MIDI file.
+
+    Returns
+    -------
+    Tuple[int, int]
+        The lowest and highest notes in the MIDI file.
+    """
+    mid = mido.MidiFile(input_file_path)
+    lowest_note = 127
+    highest_note = 0
+
+    for track in mid.tracks:
+        for msg in track:
+            if not msg.is_meta and msg.type in ["note_on", "note_off"]:
+                if msg.velocity > 0:
+                    lowest_note = min(lowest_note, msg.note)
+                    highest_note = max(highest_note, msg.note)
+
+    return (lowest_note, highest_note)
+
+
+def trim_piano_roll(piano_roll, min=None, max=None):
+    """
+    Trims the piano roll by removing rows above the highest note and below the
+    lowest note.
+
+    Parameters:
+        piano_roll (np.array): A 2D NumPy array representing the piano roll.
+        min (int): The note to remove everything below. If none is provided, the
+        lowest note in the roll will be used
+        max (int): The note to remove everything above. If none is provided, the
+        highest note in the roll will be used
+
+    Returns:
+        np.array: The trimmed piano roll.
+    """
+    non_zero_rows = np.where(np.any(piano_roll > 0, axis=1))[0]
+
+    if non_zero_rows.size == 0:
+        return piano_roll
+
+    lowest_note = non_zero_rows.min() if min is None else min
+    highest_note = non_zero_rows.max() if max is None else max
+
+    trimmed_piano_roll = piano_roll[lowest_note : highest_note + 1, :]
+
+    return trimmed_piano_roll
+
+
+def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) -> None:
+    """
+    Transposes all the notes in a MIDI file by a specified number of semitones.
+
+    Parameters
+    ----------
+    input_file_path : str
+        Path to the input MIDI file.
+    output_file_path : str
+        Path where the transposed MIDI file will be saved.
+    semitones : int
+        Number of semitones to transpose the notes. Positive for up, negative for down.
+    """
+
+    midi = pretty_midi.PrettyMIDI(input_file_path)
+    for instrument in midi.instruments:
+        if not instrument.is_drum:
+            for note in instrument.notes:
+                note.pitch += semitones
+    midi.write(output_file_path)
+
+
+def semitone_transpose(
+    midi_path: str, output_dir: str, num_iterations: int = 1
+) -> List[str]:
+    """
+    Vertically shift a matrix
+    chatgpt
+
+    Parameters
+    ----------
+    midi_path : str
+        Path to the MIDI file.
+    output_dir : str
+        Path to the output directory.
+    num_iterations : int
+        Number of iterations to perform.
+
+    Returns
+    -------
+    List[str]
+        List of paths to the transposed MIDI files.
+    """
+    new_filename = Path(midi_path).stem.split("_")
+    new_filename = f"{new_filename[0]}_{new_filename[1]}"
+    lowest_note, highest_note = get_note_min_max(midi_path)
+    max_up = 108 - highest_note
+    max_down = lowest_note
+
+    # zipper up & down
+    up = 1
+    down = -1
+    new_files = []
+    for i in range(num_iterations):
+        up_filename = f"{new_filename}_u{up:02d}.mid"
+        up_filepath = os.path.join(output_dir, up_filename)
+        down_filename = f"{new_filename}_d{abs(down):02d}.mid"
+        down_filepath = os.path.join(output_dir, down_filename)
+
+        if i % 2 == 0:
+            if (
+                up > max_up
+            ):  # If exceeding max_up, adjust by switching to down immediately
+                transpose_midi(midi_path, down_filepath, down)
+                new_files.append(down_filepath)
+                down -= 1
+            else:
+                transpose_midi(midi_path, up_filepath, up)
+                new_files.append(up_filepath)
+                up += 1
+        else:
+            if (
+                abs(down) > max_down
+            ):  # If exceeding max_down, adjust by switching to up immediately
+                transpose_midi(midi_path, up_filepath, up)
+                new_files.append(up_filepath)
+                up += 1
+            else:
+                transpose_midi(midi_path, down_filepath, down)
+                new_files.append(down_filepath)
+                down -= 1
+
+    return new_files

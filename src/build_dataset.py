@@ -1,14 +1,12 @@
 import os
-import csv
-import uuid
 import zipfile
 from shutil import copy2
 from argparse import ArgumentParser
 import mido
 import pretty_midi
 from itertools import product
+from matplotlib import pyplot as plt
 import numpy as np
-from pathlib import Path
 from rich.progress import (
     Progress,
     SpinnerColumn,
@@ -17,238 +15,28 @@ from rich.progress import (
 )
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from utils import console
+from utils import basename, console
+from utils.midi import get_bpm, set_bpm, transform, trim_piano_roll
+from utils.novelty import gen_ssm_and_novelty
+from typing import List
 
-from typing import Dict, Tuple, List
-
-
-def generate_unique_uuid(pf_uuid_map: str, pf_file: str) -> str:
-    """Generates a unique UUID for the track, ensuring it doesn't already exist in the CSV file."""
-    existing_uuids = set()
-    if os.path.exists(pf_uuid_map):
-        with open(pf_uuid_map, "r") as file:
-            reader = csv.DictReader(file)
-            existing_uuids = {row["uuid"] for row in reader}
-
-    while True:
-        track_uuid = str(uuid.uuid3(uuid.NAMESPACE_URL, pf_file)).split("-")[0]
-        if track_uuid not in existing_uuids:
-            return track_uuid
+plt.style.use("dark_background")
 
 
-def get_bpm(file_path: str) -> int:
-    """
-    Extracts the bpm from a MIDI file.
-
-    Args:
-        file_path (str): Path to the MIDI file.
-
-    Returns:
-        int: The BPM. Default is 120 BPM if not explicitly set.
-    """
-    try:
-        tempo = int(os.path.basename(file_path).split("-")[1])
-    except ValueError:
-        tempo = 120
-        midi_file = mido.MidiFile(file_path)
-        for track in midi_file.tracks:
-            for message in track:
-                if message.type == "set_tempo":
-                    tempo = mido.tempo2bpm(message.tempo)
-
-    return tempo
-
-
-def set_bpm(input_file_path: str, bpm: int) -> None:
-    """Sets the tempo of a MIDI file to a specified target tempo, provided as a bpm.
-
-    Args:
-        input_file_path (str): The path to the MIDI file whose tempo is to be adjusted.
-        bpm (int): The target tempo in beats per minute (BPM) to set for the MIDI file.
-
-    This function modifies the specified MIDI file by inserting a tempo change meta-message at the beginning of the first track, effectively setting the entire file to the specified tempo. The change is saved to the same file path, overwriting the original MIDI file.
-    """
-    midi = mido.MidiFile(input_file_path)
-    midi.tracks[0].insert(
-        0, mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(bpm), time=0)
-    )
-    midi.save(input_file_path)
-
-
-def change_tempo(in_path: str, out_path: str, bpm: int):
-    midi = mido.MidiFile(in_path)
-    new_message = mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(bpm), time=0)
-    tempo_added = False
-
-    for i, track in enumerate(midi.tracks):
-        # remove existing set_tempo messages
-        tempo_messages = []
-        for j, msg in enumerate(track):
-            if msg.type == "set_tempo":
-                tempo_messages.append(j)
-
-        for index in tempo_messages:
-            midi.tracks[i][index] = new_message
-
-        # add new set_tempo message to the first track
-        if not tempo_added:
-            track.insert(0, new_message)
-            tempo_added = True
-
-    # if no tracks had a set_tempo message and no new one was added, add a new track with the tempo message
-    if not tempo_added:
-        new_track = mido.MidiTrack()
-        new_track.append(new_message)
-        midi.tracks.append(new_track)
-
-    midi.save(out_path)
-
-
-def semitone_transpose(
-    midi_path: str, output_dir: str, num_iterations: int = 1
-) -> List[str]:
-    """vertically shift a matrix
-    chatgpt
-    """
-    new_filename = Path(midi_path).stem.split("_")
-    new_filename = f"{new_filename[0]}_{new_filename[1]}"
-    lowest_note, highest_note = get_note_min_max(midi_path)
-    max_up = 108 - highest_note  # TODO double-check this IRL
-    max_down = lowest_note
-
-    # zipper up & down
-    up = 1
-    down = -1
-    new_files = []
-    for i in range(num_iterations):
-        up_filename = f"{new_filename}_u{up:02d}.mid"
-        up_filepath = os.path.join(output_dir, up_filename)
-        down_filename = f"{new_filename}_d{abs(down):02d}.mid"
-        down_filepath = os.path.join(output_dir, down_filename)
-
-        if i % 2 == 0:
-            if (
-                up > max_up
-            ):  # If exceeding max_up, adjust by switching to down immediately
-                transpose_midi(midi_path, down_filepath, down)
-                new_files.append(down_filepath)
-                down -= 1
-            else:
-                transpose_midi(midi_path, up_filepath, up)
-                new_files.append(up_filepath)
-                up += 1
-        else:
-            if (
-                abs(down) > max_down
-            ):  # If exceeding max_down, adjust by switching to up immediately
-                transpose_midi(midi_path, up_filepath, up)
-                new_files.append(up_filepath)
-                up += 1
-            else:
-                transpose_midi(midi_path, down_filepath, down)
-                new_files.append(down_filepath)
-                down -= 1
-
-    return new_files
-
-
-def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) -> None:
-    """
-    Transposes all the notes in a MIDI file by a specified number of semitones.
-
-    Args:
-    - input_file_path: Path to the input MIDI file.
-    - output_file_path: Path where the transposed MIDI file will be saved.
-    - semitones: Number of semitones to transpose the notes. Positive for up, negative for down.
-    """
-
-    midi = pretty_midi.PrettyMIDI(input_file_path)
-    for instrument in midi.instruments:
-        if not instrument.is_drum:
-            for note in instrument.notes:
-                note.pitch += semitones
-    midi.write(output_file_path)
-
-
-def get_note_min_max(input_file_path) -> Tuple[int, int]:
-    """returns the values of the highest and lowest notes in a midi file"""
-    mid = mido.MidiFile(input_file_path)
-    lowest_note = 127
-    highest_note = 0
-
-    for track in mid.tracks:
-        for msg in track:
-            if not msg.is_meta and msg.type in ["note_on", "note_off"]:
-                if msg.velocity > 0:
-                    lowest_note = min(lowest_note, msg.note)
-                    highest_note = max(highest_note, msg.note)
-
-    return (lowest_note, highest_note)
-
-
-def transform(
-    file_path: str, out_dir: str, bpm: int, transformations: Dict, num_beats: int = 8
-) -> str:
-    new_filename = f"{Path(file_path).stem}_t{transformations["transpose"]:02d}s{transformations["shift"]:02d}"
-    out_path = os.path.join(out_dir, f"{new_filename}.mid")
-    mido.MidiFile(file_path).save(out_path)  # in case transpose is 0
-    if transformations["transpose"] != 0:
-        t_midi = pretty_midi.PrettyMIDI(initial_tempo=bpm)
-
-        for instrument in pretty_midi.PrettyMIDI(out_path).instruments:
-            transposed_instrument = pretty_midi.Instrument(
-                program=instrument.program, name=new_filename
-            )
-
-            for note in instrument.notes:
-                transposed_instrument.notes.append(
-                    pretty_midi.Note(
-                        velocity=note.velocity,
-                        pitch=note.pitch + int(transformations["transpose"]),
-                        start=note.start,
-                        end=note.end,
-                    )
-                )
-
-            t_midi.instruments.append(transposed_instrument)
-
-        t_midi.write(out_path)
-
-    if transformations["shift"] != 0:
-        midi_pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
-        seconds_per_beat = 60 / bpm
-        shift_seconds = transformations["shift"] * seconds_per_beat
-        loop_point = (num_beats + 1) * seconds_per_beat
-
-        for instrument in pretty_midi.PrettyMIDI(out_path).instruments:
-            shifted_instrument = pretty_midi.Instrument(
-                program=instrument.program, name=new_filename
-            )
-            for note in instrument.notes:
-                dur = note.end - note.start
-                shifted_start = (note.start + shift_seconds) % loop_point
-                shifted_end = shifted_start + dur
-
-                if note.start + shift_seconds >= loop_point:
-                    shifted_start += seconds_per_beat
-                    shifted_end += seconds_per_beat
-
-                shifted_instrument.notes.append(
-                    pretty_midi.Note(
-                        velocity=note.velocity,
-                        pitch=note.pitch,
-                        start=shifted_start,
-                        end=shifted_end,
-                    )
-                )
-
-            midi_pm.instruments.append(shifted_instrument)
-
-        midi_pm.write(out_path)
-
-    change_tempo(out_path, out_path, bpm)
-
-    return out_path
+class SegmentOptions:
+    def __init__(
+        self,
+        num_beats: int,
+        metronome: bool,
+        drop_last: bool,
+        novelty: bool,
+        pic_dir: str,
+    ):
+        self.num_beats = num_beats
+        self.metronome = metronome
+        self.drop_last = drop_last
+        self.novelty = novelty
+        self.pic_dir = pic_dir
 
 
 def augment_midi(
@@ -279,10 +67,27 @@ def augment_midi(
 
 def segment_midi(
     midi_file_path: str,
-    file_uuid: str,
     output_dir: str,
-    num_beats: int = 8,
+    options: SegmentOptions,
 ) -> List[str]:
+    """
+    Break a MIDI file into segments.
+
+    Parameters
+    ----------
+    midi_file_path : str
+        path to the midi file to segment
+    output_dir : str
+        path to the directory to save the segmented files
+    options : SegmentOptions
+        options for the segmentation
+
+    Returns
+    -------
+    List[str]
+        list of paths to the segmented files
+    """
+    trackname = basename(midi_file_path)
     # preserve tempo across all segments
     target_bpm = get_bpm(midi_file_path)
     set_bpm(midi_file_path, target_bpm)
@@ -290,18 +95,51 @@ def segment_midi(
     # calculate times and stuff
     midi_pm = pretty_midi.PrettyMIDI(midi_file_path)
     total_file_length_s = midi_pm.get_end_time()
-    segment_length_s = num_beats * 60 / target_bpm
+    segment_length_s = options.num_beats * 60 / target_bpm
     n_segments = int(np.round(total_file_length_s / segment_length_s))
     pre_beat_window_s = (
-        segment_length_s / num_beats / 8
-    )  # to capture when first note is a bit early
+        segment_length_s / options.num_beats / 8
+    )  # capture when first note is a bit early
 
-    # console.log(
-    #     f"\tbreaking '{filename}' ({total_file_length_s:.03f} s at {target_tempo} bpm) into {n_segments:03d} segments of {segment_length_s:.03f}s\n\t(pre window is {pre_beat_window_s:.03f} s)"
-    # )
+    if options.novelty:
+        piano_roll = midi_pm.get_piano_roll()
+        ssm, novelty = gen_ssm_and_novelty(midi_file_path)
+        # save novelty curve
+        plt.figure(figsize=(16, 4))
+        plt.imshow(
+            trim_piano_roll(piano_roll),
+            aspect="auto",
+            origin="lower",
+            cmap="magma",
+            interpolation="nearest",
+        )
+        plt.plot(
+            (1 - novelty / novelty.max()) * 17,
+            "g",
+            linewidth=1.0,
+            alpha=0.7,
+        )
+        plt.axis("off")
+        plt.savefig(
+            os.path.join(options.pic_dir, f"{basename(midi_file_path)}_novelty.png")
+        )
+        plt.close()
+
+        # save ssm
+        plt.figure(figsize=(16, 16))
+        plt.imshow(ssm / ssm.max(), cmap="magma")
+        plt.axis("off")
+        plt.savefig(
+            os.path.join(options.pic_dir, f"{basename(midi_file_path)}_ssm.png")
+        )
+        plt.close()
+
+    console.log(
+        f"\tbreaking '{trackname}' ({total_file_length_s:.03f} s at {target_bpm} bpm) into {n_segments:03d} segments of {segment_length_s:.03f} s\n\t(pre window is {pre_beat_window_s:.03f} s)"
+    )
 
     new_files = []
-    for n in list(range(n_segments)):
+    for n in list(range(n_segments - (1 if options.drop_last else 0))):
         start = n * segment_length_s
         end = start + segment_length_s - pre_beat_window_s
         if n > 0:
@@ -312,7 +150,7 @@ def segment_midi(
         segment_midi = pretty_midi.PrettyMIDI(initial_tempo=target_bpm)
         instrument = pretty_midi.Instrument(
             program=midi_pm.instruments[0].program,
-            name=f"{file_uuid}_{int(start):04d}-{int(end):04d}",
+            name=f"{trackname}_{int(start):04d}-{int(end):04d}",
         )
 
         # add notes from the original MIDI that fall within the current segment
@@ -334,12 +172,22 @@ def segment_midi(
 
         # write out
         segment_filename = os.path.join(
-            output_dir, f"{file_uuid}_{int(start):04d}-{int(end):04d}.mid"
+            output_dir, f"{trackname}_{int(start):04d}-{int(end):04d}.mid"
         )
 
         segment_midi.instruments.append(instrument)
         segment_midi.write(segment_filename)
         set_bpm(segment_filename, target_bpm)
+        if options.metronome:
+            add_metronome(segment_filename, options.num_beats)
+        if options.novelty:
+            add_novelty(
+                segment_filename,
+                novelty,
+                options.num_beats,
+                (start, end),
+                options.pic_dir,
+            )
         modify_end_of_track(segment_filename, segment_length_s, target_bpm)
 
         new_files.append(segment_filename)
@@ -347,11 +195,134 @@ def segment_midi(
     return new_files
 
 
+def add_metronome(midi_file_path: str, num_beats: int) -> None:
+    """
+    adds a clave on each beat of the segment.
+
+    Parameters
+    ----------
+    midi_file_path : str
+        path to the midi file.
+    num_beats : int
+        number of beats in the segment.
+
+    Returns
+    -------
+    None
+    """
+    midi = mido.MidiFile(midi_file_path)
+
+    # create a new track for the clave
+    clave_track = mido.MidiTrack()
+    clave_track.append(mido.MetaMessage("track_name", name="metronome", time=0))
+
+    # add clave notes on each beat
+    # +1 because we want to include the last beat
+    for beat in range(num_beats + 1):
+        time_ticks = midi.ticks_per_beat - midi.ticks_per_beat // 8 if beat > 0 else 0
+        clave_track.append(
+            mido.Message("note_on", note=76, velocity=100, time=time_ticks, channel=9)
+        )
+
+        # note off - make it short (1/8 of a beat)
+        clave_track.append(
+            mido.Message(
+                "note_off",
+                note=76,
+                velocity=0,
+                time=midi.ticks_per_beat // 8,
+                channel=9,
+            )
+        )
+
+    clave_track.append(mido.MetaMessage("end_of_track", time=0))
+    midi.tracks.append(clave_track)
+    midi.save(midi_file_path)
+
+
+def add_novelty(
+    midi_file_path: str,
+    novelty: np.ndarray,
+    num_beats: int,
+    times: tuple[float, float],
+    pic_dir: str,
+) -> None:
+    """
+    Adds a novelty track to the MIDI file.
+    TODO: properly convert time from PR to ticks (100 -> 220 and only log every 16th note?)
+            i dunno but do this carefully and check
+
+    Parameters
+    ----------
+    midi_file_path : str
+        Path to the MIDI file.
+    novelty : np.ndarray
+        The novelty curve.
+    num_beats : int
+        The number of beats in the segment.
+    times : tuple[float, float]
+        The start and end times of the segment.
+    pic_dir : str
+        The directory to save the novelty curve.
+    """
+    midi = mido.MidiFile(midi_file_path)
+    piano_roll = pretty_midi.PrettyMIDI(midi_file_path).get_piano_roll()
+    novelty_track = mido.MidiTrack()
+    novelty_track.append(mido.MetaMessage("track_name", name="novelty", time=0))
+
+    # find the index of the start and end times in the novelty curve
+    start_index = int(times[0] * 100)
+    end_index = int(times[1] * 100)
+    novelty = novelty[start_index:end_index]
+
+    # add the novelty curve to the track
+    n_msgs = [
+        mido.MetaMessage("text", text=f"{n:.03f}", time=i)
+        for i, n in enumerate(novelty)
+    ]
+    novelty_track.extend(n_msgs)
+
+    novelty_track.append(mido.MetaMessage("end_of_track", time=0))
+    midi.tracks.append(novelty_track)
+    midi.save(midi_file_path)
+
+    # save novelty curve
+    plt.figure(figsize=(8, 4))
+    plt.imshow(
+        trim_piano_roll(piano_roll),
+        aspect="auto",
+        origin="lower",
+        cmap="magma",
+        interpolation="nearest",
+    )
+    plt.plot(
+        (1 - novelty / novelty.max()) * 17,
+        "g",
+        linewidth=1.0,
+        alpha=0.7,
+    )
+    plt.axis("off")
+    plt.savefig(os.path.join(pic_dir, f"{basename(midi_file_path)}_novelty.png"))
+    plt.close()
+
+
 def modify_end_of_track(midi_file_path: str, new_end_time: float, bpm: int) -> None:
+    """
+    Modifies the 'end_of_track' message in a MIDI file to match the new end time.
+
+    Parameters
+    ----------
+    midi_file_path : str
+        Path to the MIDI file.
+    new_end_time : float
+        The new end time.
+    bpm : int
+        The BPM of the MIDI file.
+    """
     midi = mido.MidiFile(midi_file_path)
     new_end_time_t = mido.second2tick(new_end_time, 220, mido.bpm2tempo(bpm))
 
-    for i, track in enumerate(midi.tracks):
+    for _, track in enumerate(midi.tracks):
         total_time_t = 0
         # Remove existing 'end_of_track' messages and calculate last note time
         for msg in track:
@@ -368,12 +339,16 @@ def modify_end_of_track(midi_file_path: str, new_end_time: float, bpm: int) -> N
                 track.append(mido.MetaMessage("end_of_track", time=offset))
 
     # Save the modified MIDI file
-    os.remove(midi_file_path)
     midi.save(midi_file_path)
 
 
 def process_files(
-    pf_files: List[str], pf_uuid_map: str, p_segments: str, p_augments: str, index: int
+    args,
+    pf_files: List[str],
+    p_segments: str,
+    p_augments: str,
+    p_pictures: str,
+    index: int,
 ) -> int:
     p = Progress(
         SpinnerColumn(),
@@ -384,34 +359,30 @@ def process_files(
     )
     task_s = p.add_task(f"[SUBR{index:02d}] segmenting", total=len(pf_files))
 
+    seg_opts = SegmentOptions(
+        num_beats=args.num_beats,
+        metronome=args.clave,
+        drop_last=args.drop_last,
+        novelty=args.novelty,
+        pic_dir=p_pictures,
+    )
+
     # segment files
     segment_paths = []
     augment_paths = []
     with p:
         for pf_file in pf_files:
-            # generate UUID for track and only use first part to keep filenames short
-            track_uuid = generate_unique_uuid(pf_uuid_map, pf_file)
-            with open(pf_uuid_map, "a", newline="") as file:
-                writer = csv.writer(file)
-                writer.writerow([os.path.basename(pf_file), track_uuid])
-
-            # make folders to hold track segments and augments
-            p_track_segments = os.path.join(p_segments, track_uuid)
-            os.mkdir(p_track_segments)
-            p_track_augments = os.path.join(p_augments, track_uuid)
-            os.mkdir(p_track_augments)
-
             # segment
             if args.segment:
                 new_segments = segment_midi(
                     os.path.join(args.data_dir, pf_file),
-                    track_uuid,
-                    p_track_segments,
+                    p_segments,
+                    seg_opts,
                 )
             else:
                 copy2(
                     os.path.join(args.data_dir, pf_file),
-                    os.path.join(p_track_segments, pf_file),
+                    os.path.join(p_segments, pf_file),
                 )
                 new_segments = [os.path.join(args.data_dir, pf_file)]
             segment_paths.extend(new_segments)
@@ -420,7 +391,7 @@ def process_files(
             if args.augment:
                 augment_paths.extend(
                     augment_midi(
-                        p, os.path.splitext(pf_file)[0], new_segments, p_track_augments
+                        p, os.path.splitext(pf_file)[0], new_segments, p_augments
                     )
                 )
 
@@ -436,13 +407,11 @@ def main(args):
 
     p_segments = os.path.join(args.out_dir, "segmented")
     p_augments = os.path.join(args.out_dir, "augmented")
-    pf_uuid_map = os.path.join(args.out_dir, "uuid_map.csv")
-    with open(pf_uuid_map, "w") as file:
-        file.write("track,uuid\n")
+    p_pictures = os.path.join(args.out_dir, "pictures")
 
-    for dir in [p_segments, p_augments]:
+    for dir in [p_segments, p_augments, p_pictures]:
         if not os.path.exists(dir):
-            os.mkdir(dir)
+            os.makedirs(dir)
             console.log(f"created new folder: '{dir}'")
 
     tracks = []
@@ -451,6 +420,7 @@ def main(args):
             if filename.endswith(".mid") or filename.endswith(".midi"):
                 tracks.append(os.path.join(root, filename))
     tracks.sort()
+
     if args.limit is not None:
         tracks = tracks[: args.limit]
     split_keys = np.array_split(tracks, os.cpu_count())  # type: ignore
@@ -460,10 +430,11 @@ def main(args):
         futures = {
             executor.submit(
                 process_files,
+                args,
                 chunk,
-                pf_uuid_map,
                 p_segments,
                 p_augments,
+                p_pictures,
                 index=i,
             ): chunk
             for i, chunk in enumerate(split_keys)
@@ -523,11 +494,29 @@ if __name__ == "__main__":
         help="augment dataset and store files",
     )
     parser.add_argument(
+        "-c",
+        "--clave",
+        action="store_true",
+        help="add clave track on each beat of the segments",
+    )
+    parser.add_argument(
         "-l",
         "--limit",
         type=int,
         default=None,
         help="stop after a certain number of files",
+    )
+    parser.add_argument(
+        "-n",
+        "--novelty",
+        action="store_true",
+        help="add novelty score to the segments",
+    )
+    parser.add_argument(
+        "-d",
+        "--drop_last",
+        action="store_true",
+        help="drop the last segment",
     )
     args = parser.parse_args()
     console.log(args)
