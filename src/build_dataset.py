@@ -302,6 +302,22 @@ def main(args):
 
     if args.limit is not None:
         tracks = tracks[: args.limit]
+    if args.tempo_fold:
+        tmp_tracks = tracks.copy()
+        for track in tmp_tracks:
+            track_parts = track.split("_")
+            if int(track_parts[1]) <= 50:
+                track_parts[1] = str(int(track_parts[1]) * 2)
+                new_track = "_".join(track_parts) + ".mid"
+                tracks.append(new_track)
+                copy2(track, new_track)
+                console.log(f"doubled tempo of {track} to {new_track}")
+            elif int(track_parts[1]) >= 100:
+                track_parts[1] = str(int(track_parts[1]) / 2)
+                new_track = "_".join(track_parts) + ".mid"
+                tracks.append(new_track)
+                copy2(track, new_track)
+                console.log(f"halved tempo of {track} to {new_track}")
     split_keys = np.array_split(tracks, os.cpu_count())  # type: ignore
 
     console.log(f"segmenting {len(tracks)} tracks")
