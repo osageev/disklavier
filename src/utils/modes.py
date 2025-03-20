@@ -11,7 +11,7 @@ def find_path(
     source: str,
     destination: str,
     played_files: list[str],
-    max_nodes: int = 5,
+    max_nodes: int = 9,
     max_updates: int = 20,
     max_visits: int = 1,
     allow_transpose: bool = True,

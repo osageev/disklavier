@@ -1,7 +1,6 @@
 import os
 import csv
 import time
-import json
 from rich.table import Table
 from threading import Thread
 from omegaconf import OmegaConf
@@ -379,7 +378,7 @@ if __name__ == "__main__":
         last_folder = folders[-1]
         console.log(f"{tag} last run is in folder '{last_folder}'")
 
-        last_timestamp, _, _, last_initialization = last_folder.split("_")
+        last_timestamp, _, last_initialization, _ = last_folder.split("_")
         pf_last_playlist = os.path.join(
             args.output, last_folder, f"playlist_{last_timestamp}.csv"
         )

@@ -114,11 +114,16 @@ def transform(
 ) -> str:
     new_filename = f"{Path(file_path).stem}_t{transformations["transpose"]:02d}s{transformations["shift"]:02d}"
     out_path = os.path.join(out_dir, f"{new_filename}.mid")
-    mido.MidiFile(file_path).save(out_path)  # in case transpose is 0
+
     if transformations["transpose"] != 0:
         t_midi = pretty_midi.PrettyMIDI(initial_tempo=bpm)
 
-        for instrument in pretty_midi.PrettyMIDI(out_path).instruments:
+        for instrument in pretty_midi.PrettyMIDI(file_path).instruments:
+            # don't mess with the metronome
+            if instrument.is_drum:
+                t_midi.instruments.append(instrument)
+                continue
+
             transposed_instrument = pretty_midi.Instrument(
                 program=instrument.program, name=new_filename
             )
@@ -136,14 +141,21 @@ def transform(
             t_midi.instruments.append(transposed_instrument)
 
         t_midi.write(out_path)
+    else:
+        mido.MidiFile(file_path).save(out_path)
 
     if transformations["shift"] != 0:
-        midi_pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
+        s_midi = pretty_midi.PrettyMIDI(initial_tempo=bpm)
         seconds_per_beat = 60 / bpm
         shift_seconds = transformations["shift"] * seconds_per_beat
-        loop_point = (num_beats + 1) * seconds_per_beat
+        loop_point = (num_beats + 0) * seconds_per_beat
 
         for instrument in pretty_midi.PrettyMIDI(out_path).instruments:
+            # don't mess with the metronome
+            if instrument.is_drum:
+                s_midi.instruments.append(instrument)
+                continue
+
             shifted_instrument = pretty_midi.Instrument(
                 program=instrument.program, name=new_filename
             )
@@ -165,9 +177,9 @@ def transform(
                     )
                 )
 
-            midi_pm.instruments.append(shifted_instrument)
+            s_midi.instruments.append(shifted_instrument)
 
-        midi_pm.write(out_path)
+        s_midi.write(out_path)
 
     set_bpm(out_path, bpm)
 
