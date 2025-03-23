@@ -44,6 +44,7 @@ def main(args, params):
     pf_player_query = os.path.join(p_log, f"player-query.mid")
     pf_player_accompaniment = os.path.join(p_log, f"player-accompaniment.mid")
     pf_schedule = os.path.join(p_log, f"schedule.mid")
+    pf_max = os.path.join(p_log, f"max.mid")
 
     # copy old recording if replaying
     if args.replay and params.initialization == "recording":
@@ -80,6 +81,7 @@ def main(args, params):
     midi_stop_event = None
     audio_recorder = workers.AudioRecorder(params.audio, args.bpm, p_log)
     audio_stop_event = None
+    max = workers.Max(params.max, args.bpm, td_system_start, pf_max)
 
     # data setup
     match params.initialization:
@@ -118,10 +120,12 @@ def main(args, params):
     seeker.played_files.append(pf_seed)
 
     q_playback = PriorityQueue()
+    q_max = PriorityQueue()
     # at least 1 second offset to buy us some time
-    td_start = datetime.now() + timedelta(
+    td_delay = timedelta(
         seconds=RECORDING_START_DELAY if params.initialization == "recording" else 1
     )
+    td_start = datetime.now() + td_delay
     ts_queue = 0  # time in queue in seconds
     n_files = 1  # number of files played so far
 
@@ -145,7 +149,11 @@ def main(args, params):
 
     # run
     try:
-        ts_queue += scheduler.enqueue_midi(pf_seed, q_playback)
+        # start max
+        max.td_start = td_start - timedelta(seconds=0.5)
+        max_stop_event = max.play(q_max)
+
+        ts_queue += scheduler.enqueue_midi(pf_seed, q_playback, q_max)
         write_log(
             pf_playlist,
             n_files,
@@ -158,7 +166,7 @@ def main(args, params):
         # TODO: check if this is necessary
         if params.initialization == "recording":
             pf_next_file, similarity = seeker.get_next()
-            ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
+            ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback, q_max)
             console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
             n_files += 1
             write_log(
@@ -190,7 +198,7 @@ def main(args, params):
         while n_files < params.n_transitions:
             if q_playback.qsize() < params.n_min_queue_length:
                 pf_next_file, similarity = seeker.get_next()
-                ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback)
+                ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback, q_max)
                 console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
                 n_files += 1
                 write_log(
@@ -236,6 +244,10 @@ def main(args, params):
     pygame.mixer.quit()
     if args.verbose:
         console.log(f"{tag} metronome stopped")
+
+    # stop max
+    if max_stop_event is not None:
+        max.stop()
 
     # close raw notes file
     scheduler.raw_notes_file.close()

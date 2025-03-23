@@ -75,7 +75,7 @@ if __name__ == "__main__":
         description="watchdog for generating embeddings from uploaded recordings"
     )
     parser.add_argument(
-        "-i", "--folder", type=str, default=None, help="path to monitor for changes"
+        "-i", "--folder", type=str, default="data/outputs/uploads", help="path to monitor for changes"
     )
     parser.add_argument(
         "-m",

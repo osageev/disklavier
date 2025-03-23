@@ -347,7 +347,7 @@ class MidiRecorder(Worker):
                 self.midi_thread.join(0.1)
             self.is_recording = False
             if self.midi_thread.is_alive():
-                console.log(f"{self.tag} midi recording thread is still running")
+                console.log(f"{self.tag}[yellow bold] midi recording thread is still running[/yellow bold]")
             return True
         else:
             console.log(f"{self.tag} midi recording not active")

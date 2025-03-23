@@ -3,11 +3,14 @@ import mido
 from queue import PriorityQueue
 from datetime import datetime, timedelta
 
+from .worker import Worker
 from utils import basename, console
 from utils.midi import csv_to_midi, TICKS_PER_BEAT
-from .worker import Worker
+
+from typing import Optional
 
 N_BEATS_TRANSITION_OFFSET: int = 8
+MAX_VIS_OFFSET_S: float = 10
 
 
 class Scheduler(Worker):
@@ -46,7 +49,12 @@ class Scheduler(Worker):
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
 
-    def enqueue_midi(self, pf_midi: str, q_midi: PriorityQueue) -> float:
+    def enqueue_midi(
+        self,
+        pf_midi: str,
+        q_piano: PriorityQueue,
+        q_max: Optional[PriorityQueue] = None,
+    ) -> float:
         midi_in = mido.MidiFile(pf_midi)
         # number of seconds/ticks from the start of playback to start playing the file
         if self.recording_mode and "player" in basename(pf_midi):
@@ -93,7 +101,10 @@ class Scheduler(Worker):
                     #     console.log(
                     #         f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
                     #     )
-                    q_midi.put((tt_abs, msg))
+                    q_piano.put((tt_abs, msg))
+                    if q_max is not None:
+                        tick_delay = mido.second2tick(10, TICKS_PER_BEAT, self.tempo)
+                        q_max.put((tt_abs - tick_delay, msg))
                     # edge case, but it does happen sometimes that multiple recorded notes start at 0, resulting in one note getting bumped to time -1
                     if tt_abs < 0:
                         tt_abs = 0

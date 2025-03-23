@@ -4,3 +4,4 @@ from .seeker import Seeker
 from .metronome import Metronome
 from .midi_recorder import MidiRecorder
 from .audio_recorder import AudioRecorder
+from .max import Max
