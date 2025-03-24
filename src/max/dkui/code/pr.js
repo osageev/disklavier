@@ -5,6 +5,7 @@ mgraphics.autofill = 0;
 
 // constants
 var DEBUG = false;
+var TIMESTEP = 10;
 var ROLL_LEN_MS = 10000;
 var MAX_NOTE_DUR_MS = 5000; // auto trim any notes longer than this
 // graphical constants
@@ -251,9 +252,6 @@ function drawNotes() {
   }
 }
 
-/**
- * Main paint function to draw all UI elements.
- */
 function paint() {
   windowHeight = this.box.rect[2] - this.box.rect[0];
   windowWidth = this.box.rect[3] - this.box.rect[1];
@@ -281,9 +279,6 @@ function isNoteAtKeyboard(note) {
   return startX <= keyWidth && endX >= keyWidth;
 }
 
-/**
- * Update which notes are currently playing.
- */
 function updatePlayingNotes() {
   // reset all playing notes
   playingNotes = Array(NOTE_RANGE).fill(0);
@@ -305,11 +300,8 @@ function updatePlayingNotes() {
   }
 }
 
-/**
- * Update time and scroll the view.
- */
 function updateTime() {
-  currentTime += 100; // Update every 100ms
+  currentTime += TIMESTEP;
 
   // check for stuck notes and end them if they've been active too long
   for (var noteNum in activeNotes) {
@@ -340,9 +332,6 @@ function cleanup() {
   }
 }
 
-/**
- * Set debug mode on/off.
- */
 function debug(onOff) {
   DEBUG = onOff ? true : false;
   post("Debug mode:", DEBUG ? "ON" : "OFF", "\n");
@@ -383,18 +372,8 @@ function noteOff(note) {
   }
 }
 
-/**
- * Handle incoming lists (assumed to be note, velocity pairs).
- */
 function list() {
   var args = arrayfromargs(arguments);
-
-  // Check for all-notes-off messages (control 123 with value 0)
-  if (args.length >= 3 && args[0] === 176 && args[1] === 123 && args[2] === 0) {
-    allNotesOff();
-    return;
-  }
-
   if (args.length >= 2) {
     var note = args[0];
     var velocity = args[1];
@@ -407,31 +386,6 @@ function list() {
   }
 }
 
-/**
- * Handle all-notes-off MIDI message.
- */
-function allNotesOff() {
-  if (DEBUG) post("All notes off received\n");
-  cleanup();
-}
-
-/**
- * Handle messages sent to the object.
- */
-function anything() {
-  var a = arrayfromargs(messagename, arguments);
-
-  // check for specific messages
-  if (a[0] === "panic" || a[0] === "all_notes_off") {
-    allNotesOff();
-  } else if (a[0] === "clear") {
-    // clear all notes (both active and inactive)
-    allNotesOff();
-    notes = [];
-    mgraphics.redraw();
-  }
-}
-
 function init() {
   this.box.size(800, 600);
   windowHeight = this.box.rect[2] - this.box.rect[0];
@@ -439,7 +393,7 @@ function init() {
   calculateDimensions();
 
   t = new Task(updateTime, this);
-  t.interval = 100;
+  t.interval = TIMESTEP;
   t.repeat();
 }
 

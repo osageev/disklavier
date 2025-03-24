@@ -211,7 +211,6 @@ def main(args, params):
 
             time.sleep(0.1)
             ts_queue -= 0.1
-            max.send_udp(f"queue:{ts_queue:.01f}")
             if not thread_player.is_alive():
                 console.log(f"{tag} player ran out of notes, exiting")
                 thread_player.join(0.1)

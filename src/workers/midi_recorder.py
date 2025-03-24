@@ -7,6 +7,7 @@ from threading import Thread, Event
 from .worker import Worker
 from utils import console, tick
 from utils.midi import TICKS_PER_BEAT
+from utils.max import send_udp
 
 from typing import List, Optional
 
@@ -268,6 +269,12 @@ class MidiRecorder(Worker):
         else:
             console.log(f"{self.tag} no notes played in the last beat")
 
+        # send velocity stats to max
+        send_udp(
+            f"{int(self._avg_velocity)} {self._min_velocity} {self._max_velocity}",
+            address="/velocity",
+        )
+
     def save_midi(self, pf_recording: str) -> bool:
         """Saves the recorded notes to a MIDI file."""
 
@@ -347,7 +354,9 @@ class MidiRecorder(Worker):
                 self.midi_thread.join(0.1)
             self.is_recording = False
             if self.midi_thread.is_alive():
-                console.log(f"{self.tag}[yellow bold] midi recording thread is still running[/yellow bold]")
+                console.log(
+                    f"{self.tag}[yellow bold] midi recording thread is still running[/yellow bold]"
+                )
             return True
         else:
             console.log(f"{self.tag} midi recording not active")
