@@ -58,6 +58,10 @@ class Seeker(Worker):
     # filename to index mapping
     filename_to_index: dict[str, int] = {}
 
+    # velocity tracking
+    _recorder = None
+    _avg_velocity: float = 0.0
+
     def __init__(
         self,
         params,
@@ -119,6 +123,39 @@ class Seeker(Worker):
             exit()  # TODO: handle this better (return an error, let main handle it)
 
         console.log(f"{self.tag} initialization complete")
+
+    def set_recorder(self, recorder):
+        """
+        Set the reference to the MidiRecorder.
+
+        Parameters
+        ----------
+        recorder : MidiRecorder
+            Reference to the MidiRecorder instance.
+        """
+        self._recorder = recorder
+        console.log(f"{self.tag} connected to recorder for velocity updates")
+
+    def check_velocity_updates(self) -> bool:
+        """
+        Check for velocity updates from the recorder.
+
+        Returns
+        -------
+        bool
+            True if velocity data was updated, False otherwise.
+        """
+        if self._recorder is None:
+            console.log(f"{self.tag} no recorder connected")
+            return False
+        else:
+            self._avg_velocity = self._recorder.avg_velocity
+
+            if self.verbose:
+                console.log(
+                    f"{self.tag} updated velocity stats: avg={self._avg_velocity:.2f}"
+                )
+            return True
 
     def get_next(self) -> tuple[str, float]:
         """

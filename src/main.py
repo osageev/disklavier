@@ -150,7 +150,7 @@ def main(args, params):
     # run
     try:
         # start max
-        max.td_start = td_start - timedelta(seconds=0.5)
+        max.td_start = td_start# - timedelta(seconds=0.5)
         max_stop_event = max.play(q_max)
 
         ts_queue += scheduler.enqueue_midi(pf_seed, q_playback, q_max)
@@ -211,6 +211,7 @@ def main(args, params):
 
             time.sleep(0.1)
             ts_queue -= 0.1
+            max.send_udp(f"queue:{ts_queue:.01f}")
             if not thread_player.is_alive():
                 console.log(f"{tag} player ran out of notes, exiting")
                 thread_player.join(0.1)

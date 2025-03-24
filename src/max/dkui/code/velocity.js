@@ -1,139 +1,92 @@
-// velocity.js - a MaxMSP visualization for MIDI note velocities
-// displays a scrolling window of velocity bars with real-time updates
+mgraphics.init();
+mgraphics.relative_coords = 0;
+mgraphics.autofill = 0;
 
-autowatch = 1;
+var windowHeight;
+var windowWidth;
+var velocityHistory = []; // Store velocity events with timestamps
+var averageVelocity = 0; // Current average velocity
 
-// configuration parameters
-var config = {
-    maxNotes: 100,        // maximum number of notes to display
-    timeWindow: 1000,     // time window in ms for "recent" notes (1 second)
-    bgColor: [0.1, 0.1, 0.1, 1.0],
-    recentColor: [0.2, 0.8, 0.2, 1.0],  // green for recent notes
-    oldColor: [0.2, 0.4, 0.8, 1.0],     // blue for older notes
-    textColor: [1.0, 1.0, 1.0, 1.0],
-    barWidth: 5,
-    barGap: 2
-};
-
-// data storage
-var noteHistory = [];  // will store {velocity, timestamp} objects
-
-/**
- * initialize the sketch object
- */
-function setup() {
-    // create a sketch object for drawing
-    var sketch = new JitterObject("jit.gl.sketch", "v8ui");
-    sketch.automatic = 0;
-    
-    // create an interval to update the display regularly
-    var interval = new Task(function() {
-        draw(sketch);
-    }, this);
-    interval.interval = 33; // ~30fps refresh rate
-    interval.repeat();
-    
-    return sketch;
-}
-
-var sketch = setup();
-
-/**
- * handle incoming note velocity
- * 
- * @param {number} velocity - MIDI velocity value (0-127)
- */
 function msg_int(velocity) {
-    // add new note to history with current timestamp
-    noteHistory.push({
-        velocity: velocity,
-        timestamp: Date.now()
+  if (velocity > 0) {
+    // Store velocity with current timestamp
+    var now = new Date().getTime();
+    velocityHistory.push({ velocity: velocity, timestamp: now });
+
+    // Remove velocities older than 1 second
+    var oneSecondAgo = now - 1000;
+    velocityHistory = velocityHistory.filter(function (item) {
+      return item.timestamp >= oneSecondAgo;
     });
-    
-    // remove old notes if we have too many
-    if (noteHistory.length > config.maxNotes) {
-        noteHistory.shift();
+
+    // Calculate average
+    var sum = 0;
+    var count = velocityHistory.length;
+
+    for (var i = 0; i < count; i++) {
+      sum += velocityHistory[i].velocity;
     }
-    
-    // we don't need to explicitly call draw here since we're using
-    // an interval task to refresh the display
+
+    averageVelocity = count > 0 ? Math.round(sum / count) : 0;
+
+    // Print calculation details
+    // post("new velocity:", velocity, "\n");
+    // post("velocities in last second:", count, "\n");
+    // post("sum:", sum, "\n");
+    // post("average:", averageVelocity, "\n");
+
+    // Trigger redraw to update display
+    mgraphics.redraw();
+  }
 }
 
-/**
- * draw the visualization
- * 
- * @param {object} sketch - jit.gl.sketch object for drawing
- */
-function draw(sketch) {
-    var now = Date.now();
-    var width = sketch.glparent.drawto.size[0];
-    var height = sketch.glparent.drawto.size[1];
-    
-    // clear the background
-    sketch.glclearcolor = config.bgColor;
-    sketch.glclear();
-    
-    // calculate recent average (last second)
-    var recentNotes = noteHistory.filter(function(note) {
-        return now - note.timestamp < config.timeWindow;
-    });
-    
-    var avgVelocity = 0;
-    if (recentNotes.length > 0) {
-        var sum = recentNotes.reduce(function(acc, note) {
-            return acc + note.velocity;
-        }, 0);
-        avgVelocity = Math.round(sum / recentNotes.length);
-    }
-    
-    //
-    // draw note history as vertical bars
-    var totalBarWidth = config.barWidth + config.barGap;
-    var maxBars = Math.min(noteHistory.length, Math.floor(width / totalBarWidth));
-    
-    for (var i = 0; i < maxBars; i++) {
-        var note = noteHistory[noteHistory.length - 1 - i];
-        var isRecent = (now - note.timestamp < config.timeWindow);
-        
-        // normalize velocity to drawing height (0-127 to 0-height)
-        var barHeight = (note.velocity / 127.0) * (height * 0.8);
-        
-        // position bar
-        var x = width - (i + 1) * totalBarWidth;
-        var y = height - barHeight;
-        
-        // set color based on recency
-        sketch.glcolor = isRecent ? config.recentColor : config.oldColor;
-        
-        // draw bar
-        sketch.shapeslice(4, 4);
-        sketch.rectangle(x, y, config.barWidth, barHeight);
-    }
-    
-    // draw average velocity text in upper left
-    sketch.glcolor = config.textColor;
-    sketch.textalign("left", "top");
-    sketch.fontsize(14);
-    sketch.text("Avg: " + avgVelocity, 10, 10);
-    
-    // render the sketch
-    sketch.render();
+function paint() {
+  windowHeight = this.box.rect[2] - this.box.rect[0];
+  windowWidth = this.box.rect[3] - this.box.rect[1];
+
+  // Clear background
+  mgraphics.set_source_rgba(0.15, 0.15, 0.15, 1.0);
+  mgraphics.rectangle(0, 0, windowHeight, windowWidth);
+  mgraphics.fill();
+
+  // Display average velocity in large text
+  mgraphics.set_source_rgba(1, 1, 1, 1);
+  mgraphics.select_font_face("Arial Bold");
+
+  // Calculate font size based on box dimensions
+  var fontSize = Math.min(windowWidth * 0.5, windowHeight * 0.2);
+  mgraphics.set_font_size(fontSize);
+
+  // Center text
+  var text = averageVelocity.toString();
+  var textWidth = mgraphics.text_measure(text)[0];
+  var textHeight = fontSize;
+
+  mgraphics.move_to(
+    (windowHeight - textWidth) / 2,
+    (windowWidth + textHeight / 2) / 2
+  );
+  mgraphics.text_path(text);
+  mgraphics.fill();
+
+  //draw label
+  fontSize = Math.min(windowWidth * 0.15, windowHeight * 0.08);
+  mgraphics.set_font_size(fontSize);
+  var label = "avg velocity";
+  textWidth = mgraphics.text_measure(label)[0];
+
+  mgraphics.move_to((windowHeight - textWidth) / 2, windowWidth * 0.85);
+  mgraphics.text_path(label);
+  mgraphics.fill();
 }
 
-/**
- * resize handler for the UI
- */
-function resize() {
-    if (sketch) {
-        draw(sketch);
-    }
+function init() {
+  this.box.size(160, 120);
+
+  // Set initial dimensions
+  windowHeight = this.box.rect[2] - this.box.rect[0];
+  windowWidth = this.box.rect[3] - this.box.rect[1];
 }
 
-/**
- * cleanup function when script is recompiled or deleted
- */
-function clean() {
-    if (sketch) {
-        sketch.freepeer();
-    }
-}
+init();
+mgraphics.redraw();
