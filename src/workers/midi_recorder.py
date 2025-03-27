@@ -7,7 +7,7 @@ from threading import Thread, Event
 from .worker import Worker
 from utils import console, tick
 from utils.midi import TICKS_PER_BEAT
-from utils.max import send_udp
+from utils.udp import send_udp
 
 from typing import List, Optional
 

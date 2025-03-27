@@ -1,7 +1,13 @@
-// init graphics
+/*
+  This is the main Max patch for the Disklavier UI. it draws a scrolling piano roll in which the notes move from right to left until they reach the left edge of the screen, at which point they are removed.
+*/
+
+// max stuff
 mgraphics.init();
 mgraphics.relative_coords = 0;
 mgraphics.autofill = 0;
+var inlets = 2;
+var outlets = 1;
 
 // constants
 var DEBUG = false;
@@ -23,6 +29,7 @@ var KEY_COLORS = {
 var MIN_NOTE = 21; // A0
 var MAX_NOTE = 108; // C8
 var NOTE_RANGE = MAX_NOTE - MIN_NOTE + 1;
+var DEFAULT_TEMPO = 60; // default tempo in BPM
 
 // variables
 var windowHeight;
@@ -35,6 +42,8 @@ var currentTime = 0;
 var notes = [];
 var activeNotes = {};
 var playingNotes = Array(NOTE_RANGE).fill(0);
+var currentTempo = DEFAULT_TEMPO; // current tempo in BPM
+var tempoScale = 1.0; // scaling factor for time based on tempo
 
 // note object
 function Note(pitch, velocity, startTime, endTime) {
@@ -78,10 +87,11 @@ function getNoteY(note) {
 }
 
 function timeToX(timeMS) {
+  // Use tempoScale to adjust the apparent time based on current tempo
+  var adjustedTimeMS = (timeMS - currentTime) * tempoScale;
   return (
     keyWidth +
-    ((timeMS - (currentTime - ROLL_LEN_MS)) / ROLL_LEN_MS) *
-      (windowHeight - keyWidth)
+    ((adjustedTimeMS + ROLL_LEN_MS) / ROLL_LEN_MS) * (windowHeight - keyWidth)
   );
 }
 
@@ -164,7 +174,9 @@ function drawGrid() {
 
   // draw vertical time markers every second
   for (var t = 0; t <= ROLL_LEN_MS; t += 1000) {
-    var x = timeToX(currentTime - ROLL_LEN_MS + t);
+    // Adjust t based on tempo scale
+    var adjustedT = t / tempoScale;
+    var x = timeToX(currentTime + adjustedT);
 
     // only draw if in visible area
     if (x >= keyWidth && x <= windowHeight) {
@@ -180,13 +192,13 @@ function drawGrid() {
         mgraphics.set_source_rgba(0.7, 0.7, 0.7, 1.0);
         mgraphics.select_font_face("Arial");
         mgraphics.set_font_size(10);
-        if (t < ROLL_LEN_MS) {
+        if (x < windowHeight - 15) {
           mgraphics.move_to(x - 5, 10);
         } else {
           mgraphics.move_to(x - 15, 10);
         }
 
-        var relativeTimeSeconds = Math.round(-t / 1000);
+        var relativeTimeSeconds = Math.round(-adjustedT / 1000);
         var timeLabel =
           relativeTimeSeconds === 0 ? "0" : relativeTimeSeconds.toString();
         mgraphics.text_path(timeLabel);
@@ -386,11 +398,39 @@ function list() {
   }
 }
 
+/**
+ * Handle tempo message from second inlet
+ */
+function tempo(bpm) {
+  if (bpm > 0) {
+    if (DEBUG) post("Tempo changed to:", bpm, "BPM\n");
+    currentTempo = bpm;
+    // Calculate tempo scale factor: 60bpm = 1.0, 120bpm = 2.0, etc.
+    tempoScale = currentTempo / DEFAULT_TEMPO;
+    mgraphics.redraw();
+  } else if (DEBUG) {
+    post("Invalid tempo value:", bpm, "\n");
+  }
+}
+
+/**
+ * Handle messages to inlets
+ */
+function msg_int(v) {
+  if (inlet === 1) {
+    // Second inlet - tempo messages
+    tempo(v);
+  }
+}
+
 function init() {
   this.box.size(800, 600);
   windowHeight = this.box.rect[2] - this.box.rect[0];
   windowWidth = this.box.rect[3] - this.box.rect[1];
   calculateDimensions();
+
+  // Initialize tempo scale
+  tempoScale = currentTempo / DEFAULT_TEMPO;
 
   t = new Task(updateTime, this);
   t.interval = TIMESTEP;

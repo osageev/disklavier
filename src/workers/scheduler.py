@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from .worker import Worker
 from utils import basename, console
 from utils.midi import csv_to_midi, TICKS_PER_BEAT
+from utils.udp import send_udp
 
 from typing import Optional
 
@@ -75,6 +76,10 @@ class Scheduler(Worker):
 
         # add messages to queue first so that the player has access ASAP
         for track in midi_in.tracks:
+            if track[0].type == "track_name":
+                if track[0].name == "metronome":
+                    console.log(f"{self.tag} skipping metronome track")
+                    continue
             for msg in track:
                 if msg.type == "note_on" or msg.type == "note_off":
                     tt_abs += msg.time

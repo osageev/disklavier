@@ -10,9 +10,10 @@ import json
 import networkx as nx
 
 from .worker import Worker
-from utils import basename, console, panther, modes
+from utils import basename, console, panther
 from utils.models import Classifier
 from utils.modes import find_path
+from utils.udp import send_udp
 
 SUPPORTED_EXTENSIONS = (".mid", ".midi")
 EMBEDDING_SIZES = {
@@ -109,11 +110,15 @@ class Seeker(Worker):
         console.log(f"{self.tag} FAISS index loaded ({self.faiss_index.ntotal})")
 
         # load neighbor table
+        # old version -- ignore
+        # pf_neighbor_table = os.path.join(self.p_table, "neighbors.h5")
         pf_neighbor_table = os.path.join(self.p_table, "neighbor.parquet")
         console.log(f"{self.tag} looking for neighbor table '{pf_neighbor_table}'")
         if os.path.isfile(pf_neighbor_table):
             with console.status("\t\t\t      loading neighbor file..."):
+                # self.neighbor_table = pd.read_hdf(pf_neighbor_table, key="neighbors")
                 self.neighbor_table = pd.read_parquet(pf_neighbor_table)
+                self.neighbor_table.head()
             console.log(
                 f"{self.tag} loaded {len(self.neighbor_table)}*{len(self.neighbor_table.columns)} neighbor table"
             )
@@ -220,6 +225,7 @@ class Seeker(Worker):
 
         self.played_files.append(os.path.basename(next_file))
 
+        send_udp(f"setSim {similarity}", "/sim")
         full_path = os.path.join(self.p_dataset, next_file)
         console.log(
             f"{self.tag} returning file '{full_path}' with similarity {similarity:.05f}"
@@ -470,6 +476,7 @@ class Seeker(Worker):
 
         # exclude the last three tracks we've played from consideration
         # this way, played tracks CAN be revisited, but only after a few segments
+        # TODO: this is dumb and doesn't actually work as intended. what was i thinking?
         for played_file in reversed(self.played_files[-3:]):
             track = played_file.split("_")[0]
             seen_tracks.add(track)
