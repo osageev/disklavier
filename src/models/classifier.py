@@ -1,5 +1,6 @@
 import torch.nn as nn
 
+
 class Classifier(nn.Module):
     def __init__(self, input_dim, hidden_dims, output_dim, activation_fn=nn.SiLU):
         super(Classifier, self).__init__()

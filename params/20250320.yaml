@@ -1,23 +1,30 @@
 # paths
-data_dir: '/Users/finlay/Documents/Ableton Live/20250315 test Project/20250315'  # path to read MIDI files from
-out_dir: '/Users/finlay/Documents/Ableton Live/20250315 test Project/out'   # path to write MIDI files to
-dataset_name: 20250320  # name of the dataset
+data_dir: '/media/nova/Datasets/sageev-midi/20250320/unsegmented'  # path to read MIDI files from
+out_dir: '/media/nova/Datasets/sageev-midi/20250320'   # path to write MIDI files to
+dataset_name: 20250320
 
-limit: 1 # early stopping
+limit: null # early stopping
 
-# segmentations
+# segmentation
 segment: true
 num_beats: 8
-clave: true
+lead_window_beat_frac: 8
+metronome: 0 # metronome velocity (0 for none)
 novelty: false
 
-# augmentations
+# augmentation
 augment: true
 tempo_fold: true
+tempo_fold_min: 50
+tempo_fold_max: 100
 num_transposes: 12 # 12 semitones
 
 
 # supporting tables, etc.
-embeddings: ["pitch-histogram","specdiff", "clf-4note", "clf-speed", "clf-tpose"]
+representations: ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-tpose"]
+model_dir: "data/models"
+device_name: "cuda:0"
 generate_graphs: 500
+graphs: ["specdiff"]
 find_neighbors: true
+fix_tempo: true

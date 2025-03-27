@@ -13,30 +13,30 @@ from rich.progress import (
 )
 
 # filesystem parameters
-INPUT_DIR = "/media/nova/Datasets/maestro/segments"
-# INPUT_DIR = "/media/nova/Datasets/sageev-midi/20240621"
+# INPUT_DIR = "/media/nova/Datasets/maestro/segments"
+INPUT_DIR = "/media/nova/Datasets/sageev-midi/20250320"
 SEGMENT_DIR = INPUT_DIR + "/segmented"  # basic segmented files
 AUGMENT_DIR = INPUT_DIR + "/augmented"  # ^ + all augmentations
 OUTPUT_DIR = "../data/tests"
-DATASET_NAME = "maestro"
+DATASET_NAME = "20250320"
 
 # dataset parameters
 NUM_BEATS = 9
 MIN_BPM = 50
-MAX_BPM = 130
+MAX_BPM = 144
 
 # bounds for outlier detection
 OUTLIERS = {
     "min_seg_len": NUM_BEATS * 60 / MAX_BPM
-    - 1,  # 9 beats per segment * 60 secs per min / 100 bpm (fastest recording tempo) - 1s for buffer = 4.4s
+    - 2,
     "max_seg_len": NUM_BEATS * 60 / MIN_BPM
-    + 1,  # 9 beats per segment * 60 secs per min / 50 bpm (slowest recording tempo) + 1s for buffer = 11.8s
-    "min_note_len": 0.01,  # 10ms min note len
-    "max_note_len": 12,  # 12s max note len
+    + 2,
+    "min_note_len": 0.005,
+    "max_note_len": 13,
     "min_pitch": 0,  # lowest MIDI note, unusual
     "max_pitch": 127
     - 11,  # within an octave of the highest MIDI note, may cause issues transposing
-    "min_vel": 5,  # anything quieter than this is unlikely
+    "min_vel": 3,  # anything quieter than this is unlikely
     "max_vel": 120,  # anything louder than this is unlikely
 }
 
@@ -325,8 +325,9 @@ def get_analytics():
     )
 
     # delete empty files
+    # TODO: create some warnings before deletion happens
     n_deleted = 0
-    for dir_path, _, files in track(os.walk(AUGMENT_DIR), "deleting empty files"):
+    for dir_path, _, files in track(os.walk(SEGMENT_DIR), "deleting empty files"):
         for file_name in files:
             if file_name.endswith(".mid") or file_name.endswith(".midi"):
                 midi = pretty_midi.PrettyMIDI(os.path.join(dir_path, file_name))

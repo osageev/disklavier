@@ -15,7 +15,7 @@ TICKS_PER_BEAT = 220
 
 def get_bpm(file_path: str) -> int:
     """
-    Extracts the bpm from a MIDI file. If there are multiple `set_tempo` messages,
+    Extracts the bpm from a MIDI file. First, extraction is attempted from the filename, then from the file itself. If there are multiple `set_tempo` messages,
     the last one is used. A time signature of 4/4 is assumed.
 
     Parameters
@@ -511,3 +511,113 @@ def semitone_transpose(
                 down -= 1
 
     return new_files
+
+
+def change_tempo_and_trim(
+    input_file: str, output_file: str, tempo: float = 93.75, cutoff_sec: float = 5.12
+) -> bool:
+    """Process a MIDI file to change its tempo and trim events after a cutoff.
+
+    This function loads a MIDI file, replaces any existing tempo messages with a new tempo
+    message, and trims events so that no event occurs after the specified cutoff time.
+    If any note remains active at the cutoff, a note_off message is inserted.
+
+    Args:
+        input_file (str): Path to the input MIDI file.
+        output_file (str): Path where the processed MIDI file will be saved.
+        tempo (float, optional): Desired tempo in BPM. Defaults to 93.75 so that 9 beats equals 5.12s.
+        cutoff_sec (float, optional): Time in seconds after which events are trimmed.
+            Defaults to 5.12.
+
+    Returns:
+        bool: True if the output file exists after saving, False otherwise.
+    """
+
+    mid = mido.MidiFile(input_file)
+    new_tempo_value = mido.bpm2tempo(tempo)
+    ticks_per_beat = mid.ticks_per_beat
+
+    # if no tracks exist, add a new track with the tempo message
+    if not mid.tracks:
+        new_track = mido.MidiTrack()
+        new_track.append(mido.MetaMessage("set_tempo", tempo=new_tempo_value, time=0))
+        mid.tracks.append(new_track)
+
+    new_tracks = []
+    for track_index, track in enumerate(mid.tracks):
+        new_track = []
+        current_abs_tick = 0
+        active_notes = {}
+        # insert new tempo message at beginning of first track
+        if track_index == 0:
+            new_track.append(
+                mido.MetaMessage("set_tempo", tempo=new_tempo_value, time=0)
+            )
+        for msg in track:
+            # skip existing tempo messages
+            if msg.type == "set_tempo":
+                continue
+            next_abs_tick = current_abs_tick + msg.time
+            event_time_sec = mido.tick2second(
+                next_abs_tick, ticks_per_beat, new_tempo_value
+            )
+            if event_time_sec > cutoff_sec:
+                current_time_sec = mido.tick2second(
+                    current_abs_tick, ticks_per_beat, new_tempo_value
+                )
+                remaining_sec = cutoff_sec - current_time_sec
+                remaining_ticks = int(
+                    mido.second2tick(remaining_sec, ticks_per_beat, new_tempo_value)
+                )
+                first = True
+                for channel, note in list(active_notes.keys()):
+                    note_off_time = remaining_ticks if first else 0
+                    new_track.append(
+                        mido.Message(
+                            "note_off",
+                            note=note,
+                            channel=channel,
+                            velocity=0,
+                            time=note_off_time,
+                        )
+                    )
+                    first = False
+                current_abs_tick += remaining_ticks
+                break
+            else:
+                new_track.append(msg.copy(time=msg.time))
+                current_abs_tick = next_abs_tick
+                if msg.type == "note_on" and msg.velocity > 0:
+                    active_notes[(msg.channel, msg.note)] = True
+                elif msg.type == "note_off" or (
+                    msg.type == "note_on" and msg.velocity == 0
+                ):
+                    key = (msg.channel, msg.note)
+                    if key in active_notes:
+                        del active_notes[key]
+        current_time_sec = mido.tick2second(
+            current_abs_tick, ticks_per_beat, new_tempo_value
+        )
+        if current_time_sec < cutoff_sec and active_notes:
+            remaining_sec = cutoff_sec - current_time_sec
+            remaining_ticks = int(
+                mido.second2tick(remaining_sec, ticks_per_beat, new_tempo_value)
+            )
+            first = True
+            for channel, note in list(active_notes.keys()):
+                note_off_time = remaining_ticks if first else 0
+                new_track.append(
+                    mido.Message(
+                        "note_off",
+                        note=note,
+                        channel=channel,
+                        velocity=0,
+                        time=note_off_time,
+                    )
+                )
+                first = False
+        new_tracks.append(new_track)
+
+    mid.tracks = new_tracks
+    mid.save(output_file)
+    return os.path.isfile(output_file)

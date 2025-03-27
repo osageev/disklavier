@@ -1,8 +1,13 @@
 import os
 
-p_a = "/Users/finlay/Documents/Ableton Live/clean sessions/clean audio"
-p_m = "/Users/finlay/Documents/Ableton Live/clean sessions/clean midi"
-p_t = "/Users/finlay/Documents/Ableton Live/trimming Projects/trimmed"
+paths = [
+    "/media/nova/Datasets/sageev-midi/20250320/trimmed",
+    "/media/nova/Datasets/sageev-midi/20250110/unsegmented"
+]
+# p_a = "/Users/finlay/Documents/Ableton Live/clean sessions/clean audio"
+# p_m = "/Users/finlay/Documents/Ableton Live/clean sessions/clean midi"
+# p_t = "/Users/finlay/Documents/Ableton Live/trimming Projects/trimmed"
+
 
 
 def compare_directory_contents(directories):
@@ -55,4 +60,4 @@ def compare_directory_contents(directories):
             print(f"  missing from: {', '.join(missing_from)}")
 
 
-compare_directory_contents([p_a, p_m, p_t])
+compare_directory_contents(paths)
