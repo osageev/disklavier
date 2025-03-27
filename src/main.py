@@ -14,6 +14,7 @@ import pygame
 
 import workers
 from utils import console, midi
+from utils.udp import send_udp
 
 tag = "[white]main[/white]  :"
 RECORDING_START_DELAY = 6
@@ -128,6 +129,7 @@ def main(args, params):
     td_start = datetime.now() + td_delay
     ts_queue = 0  # time in queue in seconds
     n_files = 1  # number of files played so far
+    send_udp(f"setTempo {args.bpm}", "/ctrl")
 
     scheduler.td_start = td_start
 
@@ -150,7 +152,7 @@ def main(args, params):
     # run
     try:
         # start max
-        max.td_start = td_start# - timedelta(seconds=0.5)
+        max.td_start = td_start  # - timedelta(seconds=0.5)
         max_stop_event = max.play(q_max)
 
         ts_queue += scheduler.enqueue_midi(pf_seed, q_playback, q_max)
