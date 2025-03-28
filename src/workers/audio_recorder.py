@@ -44,7 +44,7 @@ class AudioRecorder(Worker):
         # wait until td_start
         t_wait = (td_start - datetime.now()).total_seconds()
         if t_wait > 0:
-            console.log(f"{self.tag} waiting {t_wait:.2f}s until recording start")
+            console.log(f"{self.tag} waiting {t_wait:.2f} s until recording start")
             time.sleep(t_wait)
 
         console.log(f"{self.tag} starting audio recording")

@@ -8,7 +8,7 @@ from utils import basename, console
 from utils.midi import csv_to_midi, TICKS_PER_BEAT
 from utils.udp import send_udp
 
-from typing import Optional
+from typing import Optional, Tuple
 
 N_BEATS_TRANSITION_OFFSET: int = 8
 MAX_VIS_OFFSET_S: float = 10
@@ -21,6 +21,7 @@ class Scheduler(Worker):
     tt_all_messages: list[int] = []
     n_files_queued: int = 0
     n_beats_per_segment: int = 8
+    queued_files: list[str] = []
 
     def __init__(
         self,
@@ -55,7 +56,7 @@ class Scheduler(Worker):
         pf_midi: str,
         q_piano: PriorityQueue,
         q_max: Optional[PriorityQueue] = None,
-    ) -> float:
+    ) -> Tuple[float, float]:
         midi_in = mido.MidiFile(pf_midi)
         # number of seconds/ticks from the start of playback to start playing the file
         if self.recording_mode and "player" in basename(pf_midi):
@@ -125,14 +126,16 @@ class Scheduler(Worker):
             _ = self._gen_transitions(self.ts_transitions[-1])
 
         self.n_files_queued += 1
+        self.queued_files.append(basename(pf_midi))
+        ts_seg_len = mido.tick2second(tt_sum, TICKS_PER_BEAT, self.tempo)
 
         console.log(
-            f"{self.tag} added {mido.tick2second(tt_sum, TICKS_PER_BEAT, self.tempo):.03f} seconds of music to queue"
+            f"{self.tag} added {ts_seg_len:.03f} seconds of music to queue"
         )
 
         _ = self._copy_midi(pf_midi)
 
-        return mido.tick2second(tt_sum, TICKS_PER_BEAT, self.tempo)
+        return ts_seg_len, ts_offset
 
     def init_schedule(self, pf_midi: str, offset_s: float = 0) -> bool:
         """Initialize a MIDI file to hold a playback recording."""
@@ -165,7 +168,7 @@ class Scheduler(Worker):
             tick_track.append(mm_transition)
         tick_track.append(mido.MetaMessage("end_of_track", time=1))
 
-        midi.tracks.append(tick_track)
+        midi.tracks.append(tick_track )
 
         # write to file
         midi.save(pf_midi)
@@ -228,7 +231,7 @@ class Scheduler(Worker):
 
         return transitions
 
-    def _get_next_transition(self) -> tuple[float, int]:
+    def _get_next_transition(self) -> Tuple[float, int]:
         if self.verbose:
             console.log(f"{self.tag} transition times:\n\t{self.ts_transitions[-5:]}")
         ts_offset = self.ts_transitions[
@@ -269,3 +272,13 @@ class Scheduler(Worker):
             out_path,
             verbose=self.verbose,
         )
+    
+    def get_current_file(self) -> str:
+        now = datetime.now()
+        for i, ts_transition in enumerate(self.ts_transitions):
+            transition_time = self.td_start + timedelta(seconds=ts_transition)
+            # console.log(f"{self.tag} checking {now.strftime('%y-%m-%d %H:%M:%S')} against {transition_time.strftime('%y-%m-%d %H:%M:%S')}")
+            if now < transition_time:
+                return self.queued_files[i-1]
+
+        return ""

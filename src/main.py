@@ -9,15 +9,11 @@ from argparse import ArgumentParser
 from multiprocessing import Process
 from datetime import datetime, timedelta
 
-os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
-import pygame
-
 import workers
 from utils import console, midi
 from utils.udp import send_udp
 
 tag = "[white]main[/white]  :"
-RECORDING_START_DELAY = 6
 
 
 def main(args, params):
@@ -31,13 +27,11 @@ def main(args, params):
         f"{ts_start}_{params.seeker.metric}_{params.initialization}_{params.seeker.seed}",
     )
     p_playlist = os.path.join(p_log, "playlist")
-    if not os.path.exists(args.output):
-        os.makedirs(args.output)
     if not os.path.exists(p_log):
         if args.verbose:
             console.log(f"{tag} creating new logging folder at '{p_log}'")
         os.makedirs(p_log)
-        os.makedirs(p_playlist)  # folder for copy of MIDI files
+        os.makedirs(p_playlist)
 
     # specify recording files
     pf_master_recording = os.path.join(p_log, f"master-recording.mid")
@@ -122,12 +116,8 @@ def main(args, params):
 
     q_playback = PriorityQueue()
     q_max = PriorityQueue()
-    # at least 1 second offset to buy us some time
-    td_delay = timedelta(
-        seconds=RECORDING_START_DELAY if params.initialization == "recording" else 1
-    )
-    td_start = datetime.now() + td_delay
-    ts_queue = 0  # time in queue in seconds
+    td_start = datetime.now() + timedelta(seconds=params.startup_delay)
+    ts_queue = args.bpm * (params.n_beats_per_segment  + 1) / 60  # time in queue in seconds
     n_files = 1  # number of files played so far
     send_udp(f"setTempo {args.bpm}", "/ctrl")
 
@@ -152,29 +142,34 @@ def main(args, params):
     # run
     try:
         # start max
-        max.td_start = td_start  # - timedelta(seconds=0.5)
+        max.td_start = td_start
         max_stop_event = max.play(q_max)
 
-        ts_queue += scheduler.enqueue_midi(pf_seed, q_playback, q_max)
+        # add seed to queue
+        ts_seg_len, ts_seg_start = scheduler.enqueue_midi(pf_seed, q_playback, q_max)
+        ts_queue += ts_seg_len
+
         write_log(
             pf_playlist,
             n_files,
-            datetime.now().strftime("%y-%m-%d %H:%M:%S"),
+            datetime.fromtimestamp(ts_seg_start).strftime("%y-%m-%d %H:%M:%S"),
             pf_seed,
             "----",
         )
 
         # preload first match
         # TODO: check if this is necessary
-        if params.initialization == "recording":
+        if params.initialization == "recording" or params.seeker.mode == "graph":
             pf_next_file, similarity = seeker.get_next()
-            ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback, q_max)
-            console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
+            ts_seg_len, ts_seg_start = scheduler.enqueue_midi(
+                pf_next_file, q_playback, q_max
+            )
+            ts_queue += ts_seg_len
             n_files += 1
             write_log(
                 pf_playlist,
                 n_files,
-                datetime.now().strftime("%y-%m-%d %H:%M:%S"),
+                datetime.fromtimestamp(ts_seg_start).strftime("%y-%m-%d %H:%M:%S"),
                 pf_next_file,
                 similarity,
             )
@@ -197,16 +192,24 @@ def main(args, params):
 
         # play for set number of transitions
         # TODO: move this to be managed by scheduler and track scheduler state instead
+        current_file = ""
         while n_files < params.n_transitions:
+            if current_file != scheduler.get_current_file():
+                current_file = scheduler.get_current_file()
+                console.log(f"{tag} now playing '{current_file}'")
+
             if q_playback.qsize() < params.n_min_queue_length:
                 pf_next_file, similarity = seeker.get_next()
-                ts_queue += scheduler.enqueue_midi(pf_next_file, q_playback, q_max)
+                ts_seg_len, ts_seg_start = scheduler.enqueue_midi(
+                    pf_next_file, q_playback, q_max
+                )
+                ts_queue += ts_seg_len
                 console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")
                 n_files += 1
                 write_log(
                     pf_playlist,
                     n_files,
-                    datetime.now().strftime("%y-%m-%d %H:%M:%S"),
+                    datetime.fromtimestamp(ts_seg_start).strftime("%y-%m-%d %H:%M:%S"),
                     pf_next_file,
                     similarity,
                 )
@@ -243,7 +246,6 @@ def main(args, params):
         console.log(f"{tag} stopping metronome")
     process_metronome.kill()
     process_metronome.join(timeout=0.5)
-    pygame.mixer.quit()
     if args.verbose:
         console.log(f"{tag} metronome stopped")
 

@@ -15,7 +15,6 @@ from typing import List, Optional
 class MidiRecorder(Worker):
     recorded_notes: List[mido.Message] = []
     is_recording: bool = False
-    n_ticks: int = 0
     stop_event: Optional[Event] = None
     midi_thread: Thread
     ts_window_duration: float = 1.0
@@ -151,7 +150,6 @@ class MidiRecorder(Worker):
                             name="recorder metronome",
                         )
                         self.metro_thread.start()
-                        self.n_ticks += 1
 
                 # record note on/off
                 elif self.is_recording and msg.type in ["note_on", "note_off"]:
@@ -194,7 +192,7 @@ class MidiRecorder(Worker):
         wait_time = (td_start - datetime.now()).total_seconds()
         if wait_time > 0:
             console.log(
-                f"{self.tag} waiting {wait_time:.2f}s until midi recording start"
+                f"{self.tag} waiting {wait_time:.2f} s until midi recording start"
             )
             time.sleep(wait_time)
 

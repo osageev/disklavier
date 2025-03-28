@@ -79,6 +79,8 @@ class Seeker(Worker):
         # TODO: stop doing this
         if hasattr(self.params, "pf_recording"):
             self.pf_recording = self.params.pf_recording
+        if hasattr(self.params, "graph_steps"):
+            self.graph_steps = self.params.graph_steps
         if self.params.metric in self.model_list:
             self.model = self.load_model()
 
@@ -111,8 +113,8 @@ class Seeker(Worker):
 
         # load neighbor table
         # old version -- ignore
-        # pf_neighbor_table = os.path.join(self.p_table, "neighbors.h5")
         pf_neighbor_table = os.path.join(self.p_table, "neighbor.parquet")
+        # pf_neighbor_table = os.path.join(self.p_table, "neighbors.h5")
         console.log(f"{self.tag} looking for neighbor table '{pf_neighbor_table}'")
         if os.path.isfile(pf_neighbor_table):
             with console.status("\t\t\t      loading neighbor file..."):
@@ -186,6 +188,7 @@ class Seeker(Worker):
             case "sequential":
                 next_file = self._get_neighbor()
             case "graph":
+                # TODO: FIX THIS
                 if "player" in self.played_files[-1]:
                     next_file, similarity = self._get_best(hop=False)
                 else:
@@ -227,9 +230,6 @@ class Seeker(Worker):
 
         send_udp(f"setSim {similarity}", "/sim")
         full_path = os.path.join(self.p_dataset, next_file)
-        console.log(
-            f"{self.tag} returning file '{full_path}' with similarity {similarity:.05f}"
-        )
         return full_path, similarity
 
     def get_random(self) -> str:
@@ -261,9 +261,6 @@ class Seeker(Worker):
             try:
                 embedding = self.faiss_index.reconstruct(self.filename_to_index[query_file])  # type: ignore
             except KeyError:
-                console.log(
-                    f"{self.tag} [yellow]Warning: '{query_file}' not found in filename_to_index, using list.index() fallback[/yellow]"
-                )
                 embedding = self.faiss_index.reconstruct(self.filenames.index(query_file))  # type: ignore
         except (ValueError, KeyError) as e:
             if hasattr(self, "pf_recording"):
@@ -452,7 +449,7 @@ class Seeker(Worker):
             console.log(
                 f"{self.tag} returning file [{self.path_position}/{len(self.current_path)}] '{next_file}' with similarity {next_sim:.05f}"
             )
-            console.log(self.current_path)
+            console.log(self.current_path[-5:])
             return next_file, next_sim
 
         seed_file = self.played_files[-1]
@@ -476,10 +473,13 @@ class Seeker(Worker):
 
         # exclude the last three tracks we've played from consideration
         # this way, played tracks CAN be revisited, but only after a few segments
-        # TODO: this is dumb and doesn't actually work as intended. what was i thinking?
-        for played_file in reversed(self.played_files[-3:]):
+        for played_file in self.played_files:
             track = played_file.split("_")[0]
-            seen_tracks.add(track)
+            seen_tracks.add(basename(track))
+        seen_tracks = set(
+            list(seen_tracks)[-self.params.graph_track_revisit_interval :]
+        )
+        console.log(f"{self.tag} seen tracks: {seen_tracks}")
 
         for idx, similarity in zip(indices[0], similarities[0]):
             segment_name = str(self.filenames[idx])
@@ -562,7 +562,9 @@ class Seeker(Worker):
                     seed_key,
                     target_segment,
                     self.played_files,
+                    max_nodes=self.params.graph_steps,
                     max_visits=1,
+                    max_updates=50,
                     allow_transpose=True,
                     allow_shift=True,
                 )
@@ -576,7 +578,7 @@ class Seeker(Worker):
 
                 edge_weights = []
                 for start_node, end_node in list(zip(path[:-1], path[1:])):
-                    edge_weights.append(graph[start_node][end_node]["weight"])
+                    edge_weights.append(1 - graph[start_node][end_node]["weight"])
 
                 if len(self.current_path) > 0:
                     if self.current_path[-1][1] == -1.0:
@@ -588,7 +590,6 @@ class Seeker(Worker):
                     path = path[1:]
                     edge_weights = edge_weights[1:]
 
-                # Store path and weights in the class
                 self.current_path.extend(
                     list(zip([p + ".mid" for p in path], edge_weights))
                 )

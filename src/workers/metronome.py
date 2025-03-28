@@ -31,9 +31,10 @@ class Metronome(Worker):
                         int((now - self.td_start).total_seconds() / self.beat_interval)
                         % self.params.n_beats_per_segment
                     ) + 1
-                    console.log(
-                        f"{self.tag} [grey50]tick {num_beat}/{self.params.n_beats_per_segment}[/grey50]"
-                    )
+                    if self.verbose:
+                        console.log(
+                            f"{self.tag} [grey50]tick {num_beat}/{self.params.n_beats_per_segment}[/grey50]"
+                        )
                     if self.do_tick:
                         # play tick, changing sample on first beat
                         pygame.mixer.Sound(
