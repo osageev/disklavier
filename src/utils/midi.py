@@ -112,7 +112,7 @@ def change_tempo(in_path: str, out_path: str, tempo: int):
 def transform(
     file_path: str, out_dir: str, bpm: int, transformations: Dict, num_beats: int = 8
 ) -> str:
-    new_filename = f"{Path(file_path).stem}_t{transformations["transpose"]:02d}s{transformations["shift"]:02d}"
+    new_filename = f"{Path(file_path).stem}_t{transformations['transpose']:02d}s{transformations['shift']:02d}"
     out_path = os.path.join(out_dir, f"{new_filename}.mid")
 
     if transformations["transpose"] != 0:

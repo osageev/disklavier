@@ -1,11 +1,11 @@
 import os
 import time
-import glob
+from glob import glob
 from omegaconf import OmegaConf
 from argparse import ArgumentParser
 
 from utils import console
-from utils.tables import build_neighbor_table, pitch_histograms, specdiff, classifier
+import utils.tables as table_utils
 
 SUPPORTED_REPS = ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-tpose"]
 
@@ -13,10 +13,10 @@ SUPPORTED_REPS = ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-
 def main(config) -> None:
     start_time = time.time()
     # load files
-    segmented_files = glob.glob(os.path.join(config.out_dir, "segmented", "*.mid"))
+    segmented_files = glob(os.path.join(config.out_dir, "segmented", "*.mid"))
     segmented_files.sort()
     console.log(f"loaded segmented files", segmented_files[:5])
-    augmented_files = glob.glob(os.path.join(config.out_dir, "augmented", "*.mid"))
+    augmented_files = glob(os.path.join(config.out_dir, "augmented", "*.mid"))
     augmented_files.sort()
     console.log(f"loaded augmented files", augmented_files[:5])
 
@@ -24,12 +24,12 @@ def main(config) -> None:
     if config.find_neighbors:
         neighbors_path = os.path.join(config.out_dir, "neighbors.h5")
         if os.path.exists(neighbors_path):
-            console.log(f"neighbor table already exists, delete or remove it")
+            console.log(f"neighbor table already exists, delete or remove it first")
         else:
             console.log(
                 f"building neighbor table for {len(segmented_files)} segmented files"
             )
-            built_n = build_neighbor_table(
+            built_n = table_utils.build_neighbor_table(
                 segmented_files, neighbors_path, config.dataset_name
             )
             if built_n:
@@ -49,16 +49,16 @@ def main(config) -> None:
 
         match rep:
             case "pitch-histogram":
-                resp = pitch_histograms(augmented_files, table_path)
+                resp = table_utils.pitch_histograms(augmented_files, table_path)
                 console.log(
                     f"pitch histogram table built [{resp}] in {time.time() - start_time:.03f} s at '{table_path}'"
                 )
             case "specdiff":
-                specdiff(augmented_files, table_path, device_name=config.device_name)
+                resp = table_utils.specdiff(augmented_files, table_path, device_name=config.device_name)
             case "clf-4note" | "clf-speed" | "clf-tpose":
                 if not os.path.exists(os.path.join(config.out_dir, "specdiff.h5")):
                     console.log("need to generate specdiff table first")
-                    specdiff(
+                    resp = table_utils.specdiff(
                         augmented_files,
                         os.path.join(config.out_dir, "specdiff.h5"),
                         device_name=config.device_name,
@@ -69,7 +69,7 @@ def main(config) -> None:
                     continue
 
                 console.log(f"building {rep} table")
-                classifier(
+                resp = table_utils.classifier(
                     augmented_files,
                     table_path,
                     clf_path,
@@ -80,7 +80,24 @@ def main(config) -> None:
                 console.log(f"supported representations are: {SUPPORTED_REPS}")
                 continue
 
-    # generate FAISS indices
+    # calculate graphs
+    if len(config.graphs) > 0:
+        console.log(f"calculating graphs for {len(config.graphs)} representations: {config.graphs}")
+        graph_dir = os.path.join(config.out_dir, "graphs")
+        if not os.path.exists(graph_dir):
+            os.makedirs(graph_dir)
+
+        for rep in config.graphs:
+            table_path = os.path.join(graph_dir, f"{rep}.json")
+            if os.path.exists(table_path):
+                console.log(f"skipping {rep} because it already exists")
+                continue
+
+            resp = table_utils.graph(
+                os.path.join(config.out_dir, "specdiff.h5"),
+                config.out_dir,
+                config.out_dir,
+            )
     return
 
 

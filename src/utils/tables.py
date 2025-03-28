@@ -1,19 +1,21 @@
 import os
 import time
 import h5py
+import json
 import faiss
+import torch
 import numpy as np
 import pandas as pd
+import networkx as nx
+from glob import glob
 from pretty_midi import PrettyMIDI
+from collections import defaultdict
 from rich.progress import (
     Progress,
     SpinnerColumn,
     TimeElapsedColumn,
     MofNCompleteColumn,
 )
-import os
-import h5py
-import torch
 from diffusers.pipelines.deprecated.spectrogram_diffusion.midi_utils import (
     MidiProcessor,
 )
@@ -213,7 +215,7 @@ def specdiff(
             fillvalue="",
         )
 
-        # calculate embeddings while tracking progress
+        # calculate embeddings
         progress = Progress(
             SpinnerColumn(),
             *Progress.get_default_columns(),
@@ -411,3 +413,62 @@ def _tokenize(files: List[str], out_path: str, fix_time: Optional[bool] = True) 
     console.log(f"tokenized {n_files} files in {time.time() - start_time:.03f} s")
 
     return _check_hdf5(out_path, ["filenames", "tokens"])
+
+def graph(embeddings_path: str, data_dir:str, output_path: str, top_k: int = 1000) -> int:
+    n_graphs = 0
+
+    with h5py.File(embeddings_path, "r") as f:
+        embeddings = [e / np.linalg.norm(e, keepdims=True) for e in f["embeddings"]]  # type: ignore
+        filenames = [str(name[0], "utf-8") for name in f["filenames"]]  # type: ignore
+    df = pd.DataFrame({"embeddings": embeddings}, index=filenames, dtype=np.float32)
+
+
+    print("grouping files")
+    grouped_files = defaultdict(list)
+    for filename in glob(os.path.join(data_dir, "*.mid")):
+        track_name = filename.split("_")[0]
+        grouped_files[track_name].append(basename(filename))
+
+    print("building graphs")
+    progress = Progress(
+        SpinnerColumn(),
+        *Progress.get_default_columns(),
+        TimeElapsedColumn(),
+        MofNCompleteColumn(),
+        refresh_per_second=1,
+    )
+    prim_task = progress.add_task("generating graphs", total=len(grouped_files.items()))
+    with progress:
+        for track, files in grouped_files.items():
+            print(f"building graph for track {track}")
+
+            emb_group = np.stack([df.loc[file, "embeddings"] for file in files])  # type: ignore
+            # compute cosine similarity matrix (dot product works since embeddings are normalized)
+            similarity = emb_group.dot(emb_group.T)
+            # exclude self-similarity by setting the diagonal to -infinity
+            np.fill_diagonal(similarity, -np.inf)
+
+            # for each node, get indices of top_k neighbors with highest cosine similarity
+            neighbors = np.argsort(-similarity, axis=1)[:, :top_k]
+
+            edges = []
+            sec_task = progress.add_task("connecting nodes", total=len(files))
+            for i in range(len(files)):
+                for j in neighbors[i]:
+                    if i < j:
+                        weight = 1 - similarity[i, j]
+                        edges.append((files[i], files[j], float(weight)))
+                progress.advance(sec_task)
+
+            graph = nx.Graph(name=track)
+            graph.add_nodes_from(files)
+            graph.add_weighted_edges_from(edges)
+
+            with open(f"{output_path}/{track}.json", "w") as f:
+                json.dump(nx.node_link_data(graph), f)
+
+            del graph
+            n_graphs += 1
+            progress.advance(prim_task)
+
+    return n_graphs

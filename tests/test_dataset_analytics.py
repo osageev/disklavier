@@ -14,11 +14,11 @@ from rich.progress import (
 
 # filesystem parameters
 # INPUT_DIR = "/media/nova/Datasets/maestro/segments"
-INPUT_DIR = "/media/nova/Datasets/sageev-midi/20250320"
+INPUT_DIR = "/media/scratch/sageev-midi/20250320"
 SEGMENT_DIR = INPUT_DIR + "/segmented"  # basic segmented files
 AUGMENT_DIR = INPUT_DIR + "/augmented"  # ^ + all augmentations
 OUTPUT_DIR = "../data/tests"
-DATASET_NAME = "20250320"
+DATASET_NAME = "20250320-c000"
 
 # dataset parameters
 NUM_BEATS = 9
@@ -36,7 +36,7 @@ OUTLIERS = {
     "min_pitch": 0,  # lowest MIDI note, unusual
     "max_pitch": 127
     - 11,  # within an octave of the highest MIDI note, may cause issues transposing
-    "min_vel": 3,  # anything quieter than this is unlikely
+    "min_vel": 1,  
     "max_vel": 120,  # anything louder than this is unlikely
 }
 

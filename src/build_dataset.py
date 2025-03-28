@@ -21,7 +21,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from utils import basename, console
 from utils.novelty import gen_ssm_and_novelty
 from utils.midi import get_bpm, set_bpm, transform, trim_piano_roll
-from utils.dataset import add_metronome, add_novelty, modify_end_of_track
+from utils.dataset import (
+    add_metronome,
+    add_novelty,
+    modify_end_of_track,
+    add_beats_to_file,
+)
 from typing import List
 
 plt.style.use("dark_background")
@@ -31,7 +36,8 @@ class SegmentOptions:
     def __init__(
         self,
         num_beats: int,
-        metronome: bool,
+        metronome: int,
+        beats: bool,
         novelty: bool,
         pic_dir: str,
         lead_window_beat_frac: int,
@@ -39,6 +45,7 @@ class SegmentOptions:
         self.num_beats = num_beats
         self.lead_window_beat_frac = lead_window_beat_frac
         self.metronome = metronome
+        self.beats = beats
         self.novelty = novelty
         self.pic_dir = pic_dir
 
@@ -200,9 +207,10 @@ def segment_midi(
         segment_midi.instruments.append(instrument)
         segment_midi.write(segment_filename)
         set_bpm(segment_filename, target_bpm)
-
+        if options.beats:
+            add_beats_to_file(segment_filename, segment_filename, target_bpm)
         if options.metronome > 0:
-            add_metronome(segment_filename, options.num_beats)
+            add_metronome(segment_filename, options.num_beats, options.metronome)
         if options.novelty:
             add_novelty(
                 segment_filename,
@@ -211,11 +219,7 @@ def segment_midi(
                 (start, end),
                 options.pic_dir,
             )
-
-        try:
-            modify_end_of_track(segment_filename, segment_length_s, target_bpm)
-        except Exception as e:
-            console.log(f"error modifying end of track for {segment_filename}: {e}")
+        modify_end_of_track(segment_filename, segment_length_s, target_bpm)
 
         new_files.append(segment_filename)
 
@@ -246,6 +250,7 @@ def process_files(
         novelty=args.novelty,
         pic_dir=p_pictures,
         lead_window_beat_frac=args.lead_window_beat_frac,
+        beats=args.beats,
     )
     aug_opts = AugmentOptions(
         num_shifts=args.num_beats,
@@ -392,7 +397,9 @@ def main(args) -> None:
                 for i, file in enumerate(files):
                     file_path = os.path.join(root, file)
                     if i == random_file:
-                        console.log(f"randomly selected file {i}: {basename(file_path)}")
+                        console.log(
+                            f"randomly selected file {i}: {basename(file_path)}"
+                        )
                         mido.MidiFile(file_path).print_tracks()
                     arcname = os.path.relpath(file_path, p_augments)
                     zipf.write(file_path, arcname)
@@ -401,6 +408,7 @@ def main(args) -> None:
     console.log(
         f"[green bold]segmentation complete, {n_files} files generated in {time.time() - start_time:.03f} s"
     )
+
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="dataset builder arguments")
