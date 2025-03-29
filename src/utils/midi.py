@@ -366,7 +366,6 @@ def generate_piano_roll(midi_path, output_path=None, figsize=(12, 8), dpi=100):
             f"\t[green italic]saved piano roll to '{os.path.basename(output_path)}'[/green italic]"
         )
         return output_path
-
     except Exception as e:
         console.log(f"\t[red]error generating piano roll: {e}[/red]")
         return None

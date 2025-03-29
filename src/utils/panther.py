@@ -54,10 +54,10 @@ def calc_embedding(
         sftp.stat(remote_file_path)
         sftp.remove(remote_file_path)
         sftp.remove(os.path.splitext(remote_file_path)[0] + ".pt")
-        console.log(f"{tag} Existing file '{remote_file_path}' deleted.")
+        console.log(f"{tag} existing file '{remote_file_path}' deleted.")
     except FileNotFoundError:
         console.log(
-            f"{tag} No existing file found at '{remote_file_path}'. Proceeding with upload."
+            f"{tag} no existing file found at '{remote_file_path}', proceeding..."
         )
     # upload
     sftp.put(file_path, remote_file_path)
