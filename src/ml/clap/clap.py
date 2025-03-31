@@ -1,10 +1,10 @@
 import os
 import h5py
 import faiss
-import torch
 import laion_clap
 import numpy as np
 from glob import glob
+from datetime import datetime
 
 from rich.progress import (
     Progress,
@@ -13,20 +13,22 @@ from rich.progress import (
     MofNCompleteColumn,
 )
 
-
-input_path = "/media/scratch/sageev-midi/20250320/wavs-alex_gm"
-output_path = "/media/scratch/sageev-midi/20250320/clap-alex_gm.h5"
+start_time = datetime.now()
+sf_name = "sgm"
+input_path = f"/media/scratch/sageev-midi/20250320/wavs-{sf_name}"
+output_path = f"/media/scratch/sageev-midi/20250320/clap-{sf_name}.h5"
+checkpoint_path = "checkpoints/music_speech_audioset_epoch_15_esc_89.98.pt"
 audio_files = list(glob(os.path.join(input_path, "*.wav")))
 audio_files.sort()
 num_files = len(audio_files)
 print(audio_files[:3])
 
-faiss_path = os.path.join(os.path.dirname(output_path), "clap-alex_gm.faiss")
+faiss_path = os.path.join(os.path.dirname(output_path), f"clap-{sf_name}.faiss")
 index = faiss.IndexFlatIP(512)
 vecs = np.zeros((num_files, 512), dtype=np.float32)
 
 model = laion_clap.CLAP_Module(enable_fusion=False, amodel="HTSAT-base")
-model.load_ckpt("music_speech_audioset_epoch_15_esc_89.98.pt")
+model.load_ckpt(checkpoint_path)
 
 with h5py.File(output_path, "w") as out_file:
     # create output datasets
@@ -53,11 +55,28 @@ with h5py.File(output_path, "w") as out_file:
             )
             d_embeddings[i] = embedding
             d_filenames[i] = audio_file
-            vecs[i] = torch.nn.functional.normalize(torch.tensor(embedding), p=2, dim=0)
+            vecs[i] = embedding / np.linalg.norm(embedding, axis=0, keepdims=True)
             progress.advance(emb_task, 1)
 
-    index.add(vecs)
+    index.add(vecs)  # type: ignore
     faiss.write_index(index, faiss_path)
 
 print(f"CLAP embeddings saved to '{output_path}'")
 print(f"FAISS index saved to '{faiss_path}'")
+
+keys = ["filenames", "embeddings"]
+with h5py.File(f"/media/scratch/sageev-midi/20250320/clap-{sf_name}.h5", "r") as f:
+    print(f"checking HDF5 file with keys {f.keys()} for keys: {keys}")
+    for key in keys:
+        if key not in f:
+            print(f"key {key} not found in HDF5 file")
+
+        print(f"{key}:")
+        if key == "filenames":
+            for filename in f[key][:5]:  # type: ignore
+                print(f"\t{str(filename[0], 'utf-8')}")
+        else:
+            for val in f[key][:5]:  # type: ignore
+                print(f"\t{val.shape}")
+
+print(f"embeddings generated in {datetime.now() - start_time}")
