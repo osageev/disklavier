@@ -3,6 +3,7 @@ import time
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
+import mido
 from threading import Thread, Event
 from datetime import datetime
 from typing import Optional
@@ -119,3 +120,90 @@ class AudioRecorder(Worker):
             console.log(f"{self.tag} \tis_recording: {self.is_recording}")
             console.log(f"{self.tag} \tstop_event: {self.stop_event}")
             return False
+
+    def record_query(self, record_path: str) -> float:
+        """
+        Records audio while the keyboard's left pedal is held down.
+
+        Parameters
+        ----------
+        record_path : str
+            Path where the audio recording will be saved.
+
+        Returns
+        -------
+        float
+            Duration of the recording in seconds.
+        """
+        start_time = datetime.now()
+        end_time = None
+        recorded_data = []
+
+        def callback(indata, frames, time, status):
+            if status:
+                console.log(f"{self.tag} status: {status}")
+            recorded_data.append(indata.copy())
+
+        console.log(
+            f"{self.tag} waiting for pedal press (control 67) to start recording"
+        )
+
+        # Initialize audio input stream
+        stream = sd.InputStream(
+            samplerate=self.params.sample_rate,
+            channels=self.params.channels,
+            callback=callback,
+        )
+
+        try:
+            # Open MIDI input port
+            with mido.open_input(self.params.midi_port) as inport:  # type: ignore
+                recording_started = False
+
+                # Start audio stream once MIDI port is open
+                stream.start()
+
+                for msg in inport:
+                    # Check for pedal press/release (control 67)
+                    if (
+                        msg.type == "control_change"
+                        and msg.control == self.params.record
+                    ):
+                        # Pedal pressed
+                        if msg.value > 0 and not recording_started:
+                            start_time = datetime.now()
+                            console.log(
+                                f"{self.tag} pedal pressed, starting audio recording"
+                            )
+                            self.is_recording = True
+                            recording_started = True
+
+                        # Pedal released
+                        elif msg.value == 0 and recording_started:
+                            end_time = datetime.now()
+                            self.is_recording = False
+                            console.log(
+                                f"{self.tag} pedal released, stopping audio recording"
+                            )
+                            break
+        finally:
+            # Stop and close the audio stream
+            stream.stop()
+            stream.close()
+
+        # Calculate duration
+        duration = 0.0
+        if end_time is not None:
+            duration = (end_time - start_time).total_seconds()
+            console.log(f"{self.tag} recorded {duration:.2f} seconds of audio")
+
+        # Save the recording if any data was collected
+        if len(recorded_data) > 0:
+            recorded_array = np.concatenate(recorded_data)
+            sf.write(record_path, recorded_array, self.params.sample_rate)
+            console.log(f"{self.tag} saved audio recording to {record_path}")
+        else:
+            console.log(f"{self.tag} no audio recorded")
+            duration = 0.0
+
+        return duration

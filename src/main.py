@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 import workers
 from utils import console, midi
+from utils.panther import calc_embedding
 from utils.udp import send_udp
 
 tag = "[white]main[/white]  :"
@@ -93,6 +94,16 @@ def main(args, params):
             else:
                 ts_recording_len = midi_recorder.run()
             pf_seed = pf_player_query
+        case "audio":
+            pf_player_query = pf_player_query.replace(".mid", ".wav")
+            ts_recording_len = audio_recorder.record_query(pf_player_query)
+            embedding = calc_embedding(pf_player_query, model="clap")
+            console.log(f"{tag} got embedding {embedding.shape} from pantherino")
+            best_match, best_similarity = seeker.get_match(embedding)
+            console.log(
+                f"{tag} got best match '{best_match}' with similarity {best_similarity}"
+            )
+            pf_seed = best_match
         case "kickstart":  # use specified file as seed
             try:
                 if params.kickstart_path:
@@ -117,7 +128,9 @@ def main(args, params):
     q_playback = PriorityQueue()
     q_max = PriorityQueue()
     td_start = datetime.now() + timedelta(seconds=params.startup_delay)
-    ts_queue = args.bpm * (params.n_beats_per_segment  + 1) / 60  # time in queue in seconds
+    ts_queue = (
+        args.bpm * (params.n_beats_per_segment + 1) / 60
+    )  # time in queue in seconds
     n_files = 1  # number of files played so far
     send_udp(f"setTempo {args.bpm}", "/ctrl")
 
@@ -148,7 +161,10 @@ def main(args, params):
         # add seed to queue
         ts_seg_len, ts_seg_start = scheduler.enqueue_midi(pf_seed, q_playback, q_max)
         ts_queue += ts_seg_len
-
+        console.log(f"{tag} enqueued seed at {ts_seg_start}")
+        console.log(
+            f"{tag} sys start is {td_system_start.timestamp()}, reg start is {td_start.timestamp()}"
+        )
         write_log(
             pf_playlist,
             n_files,
@@ -169,7 +185,10 @@ def main(args, params):
             write_log(
                 pf_playlist,
                 n_files,
-                datetime.fromtimestamp(ts_seg_start).strftime("%y-%m-%d %H:%M:%S"),
+                datetime.fromtimestamp(
+                    td_system_start.timestamp()
+                    + timedelta(seconds=ts_seg_start).total_seconds()
+                ).strftime("%y-%m-%d %H:%M:%S"),
                 pf_next_file,
                 similarity,
             )
@@ -209,7 +228,9 @@ def main(args, params):
                 write_log(
                     pf_playlist,
                     n_files,
-                    datetime.fromtimestamp(ts_seg_start).strftime("%y-%m-%d %H:%M:%S"),
+                    datetime.fromtimestamp(
+                        ts_seg_start - td_system_start.timestamp()
+                    ).strftime("%y-%m-%d %H:%M:%S"),
                     pf_next_file,
                     similarity,
                 )

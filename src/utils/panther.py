@@ -95,7 +95,7 @@ def send_embedding(
         sftp.close()
         ssh.close()
 
-    embedding = torch.load(pf_tensor_local, weights_only=True).numpy().reshape(1, -1)
+    embedding = torch.load(pf_tensor_local, weights_only=False).numpy().reshape(1, -1)
     console.log(f"{tag} loaded embedding {embedding.shape}")
 
     return embedding
