@@ -196,7 +196,7 @@ class Scheduler(Worker):
 
         if self.verbose:
             console.log(
-                f"{self.tag} segment interval is {ts_interval} seconds (from {self.td_start})",
+                f"{self.tag} segment interval is {ts_interval:.03f} seconds (from {self.td_start})",
                 [
                     f"{t:07.03f}s -> {str(self.td_start + timedelta(seconds=t))}"
                     for t in self.ts_transitions

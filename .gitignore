@@ -18,6 +18,7 @@ src/ml/outputs/runs
 *.h5
 *.pt
 
+.cursorignore
 .DS_STORE
 
 # Byte-compiled / optimized / DLL files
