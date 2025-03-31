@@ -5,6 +5,7 @@ import pretty_midi
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from scipy.ndimage import zoom
 
 from typing import Dict, Tuple, List
 
@@ -399,32 +400,66 @@ def get_note_min_max(input_file_path) -> Tuple[int, int]:
     return (lowest_note, highest_note)
 
 
-def trim_piano_roll(piano_roll, min=None, max=None):
+def trim_piano_roll(piano_roll):
     """
-    Trims the piano roll by removing rows above the highest note and below the
-    lowest note.
+    trim piano roll to remove empty rows and columns
 
-    Parameters:
-        piano_roll (np.array): A 2D NumPy array representing the piano roll.
-        min (int): The note to remove everything below. If none is provided, the
-        lowest note in the roll will be used
-        max (int): The note to remove everything above. If none is provided, the
-        highest note in the roll will be used
+    Parameters
+    ----------
+    piano_roll : np.ndarray
+        piano roll array
 
-    Returns:
-        np.array: The trimmed piano roll.
+    Returns
+    -------
+    np.ndarray
+        trimmed piano roll array
     """
-    non_zero_rows = np.where(np.any(piano_roll > 0, axis=1))[0]
+    # find non-zero rows and columns
+    rows = np.any(piano_roll, axis=1)
+    cols = np.any(piano_roll, axis=0)
 
-    if non_zero_rows.size == 0:
-        return piano_roll
+    # get indices of non-zero rows and columns
+    row_indices = np.where(rows)[0]
+    col_indices = np.where(cols)[0]
 
-    lowest_note = non_zero_rows.min() if min is None else min
-    highest_note = non_zero_rows.max() if max is None else max
+    # if no non-zero elements, return empty array
+    if len(row_indices) == 0 or len(col_indices) == 0:
+        return np.array([])
 
-    trimmed_piano_roll = piano_roll[lowest_note : highest_note + 1, :]
+    # trim array
+    return piano_roll[
+        row_indices[0] : row_indices[-1] + 1, col_indices[0] : col_indices[-1] + 1
+    ]
 
-    return trimmed_piano_roll
+
+def upsample_piano_roll(piano_roll, target_height=400, target_width=1200):
+    """
+    upsample piano roll to target resolution while preserving aspect ratio
+
+    Parameters
+    ----------
+    piano_roll : np.ndarray
+        piano roll array
+    target_height : int
+        target height in pixels
+    target_width : int
+        target width in pixels
+
+    Returns
+    -------
+    np.ndarray
+        upsampled piano roll array
+    """
+    if piano_roll.size == 0:
+        return np.zeros((target_height, target_width))
+
+    # calculate zoom factors
+    height, width = piano_roll.shape
+    zoom_height = target_height / height
+    zoom_width = target_width / width
+
+    # upsample using scipy zoom
+    return zoom(piano_roll, (zoom_height, zoom_width), order=0)
 
 
 def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) -> None:

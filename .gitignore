@@ -4,6 +4,7 @@ data/outputs
 data/ableton
 data/models
 data/tables
+data/tests
 notebooks/tmp
 inputs/*
 src/ml/outputs/checkpoints

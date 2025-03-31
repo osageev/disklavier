@@ -275,7 +275,9 @@ class Seeker(Worker):
                     console.log(
                         f"{self.tag} getting [italic bold]{self.params.metric}[/italic bold] embedding for '{pf_new}'"
                     )
-                    embedding = panther.calc_embedding(pf_new, model=self.params.metric)
+                    embedding = panther.send_embedding(
+                        pf_new, model=self.params.metric, mode=self.params.system
+                    )
                     console.log(
                         f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
                     )
@@ -285,7 +287,7 @@ class Seeker(Worker):
                             f"{self.tag} applying {self.params.metric} model to embedding"
                         )
                         embedding = (
-                            self.model.get_hidden(torch.from_numpy(embedding), 1)
+                            self.model(torch.from_numpy(embedding), return_hidden=True)
                             .detach()
                             .numpy()
                         )
