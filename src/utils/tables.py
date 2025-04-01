@@ -143,7 +143,7 @@ def specdiff(
     device_name: str = "cuda:0",
 ) -> bool:
     """
-    Calculate the specdiff for all files.
+    Calculate the spectrogram diffusion embedding for input files.
 
     Parameters
     ----------
@@ -199,7 +199,7 @@ def specdiff(
     with h5py.File(tokens_path, "r") as in_file:
         # load input datasets
         files = in_file["filenames"][:]  # type: ignore
-        console.log(f"processing {num_files} files, e.g.:\n{all_files[:5]}")
+        console.log(f"processing {num_files} files, e.g.:\n{files[:5]}")
         tokens = in_file["tokens"][:]  # type: ignore
         console.log(f"processing {num_files} files, e.g.:\n{tokens[:5]}")
 
@@ -235,15 +235,14 @@ def specdiff(
                         encoder_input_tokens=batch_tokens,
                         encoder_inputs_mask=tokens_mask,
                     )
-                d_embeddings[i : i + batch_size] = [
+                embeddings = [
                     enc[mask].mean(0).cpu().detach()
                     for enc, mask in zip(tokens_encoded, tokens_mask)
                 ]
+
+                d_embeddings[i : i + batch_size] = embeddings
                 vecs[i : i + batch_size] = [
-                    torch.nn.functional.normalize(
-                        enc[mask].mean(0).cpu().detach(), p=2, dim=0
-                    )
-                    for enc, mask in zip(tokens_encoded, tokens_mask)
+                    e / np.linalg.norm(e, keepdims=True) for e in embeddings
                 ]
                 d_filenames[i : i + batch_size] = files[i : i + batch_size]
                 progress.advance(emb_task, batch_size)
@@ -257,6 +256,7 @@ def specdiff(
 
 
 def classifier(
+    type: str,
     all_files: List[str],
     output_path: str,
     model_path: str,
@@ -267,7 +267,6 @@ def classifier(
     device = torch.device(device_name)
 
     # FAISS index
-    faiss_path = os.path.join(os.path.dirname(output_path), "specdiff.faiss")
     index = faiss.IndexFlatIP(128)
     vecs = np.zeros((num_files, 128), dtype=np.float32)
 
@@ -309,7 +308,7 @@ def classifier(
                 batch = batch[0].cuda(device=device)
                 hidden_output = clf(batch, return_hidden=True).cpu().numpy()
                 updated_embeddings.append(hidden_output)
-                vecs[i : i + batch_size] = hidden_output
+                vecs[i : i + batch_size] = hidden_output  # TODO: normalize
                 progress.advance(update_task, batch_size)
         updated_embeddings = np.vstack(updated_embeddings)
 
@@ -321,6 +320,7 @@ def classifier(
     # save index
     console.log("copying vectors to FAISS index")
     index.add(vecs)  # type: ignore
+    faiss_path = os.path.join(os.path.dirname(output_path), f"{type}.faiss")
     faiss.write_index(index, faiss_path)
     console.log(f"FAISS index saved to '{faiss_path}'")
 
@@ -401,7 +401,7 @@ def _tokenize(files: List[str], out_path: str, fix_time: Optional[bool] = True) 
                 # tokens = processor(tmp_file)
                 # console.log(np.array(tokens).shape)
                 # raise Exception("stop here")
-                
+
                 d_tokens[i] = processor(tmp_file)
                 d_filenames[i] = basename(file)
 
@@ -414,7 +414,10 @@ def _tokenize(files: List[str], out_path: str, fix_time: Optional[bool] = True) 
 
     return _check_hdf5(out_path, ["filenames", "tokens"])
 
-def graph(embeddings_path: str, data_dir:str, output_path: str, top_k: int = 1000) -> int:
+
+def graph(
+    embeddings_path: str, data_dir: str, output_path: str, top_k: int = 1000
+) -> int:
     n_graphs = 0
 
     with h5py.File(embeddings_path, "r") as f:
@@ -422,27 +425,30 @@ def graph(embeddings_path: str, data_dir:str, output_path: str, top_k: int = 100
         filenames = [str(name[0], "utf-8") for name in f["filenames"]]  # type: ignore
     df = pd.DataFrame({"embeddings": embeddings}, index=filenames, dtype=np.float32)
 
-
-    print("grouping files")
-    grouped_files = defaultdict(list)
+    console.log("grouping files")
+    grouped_files = defaultdict(list[str])
     for filename in glob(os.path.join(data_dir, "*.mid")):
-        track_name = filename.split("_")[0]
-        grouped_files[track_name].append(basename(filename))
+        track_name = basename(filename).split("_")[0]
+        grouped_files[track_name].append(filename)
 
-    print("building graphs")
+    console.log(f"grouped {len(grouped_files)} tracks:")
+    for track, files in list(grouped_files.items())[-3:]:
+        console.log(f"\t{track}: {len(files):04d} files")
+
+    console.log("building graphs")
     progress = Progress(
         SpinnerColumn(),
         *Progress.get_default_columns(),
         TimeElapsedColumn(),
         MofNCompleteColumn(),
-        refresh_per_second=1,
+        refresh_per_second=2,
     )
     prim_task = progress.add_task("generating graphs", total=len(grouped_files.items()))
     with progress:
         for track, files in grouped_files.items():
-            print(f"building graph for track {track}")
+            print(f"building graph for track {track} with {len(files)} files")
 
-            emb_group = np.stack([df.loc[file, "embeddings"] for file in files])  # type: ignore
+            emb_group = np.stack([df.loc[basename(file), "embeddings"] for file in files])  # type: ignore
             # compute cosine similarity matrix (dot product works since embeddings are normalized)
             similarity = emb_group.dot(emb_group.T)
             # exclude self-similarity by setting the diagonal to -infinity
@@ -465,9 +471,9 @@ def graph(embeddings_path: str, data_dir:str, output_path: str, top_k: int = 100
             graph.add_weighted_edges_from(edges)
 
             with open(f"{output_path}/{track}.json", "w") as f:
-                json.dump(nx.node_link_data(graph), f)
-
+                json.dump(nx.node_link_data(graph, edges="edges"), f)  # type: ignore
             del graph
+
             n_graphs += 1
             progress.advance(prim_task)
 

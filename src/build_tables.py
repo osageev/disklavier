@@ -54,7 +54,9 @@ def main(config) -> None:
                     f"pitch histogram table built [{resp}] in {time.time() - start_time:.03f} s at '{table_path}'"
                 )
             case "specdiff":
-                resp = table_utils.specdiff(augmented_files, table_path, device_name=config.device_name)
+                resp = table_utils.specdiff(
+                    augmented_files, table_path, device_name=config.device_name
+                )
             case "clf-4note" | "clf-speed" | "clf-tpose":
                 if not os.path.exists(os.path.join(config.out_dir, "specdiff.h5")):
                     console.log("need to generate specdiff table first")
@@ -70,6 +72,7 @@ def main(config) -> None:
 
                 console.log(f"building {rep} table")
                 resp = table_utils.classifier(
+                    rep,
                     augmented_files,
                     table_path,
                     clf_path,
@@ -82,7 +85,9 @@ def main(config) -> None:
 
     # calculate graphs
     if len(config.graphs) > 0:
-        console.log(f"calculating graphs for {len(config.graphs)} representations: {config.graphs}")
+        console.log(
+            f"calculating graphs for {len(config.graphs)} representations: {config.graphs}"
+        )
         graph_dir = os.path.join(config.out_dir, "graphs")
         if not os.path.exists(graph_dir):
             os.makedirs(graph_dir)
@@ -95,8 +100,9 @@ def main(config) -> None:
 
             resp = table_utils.graph(
                 os.path.join(config.out_dir, "specdiff.h5"),
-                config.out_dir,
-                config.out_dir,
+                os.path.join(config.out_dir, "augmented"),
+                graph_dir,
+                config.n_graph_connections,
             )
     return
 

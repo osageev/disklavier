@@ -4,6 +4,7 @@ data/outputs
 data/ableton
 data/models
 data/tables
+data/tests
 notebooks/tmp
 inputs/*
 src/ml/outputs/checkpoints
@@ -18,6 +19,7 @@ src/ml/outputs/runs
 *.h5
 *.pt
 
+.cursorignore
 .DS_STORE
 
 # Byte-compiled / optimized / DLL files

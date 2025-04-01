@@ -22,6 +22,7 @@ EMBEDDING_SIZES = {
     "clf-4note": 128,
     "clf-speed": 128,
     "clf-tpose": 128,
+    "clap": 512,
 }
 
 
@@ -29,7 +30,7 @@ class Seeker(Worker):
     # required tables
     filenames: list[str] = []
     faiss_index: faiss.IndexFlatIP
-    neighbor_table: pd.DataFrame
+    neighbor_table: pd.DataFrame | pd.Series
     neighbor_col_priorities = ["next", "next_2", "prev", "prev_2"]
     # forced track change interval
     n_transition_interval: int = 8  # 16 bars since segments are 2 bars
@@ -76,11 +77,6 @@ class Seeker(Worker):
         self.p_dataset = dataset_path
         self.p_playlist = playlist_path
         self.rng = np.random.default_rng(self.params.seed)
-        # TODO: stop doing this
-        if hasattr(self.params, "pf_recording"):
-            self.pf_recording = self.params.pf_recording
-        if hasattr(self.params, "graph_steps"):
-            self.graph_steps = self.params.graph_steps
         if self.params.metric in self.model_list:
             self.model = self.load_model()
 
@@ -112,14 +108,19 @@ class Seeker(Worker):
         console.log(f"{self.tag} FAISS index loaded ({self.faiss_index.ntotal})")
 
         # load neighbor table
-        # old version -- ignore
+        # old version -- backwards compat
         pf_neighbor_table = os.path.join(self.p_table, "neighbor.parquet")
-        # pf_neighbor_table = os.path.join(self.p_table, "neighbors.h5")
+        if not os.path.isfile(pf_neighbor_table):
+            pf_neighbor_table = os.path.join(self.p_table, "neighbors.h5")
         console.log(f"{self.tag} looking for neighbor table '{pf_neighbor_table}'")
         if os.path.isfile(pf_neighbor_table):
             with console.status("\t\t\t      loading neighbor file..."):
-                # self.neighbor_table = pd.read_hdf(pf_neighbor_table, key="neighbors")
-                self.neighbor_table = pd.read_parquet(pf_neighbor_table)
+                if os.path.splitext(pf_neighbor_table)[1] == ".h5":
+                    self.neighbor_table = pd.read_hdf(
+                        pf_neighbor_table, key="neighbors"
+                    )
+                else:
+                    self.neighbor_table = pd.read_parquet(pf_neighbor_table)
                 self.neighbor_table.head()
             console.log(
                 f"{self.tag} loaded {len(self.neighbor_table)}*{len(self.neighbor_table.columns)} neighbor table"
@@ -202,7 +203,7 @@ class Seeker(Worker):
             )
             if "player" in self.played_files[-1].split("_")[0]:
                 base_pch = PrettyMIDI(
-                    os.path.join(self.pf_recording)
+                    os.path.join(self.params.pf_recording)
                 ).get_pitch_class_histogram(True, True)
             else:
                 base_pch = PrettyMIDI(
@@ -248,6 +249,18 @@ class Seeker(Worker):
 
         query_file = basename(self.played_files[-1])
 
+        if self.params.match != "current" and "player" not in query_file:
+            track, segment, augmentation = query_file.split("_")
+            new_query_file = self.neighbor_table.loc[
+                f"{track}_{segment}", self.params.match
+            ]
+            new_query_file = f"{new_query_file}_{augmentation}"
+            if new_query_file is not None:
+                console.log(
+                    f"{self.tag} finding match for '{new_query_file}' instead of '{query_file}' due to match mode {self.params.match}"
+                )
+                query_file = new_query_file
+
         if self.verbose:
             console.log(
                 f"{self.tag} extracted '{self.played_files[-1]}' -> '{query_file}'"
@@ -264,18 +277,20 @@ class Seeker(Worker):
                 embedding = self.faiss_index.reconstruct(self.filenames.index(query_file))  # type: ignore
         except (ValueError, KeyError) as e:
             if hasattr(self, "pf_recording"):
-                pf_new = self.pf_recording
+                pf_new = self.params.pf_recording
             else:
                 pf_new = self.played_files[-1]
             console.log(
                 f"{self.tag}[yellow] unable to find embedding for '{query_file}', calculating manually from '{pf_new}'"
             )
             match self.params.metric:
-                case "specdiff" | "clf-4note" | "clf-speed" | "clf-tpose":
+                case "specdiff" | "clf-4note" | "clf-speed" | "clf-tpose" | "clap":
                     console.log(
                         f"{self.tag} getting [italic bold]{self.params.metric}[/italic bold] embedding for '{pf_new}'"
                     )
-                    embedding = panther.calc_embedding(pf_new, model=self.params.metric)
+                    embedding = panther.send_embedding(
+                        pf_new, model=self.params.metric, mode=self.params.system
+                    )
                     console.log(
                         f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
                     )
@@ -285,7 +300,7 @@ class Seeker(Worker):
                             f"{self.tag} applying {self.params.metric} model to embedding"
                         )
                         embedding = (
-                            self.model.get_hidden(torch.from_numpy(embedding), 1)
+                            self.model(torch.from_numpy(embedding), return_hidden=True)
                             .detach()
                             .numpy()
                         )
@@ -297,9 +312,9 @@ class Seeker(Worker):
                 case "pitch-histogram":
                     if self.verbose:
                         console.log(f"{self.tag} using pitch histogram metric")
-                    embedding = PrettyMIDI(self.pf_recording).get_pitch_class_histogram(
-                        True, True
-                    )
+                    embedding = PrettyMIDI(
+                        self.params.pf_recording
+                    ).get_pitch_class_histogram(True, True)
                     embedding = embedding.reshape(1, -1)
                     console.log(f"{self.tag} {embedding}")
                 case _:
@@ -329,12 +344,12 @@ class Seeker(Worker):
             console.log(f"{self.tag} indices:\n\t", indices[0][:10])
             console.log(f"{self.tag} similarities:\n\t", similarities[0][:10])
 
-        # reformat and filter shifted files as it often sounds bad
+        # reformat and DONT filter shifted files as it often sounds bad
         indices, similarities = zip(
             *[
                 (i, d)
                 for i, d in zip(indices[0], similarities[0])
-                if str(self.filenames[i]).endswith("s00")
+                # if str(self.filenames[i]).endswith("s00")
             ]
         )
 
@@ -343,8 +358,10 @@ class Seeker(Worker):
             next_file = self._get_random()
         else:
             next_file = self._get_neighbor()
-        # TODO: fix this
+        # TODO: fix this (what the hell did i mean by this?)
         played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
+        if self.params.match != "current":
+            played_files.append(query_file)
         for idx, similarity in zip(indices, similarities):
             segment_name = str(self.filenames[idx])
             if "player" in query_file:
@@ -403,8 +420,7 @@ class Seeker(Worker):
         # transforms not needed
         # TODO: panther breaks this
         if len(current_file.split("_")) > 2:
-            track, segment, _ = current_file.split("_")
-            current_file = f"{track}_{segment}.mid"
+            current_file = self.base_file(current_file).split(".")[0]
 
         try:
             for col_name in self.neighbor_col_priorities:
@@ -723,10 +739,6 @@ class Seeker(Worker):
         pieces = os.path.basename(filename).split("_")
         return f"{pieces[0]}_{pieces[1]}.mid"
 
-    def construct_keys(self):
-        for filename in self.played_files:
-            yield f"files:{filename[:-4]}_t00s00.mid"
-
     def load_model(self):
         match self.params.metric:
             case "clamp":
@@ -757,3 +769,35 @@ class Seeker(Worker):
                 raise TypeError(
                     f"{self.tag} Unsupported model specified: {self.params.metric}"
                 )
+
+    def get_match(self, query_embedding: np.ndarray) -> tuple[str, float]:
+        from glob import glob
+
+        console.log(f"{self.tag} loading faiss index")
+        faiss_index = faiss.read_index(
+            "/Users/finlay/Documents/Programming/disklavier/data/tables/20250320/clap-sgm.faiss"
+        )
+        input_path = self.p_dataset.replace("augmented", "segmented")
+        filenames = list(glob(os.path.join(input_path, "*.mid")))
+        filenames.sort()
+        console.log(f"{self.tag} found {len(filenames)} files:\n\t{filenames[:5]}")
+        # ensure that embedding is normalized
+        query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
+        console.log(f"{self.tag} query embedding shape: {query_embedding.shape}")
+        console.log(query_embedding)
+
+        # get matches
+        similarities, indices = faiss_index.search(query_embedding, 3)  # type: ignore
+        if self.verbose:
+            console.log(f"{self.tag} indices:\n\t", indices[0])
+            console.log(f"{self.tag} similarities:\n\t", similarities[0])
+            for i in range(3):
+                console.log(f"{self.tag} filenames:\n\t", filenames[indices[0][i]])
+
+        # get best match
+        best_match = os.path.join(
+            self.p_dataset, basename(filenames[indices[0][0]]) + "_t00s00.mid"
+        )
+        best_similarity = similarities[0][0]
+
+        return best_match, best_similarity

@@ -19,9 +19,7 @@ class Clamp:
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
             console.log(f"{self.tag} Using GPU: {torch.cuda.get_device_name(0)}")
-            console.log(f"{self.tag} Using GPU: {torch.cuda.get_device_name(0)}")
         else:
-            console.log(f"{self.tag} No GPU available, using the CPU instead.")
             console.log(f"{self.tag} No GPU available, using the CPU instead.")
             self.device = torch.device("cpu")
 
@@ -42,7 +40,6 @@ class Clamp:
         self.softmax = torch.nn.Softmax(dim=1)
 
         if self.verbose:
-            console.log(f"{self.tag} Initialization complete.")
             console.log(f"{self.tag} Initialization complete.")
 
     def abc_filter(self, lines: list) -> str:
