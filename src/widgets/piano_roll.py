@@ -1,4 +1,3 @@
-
 import sys
 import time
 import math
@@ -11,7 +10,6 @@ from PySide6.QtWidgets import QApplication, QGraphicsView, QGraphicsScene, QWidg
 from PySide6.QtCore import Qt, QThread, Signal, QRectF, QPointF, QTimer, QObject
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QFont
 
-from .worker import Worker
 
 @dataclass
 class Note:
@@ -37,6 +35,7 @@ class Note:
     similarity: float = 0.0
     is_active: bool = True
     is_playing: bool = False
+
 
 class PianoRollBuilder(QThread):
     note_on_signal = Signal(int, int)
@@ -66,6 +65,7 @@ class PianoRollBuilder(QThread):
         self.running = False
         self.wait()
 
+
 class PianoRollView(QGraphicsView):
     """
     graphical view that displays a piano roll with scrolling notes.
@@ -73,8 +73,8 @@ class PianoRollView(QGraphicsView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.scene = QGraphicsScene(self)
-        self.setScene(self.scene)
+        self._scene = QGraphicsScene(self)
+        self.setScene(self._scene)
 
         # constants
         self.DEBUG = False
@@ -114,7 +114,7 @@ class PianoRollView(QGraphicsView):
         self.tempo_scale = 1.0
 
         # appearance settings
-        self.setRenderHint(QPainter.Antialiasing)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setBackgroundBrush(self.KEY_COLORS["background"])
 
         # update timer
@@ -536,6 +536,7 @@ class MidiListener(QObject):
     """
     Listens for MIDI input and places messages into a queue.
     """
+
     midi_message_received = Signal(object)
 
     def __init__(self, midi_port, queue):
@@ -544,15 +545,17 @@ class MidiListener(QObject):
         self.queue = queue
 
     def run(self):
-        with mido.open_input(self.midi_port) as port:
+        with mido.open_input(self.midi_port) as port:  # type: ignore
             for message in port:
                 self.queue.put(message)
                 self.midi_message_received.emit(message)
+
 
 class WorkerThread(QThread):
     """
     Worker thread to process MIDI messages.
     """
+
     midi_message = Signal(object)
 
     def __init__(self, midi_port, queue):
