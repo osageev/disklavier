@@ -79,6 +79,8 @@ class Seeker(Worker):
         self.rng = np.random.default_rng(self.params.seed)
         if self.params.metric in self.model_list:
             self.model = self.load_model()
+        if not hasattr(self, "match"):
+            self.params.match = "current"
 
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")

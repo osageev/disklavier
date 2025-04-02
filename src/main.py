@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 import workers
 from utils import console, midi
-from utils.panther import calc_embedding
+from utils.panther import send_embedding
 from utils.udp import send_udp
 
 tag = "[white]main[/white]  :"
@@ -97,7 +97,7 @@ def main(args, params):
         case "audio":
             pf_player_query = pf_player_query.replace(".mid", ".wav")
             ts_recording_len = audio_recorder.record_query(pf_player_query)
-            embedding = calc_embedding(pf_player_query, model="clap")
+            embedding = send_embedding(pf_player_query, model="clap")
             console.log(f"{tag} got embedding {embedding.shape} from pantherino")
             best_match, best_similarity = seeker.get_match(embedding)
             console.log(
