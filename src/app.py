@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from PySide6.QtWidgets import QApplication
 
 from utils import console
-from widgets import MainWindow
+from widgets.main_window import MainWindow
 
 
 tag = "[white]main[/white]  :"

@@ -103,6 +103,8 @@ class Seeker(Worker):
         console.log(
             f"{self.tag} created mapping with {len(self.filename_to_index)} entries"
         )
+        for k, v in list(self.filename_to_index.items())[:3]:
+            console.log(f"{self.tag}\t\t'{k}' -> {v}")
 
         self.faiss_index = faiss.read_index(
             os.path.join(self.p_table, f"{self.params.metric}.faiss")
@@ -528,7 +530,7 @@ class Seeker(Worker):
         with open(graph_path, "r") as f:
             graph_json = json.load(f)
 
-        graph = nx.node_link_graph(graph_json)
+        graph = nx.node_link_graph(graph_json, edges="links") # type: ignore
 
         # Try each of the top segments until a path is found
         for i, (target_segment, target_similarity) in enumerate(top_segments):

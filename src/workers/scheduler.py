@@ -56,6 +56,7 @@ class Scheduler(Worker):
         pf_midi: str,
         q_piano: PriorityQueue,
         q_gui: Optional[PriorityQueue] = None,
+        similarity: Optional[float] = None,
     ) -> Tuple[float, float]:
         midi_in = mido.MidiFile(pf_midi)
         # number of seconds/ticks from the start of playback to start playing the file
@@ -111,7 +112,7 @@ class Scheduler(Worker):
                     if q_gui is not None:
                         # TODO: make this 10 seconds a global parameter
                         tt_delay = mido.second2tick(10, TICKS_PER_BEAT, self.tempo)
-                        q_gui.put((tt_abs - tt_delay, msg))
+                        q_gui.put((tt_abs - tt_delay, similarity if similarity is not None else 1.0, msg))
                     # edge case, but it does happen sometimes that multiple recorded notes start at 0, resulting in one note getting bumped to time -1
                     if tt_abs < 0:
                         tt_abs = 0

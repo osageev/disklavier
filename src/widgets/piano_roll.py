@@ -27,7 +27,7 @@ class Note:
 
 class PianoRollBuilder(QThread):
     tag = "[#90EE90]pr bld[/#90EE90]:"
-    note_on_signal = Signal(mido.Message)
+    note_on_signal = Signal(Note)
     note_off_signal = Signal(int)
 
     def __init__(self, midi_queue: Queue, bpm: int, td_start: datetime):
@@ -48,25 +48,29 @@ class PianoRollBuilder(QThread):
 
         while self.running:
             if not self.queue.empty():
-                tt_abs, message = self.queue.get()
-
-                # convert ticks to seconds
+                tt_abs, sim, message = self.queue.get()
                 ts_abs = mido.tick2second(tt_abs, TICKS_PER_BEAT, self.tempo)
 
                 # calculate when to send the message
-                td_now = datetime.now()
-                dt_sleep = self.td_start + timedelta(seconds=ts_abs) - td_now
+                note_start = self.td_start + timedelta(seconds=ts_abs)
+                dt_sleep = note_start - datetime.now()
 
                 # sleep until the correct time if needed
                 if dt_sleep.total_seconds() > 0:
-                    console.log(
-                        f"{self.tag} waiting {dt_sleep.total_seconds():.3f} s to send message: {message}"
-                    )
+                    # console.log(
+                    #     f"{self.tag} waiting {dt_sleep.total_seconds():.3f} s to send message: {message}"
+                    # )
                     time.sleep(dt_sleep.total_seconds())
 
                 # now emit the signal for the appropriate note event
                 if message.type == "note_on" and message.velocity > 0:
-                    self.note_on_signal.emit(message)
+                    note = Note(
+                        message.note,
+                        message.velocity,
+                        note_start.timestamp(),
+                        similarity=sim,
+                    )
+                    self.note_on_signal.emit(note)
                 elif message.type == "note_off" or (
                     message.type == "note_on" and message.velocity == 0
                 ):
@@ -84,6 +88,41 @@ class PianoRollView(QGraphicsView):
     graphical view that displays a piano roll with scrolling notes.
     """
 
+    # constants
+    debug = True
+    timestep_ms = 10  # ms
+    roll_len_ms = 10000  # visible roll duration in ms # TODO: make this 10 seconds a global parameter
+    max_note_dur_ms = 5000  # auto trim notes longer than this
+    MIN_NOTE_HEIGHT = 6
+    MAX_NOTE_HEIGHT = 20
+    MIN_KEY_WIDTH = 30
+    MAX_KEY_WIDTH = 80
+    KEY_COLORS = {
+        "white": QColor(230, 230, 230),
+        "black": QColor(51, 51, 51),
+        "playing": QColor(255, 128, 128),
+        "grid": QColor(178, 178, 178, 128),
+        "background": QColor(38, 38, 38),
+    }
+    MIN_NOTE = 21  # A0
+    MAX_NOTE = 108  # C8
+    NOTE_RANGE = MAX_NOTE - MIN_NOTE + 1
+    default_bpm = 60  # default tempo in BPM
+
+    # variables
+    window_height = 600
+    window_width = 800
+    key_width = 60
+    note_height = 10
+    white_key_width = 60
+    black_key_width = 51  # 85% of white key width
+    current_time = 0
+    notes = []
+    active_notes = {}
+    playing_notes = [0] * NOTE_RANGE
+    current_tempo = default_bpm
+    tempo_scale = 1.0
+
     def __init__(self, parent=None):
         super().__init__(parent)
         if hasattr(parent, "td_start") and parent is not None:
@@ -96,41 +135,6 @@ class PianoRollView(QGraphicsView):
             self.start_time = datetime.now()
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
-
-        # constants
-        self.debug = True
-        self.timestep_ms = 10  # ms
-        self.ROLL_LEN_MS = 10000  # visible roll duration in ms # TODO: make this 10 seconds a global parameter
-        self.MAX_NOTE_DUR_MS = 5000  # auto trim notes longer than this
-        self.MIN_NOTE_HEIGHT = 6
-        self.MAX_NOTE_HEIGHT = 20
-        self.MIN_KEY_WIDTH = 30
-        self.MAX_KEY_WIDTH = 80
-        self.KEY_COLORS = {
-            "white": QColor(230, 230, 230),
-            "black": QColor(51, 51, 51),
-            "playing": QColor(255, 128, 128),
-            "grid": QColor(178, 178, 178, 128),
-            "background": QColor(38, 38, 38),
-        }
-        self.MIN_NOTE = 21  # A0
-        self.MAX_NOTE = 108  # C8
-        self.NOTE_RANGE = self.MAX_NOTE - self.MIN_NOTE + 1
-        self.default_bpm = 60  # default tempo in BPM
-
-        # variables
-        self.window_height = 600
-        self.window_width = 800
-        self.key_width = 60
-        self.note_height = 10
-        self.white_key_width = 60
-        self.black_key_width = 51  # 85% of white key width
-        self.current_time = 0
-        self.notes = []
-        self.active_notes = {}
-        self.playing_notes = [0] * self.NOTE_RANGE
-        self.current_tempo = self.default_bpm
-        self.tempo_scale = 1.0
 
         # appearance settings
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -192,7 +196,7 @@ class PianoRollView(QGraphicsView):
         # adjust time based on tempo scale
         adjusted_time_ms = (time_ms - self.current_time) * self.tempo_scale
         return self.key_width + (
-            (adjusted_time_ms + self.ROLL_LEN_MS) / self.ROLL_LEN_MS
+            (adjusted_time_ms + self.roll_len_ms) / self.roll_len_ms
         ) * (self.window_height - self.key_width)
 
     def is_note_at_keyboard(self, note: Note) -> bool:
@@ -221,11 +225,11 @@ class PianoRollView(QGraphicsView):
 
         # check for stuck notes and end them if they've been active too long
         for note_num, note in list(self.active_notes.items()):
-            if self.current_time - note.start_time > self.MAX_NOTE_DUR_MS:
+            if self.current_time - note.start_time > self.max_note_dur_ms:
                 self.note_off(int(note_num))
 
         # cleanup old notes that are too far in the past
-        cutoff_time = self.current_time - self.ROLL_LEN_MS * 2
+        cutoff_time = self.current_time - self.roll_len_ms * 2
         self.notes = [n for n in self.notes if n.is_active or n.end_time > cutoff_time]
 
         # update playing notes
@@ -234,19 +238,18 @@ class PianoRollView(QGraphicsView):
         # redraw
         self._scene.update()
 
-    def note_on(self, message):
+    def note_on(self, note: Note):
         # check if note already active and end it first
-        if message.note in self.active_notes:
+        if note.pitch in self.active_notes:
             if self.debug:
                 print(
-                    f"Warning: Note {message.note} already active, ending previous note"
+                    f"Warning: Note {note.pitch} already active, ending previous note"
                 )
-            self.note_off(message.note)
+            self.note_off(note.pitch)
 
-        # use current_time as the note's start time
-        new_note = Note(message.note, message.velocity, self.current_time)
-        self.notes.append(new_note)
-        self.active_notes[message.note] = new_note
+        note.start_time = self.current_time
+        self.notes.append(note)
+        self.active_notes[note.pitch] = note
 
     def note_off(self, pitch: int):
         if pitch in self.active_notes:
@@ -343,7 +346,7 @@ class PianoRollView(QGraphicsView):
                 painter.drawLine(self.key_width, y, self.window_height, y)
 
         # draw vertical time markers every second
-        for t in range(0, self.ROLL_LEN_MS + 1, 1000):
+        for t in range(0, self.roll_len_ms + 1, 1000):
             # adjust t based on tempo scale
             adjusted_t = t / self.tempo_scale
             x = self.time_to_x(self.current_time + adjusted_t)
@@ -379,7 +382,7 @@ class PianoRollView(QGraphicsView):
         painter.drawLine(current_x, 0, current_x, self.window_width)
 
     def draw_notes(self, painter):
-        visible_start_time = self.current_time - self.ROLL_LEN_MS
+        visible_start_time = self.current_time - self.roll_len_ms
 
         for note in self.notes:
             # skip notes that are completely before the visible time window
@@ -404,10 +407,20 @@ class PianoRollView(QGraphicsView):
             note_width = max(end_x - start_x, 2)  # ensure a minimum width
 
             # note background scaled by velocity
-            alpha = 0.5 + (note.velocity / 127) * 0.5
+            alpha = 0.25 + (note.velocity / 127) * 0.75
 
             if note.is_active:
-                color = QColor(77, 77, 77, int(alpha * 255))
+                if note.similarity < 0.8:
+                    color = QColor(255, 255, 0, int(alpha * 255))
+                else:
+                    # interpolate between yellow and dark gray based on similarity
+                    # when similarity is 1.0, we get the original dark gray (77,77,77)
+                    # when similarity is 0.8, we get yellow (255,255,0)
+                    t = (note.similarity - 0.8) / 0.2  # normalize to 0-1 range
+                    r = int(77 + (255 - 77) * (1 - t))
+                    g = int(77 + (255 - 77) * (1 - t))
+                    b = int(77 + (0 - 77) * (1 - t))
+                    color = QColor(r, g, b, int(alpha * 255))
             elif note.is_playing:
                 color = QColor(255, 128, 128, int(alpha * 255))
             else:
@@ -429,10 +442,12 @@ class PianoRollWidget(QWidget):
         if parent is not None:
             self.td_start = parent.td_start
             self.bpm = parent.params.bpm
-            console.log(f"{self.tag} using start time: {self.td_start}")
-            console.log(f"{self.tag} using bpm: {self.bpm}")
+            console.log(
+                f"{self.tag} using start time: {self.td_start} and bpm: {self.bpm}"
+            )
         else:
             self.td_start = datetime.now()
+            self.bpm = 60
             console.log(
                 f"{self.tag}[orange bold] no start time found, using current time: {self.td_start} [/orange bold]"
             )
@@ -467,7 +482,7 @@ class PianoRollWidget(QWidget):
 
 
 ###############################################################################
-########################## NOT USED ###########################################
+####################### NOT USED FOR LIVE SYSTEM ##############################
 ###############################################################################
 
 

@@ -8,6 +8,7 @@ from multiprocessing import Process
 from queue import PriorityQueue
 
 import workers
+from workers import Staff
 from utils import console
 from utils.panther import send_embedding
 
@@ -27,7 +28,7 @@ class RunWorker(QtCore.QThread):
         self.tag = main_window.tag
         self.args = main_window.args
         self.params = main_window.params
-        self.workers = main_window.workers
+        self.staff: Staff = main_window.workers
         self.td_system_start = main_window.td_system_start
 
         # Connect signals
@@ -62,18 +63,18 @@ class RunWorker(QtCore.QThread):
                     if ts_recording_len == 0:
                         raise ValueError("no recording found")
                 else:
-                    ts_recording_len = self.workers.midi_recorder.run()
+                    ts_recording_len = self.staff.midi_recorder.run()
                 self.pf_seed = self.pf_player_query
             case "audio":
                 self.pf_player_query = self.pf_player_query.replace(".mid", ".wav")
-                ts_recording_len = self.workers.audio_recorder.record_query(
+                ts_recording_len = self.staff.audio_recorder.record_query(
                     self.pf_player_query
                 )
                 embedding = send_embedding(self.pf_player_query, model="clap")
                 console.log(
                     f"{self.tag} got embedding {embedding.shape} from pantherino"
                 )
-                best_match, best_similarity = self.workers.seeker.get_match(embedding)
+                best_match, best_similarity = self.staff.seeker.get_match(embedding)
                 console.log(
                     f"{self.tag} got best match '{best_match}' with similarity {best_similarity}"
                 )
@@ -89,19 +90,19 @@ class RunWorker(QtCore.QThread):
                     console.log(
                         f"{self.tag} no file specified to kickstart from, choosing randomly"
                     )
-                    self.pf_seed = self.workers.seeker.get_random()
+                    self.pf_seed = self.staff.seeker.get_random()
                     console.log(
                         f"{self.tag} [cyan]RANDOM INIT[/cyan] - '{self.pf_seed}'"
                     )
             case "random" | _:  # choose random file from library
-                self.pf_seed = self.workers.seeker.get_random()
+                self.pf_seed = self.staff.seeker.get_random()
                 console.log(f"{self.tag} [cyan]RANDOM INIT[/cyan] - '{self.pf_seed}'")
 
         if self.params.seeker.mode == "playlist":
             # TODO: implement playlist mode using generated csvs
             raise NotImplementedError("playlist mode not implemented")
 
-        self.workers.seeker.played_files.append(self.pf_seed)
+        self.staff.seeker.played_files.append(self.pf_seed)
 
         q_playback = PriorityQueue()
         q_gui = PriorityQueue()
@@ -113,12 +114,12 @@ class RunWorker(QtCore.QThread):
         )  # time in queue in seconds
         n_files = 1  # number of files played so far
 
-        self.workers.scheduler.td_start = td_start
+        self.staff.scheduler.td_start = td_start
 
         # start audio recording in a separate thread
-        self.e_audio_stop = self.workers.audio_recorder.start_recording(td_start)
+        self.e_audio_stop = self.staff.audio_recorder.start_recording(td_start)
 
-        if self.workers.scheduler.init_schedule(
+        if self.staff.scheduler.init_schedule(
             self.pf_schedule,
             ts_recording_len if self.params.initialization == "recording" else 0,
         ):
@@ -126,20 +127,20 @@ class RunWorker(QtCore.QThread):
         else:
             console.log(f"{self.tag} [red]error initializing recording, exiting")
             if self.e_audio_stop is not None:
-                self.workers.audio_recorder.stop_recording()
+                self.staff.audio_recorder.stop_recording()
             raise FileExistsError("Couldn't initialize MIDI recording file")
 
 		# Switch to piano roll view using signal
         self.s_switch_to_pr.emit(q_gui)
         try:
             # add seed to queue
-            ts_seg_len, ts_seg_start = self.workers.scheduler.enqueue_midi(
-                self.pf_seed, q_playback, q_gui
+            ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
+                self.pf_seed, q_playback, q_gui, 1.0
             )
             ts_queue += ts_seg_len
-            console.log(f"{self.tag} enqueued seed at {ts_seg_start}")
+            console.log(f"{self.tag} enqueued seed at {ts_seg_start:.03f}")
             console.log(
-                f"{self.tag} sys start is {self.td_system_start.timestamp()}, reg start is {td_start.timestamp()}"
+                f"{self.tag} sys start is {self.td_system_start.strftime('%y-%m-%d %H:%M:%S')}, reg start is {td_start.strftime('%y-%m-%d %H:%M:%S')}"
             )
             self.write_log(
                 self.pf_playlist,
@@ -155,9 +156,9 @@ class RunWorker(QtCore.QThread):
                 self.params.initialization == "recording"
                 or self.params.seeker.mode == "graph"
             ):
-                pf_next_file, similarity = self.workers.seeker.get_next()
-                ts_seg_len, ts_seg_start = self.workers.scheduler.enqueue_midi(
-                    pf_next_file, q_playback, q_gui
+                pf_next_file, similarity = self.staff.seeker.get_next()
+                ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
+                    pf_next_file, q_playback, q_gui, similarity
                 )
                 ts_queue += ts_seg_len
                 n_files += 1
@@ -173,22 +174,22 @@ class RunWorker(QtCore.QThread):
                 )
 
             # start player
-            self.workers.player.td_start = td_start
-            self.workers.player.td_last_note = td_start
+            self.staff.player.td_start = td_start
+            self.staff.player.td_last_note = td_start
             thread_player = Thread(
-                target=self.workers.player.play, name="player", args=(q_playback,)
+                target=self.staff.player.play, name="player", args=(q_playback,)
             )
             thread_player.start()
 
             # start midi recording
-            self.midi_stop_event = self.workers.midi_recorder.start_recording(td_start)
+            self.midi_stop_event = self.staff.midi_recorder.start_recording(td_start)
             self.main_window.midi_stop_event = self.midi_stop_event
             # connect recorder to player for velocity updates
-            self.workers.player.set_recorder(self.workers.midi_recorder)
+            self.staff.player.set_recorder(self.staff.midi_recorder)
 
             # start metronome
             metronome = workers.Metronome(
-                self.params.metronome, self.args.bpm, td_start
+                self.params.metronome, self.params.bpm, td_start
             )
             process_metronome = Process(target=metronome.tick, name="metronome")
             process_metronome.start()
@@ -197,15 +198,15 @@ class RunWorker(QtCore.QThread):
             # TODO: move this to be managed by scheduler and track scheduler state instead
             current_file = ""
             while n_files < self.params.n_transitions:
-                if current_file != self.workers.scheduler.get_current_file():
-                    current_file = self.workers.scheduler.get_current_file()
+                if current_file != self.staff.scheduler.get_current_file():
+                    current_file = self.staff.scheduler.get_current_file()
                     console.log(f"{self.tag} now playing '{current_file}'")
                     self.s_status.emit(f"now playing '{current_file}'")
 
                 if q_playback.qsize() < self.params.n_min_queue_length:
-                    pf_next_file, similarity = self.workers.seeker.get_next()
-                    ts_seg_len, ts_seg_start = self.workers.scheduler.enqueue_midi(
-                        pf_next_file, q_playback, q_gui
+                    pf_next_file, similarity = self.staff.seeker.get_next()
+                    ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
+                        pf_next_file, q_playback, q_gui, similarity
                     )
                     ts_queue += ts_seg_len
                     console.log(f"{self.tag} queue time is now {ts_queue:.01f} seconds")
