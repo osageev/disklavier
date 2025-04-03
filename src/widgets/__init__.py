@@ -1,6 +1,7 @@
 import os
 import csv
 import yaml
+from queue import Queue
 from threading import Event
 from omegaconf import OmegaConf
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ import workers
 from utils import console
 from widgets.runner import RunWorker
 from widgets.param_editor import ParameterEditorWidget
+from widgets.piano_roll import PianoRollWidget
 
 from typing import Optional
 
@@ -41,6 +43,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, args, params):
         self.args = args
         self.params = params
+        self.td_system_start = datetime.now()
 
         QtWidgets.QMainWindow.__init__(self)
         self.setWindowTitle("disklavier")
@@ -93,7 +96,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         current_time = QtCore.QTime.currentTime()
         time_text = current_time.toString("hh:mm:ss")
-        self.time_label.setText(time_text)
+        delta = datetime.now() - self.td_system_start
+        delta_text = f"{delta.seconds//3600:02d}:{(delta.seconds//60)%60:02d}:{delta.seconds%60:02d}"
+        self.time_label.setText(time_text + " | " + delta_text)
 
     def init_fs(self):
         """
@@ -114,7 +119,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.p_log, f"player-accompaniment.mid"
         )
         self.pf_schedule = os.path.join(self.p_log, f"schedule.mid")
-        self.pf_max = os.path.join(self.p_log, f"max.mid")
 
         # copy old recording if replaying
         if self.args.replay and self.params.initialization == "recording":
@@ -166,16 +170,16 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.workers = Staff(seeker, player, scheduler, midi_recorder, audio_recorder)
 
+    def switch_to_piano_roll(self, q_gui: Queue):
+        console.log(f"{self.tag} switching to piano roll view")
+        self.piano_roll = PianoRollWidget(q_gui, self)
+        self.setCentralWidget(self.piano_roll)
+        self.status.showMessage("piano roll view activated")
+
     def save_and_start(self, params):
         """
-        save parameters to yaml file and start the application.
-
-        parameters
-        ----------
-        params : dict
-            parameters to save.
+        save parameters to yaml file and start the application
         """
-        self.td_system_start = datetime.now()
         ts_start = self.td_system_start.strftime("%y%m%d-%H%M%S")
 
         # filesystem setup
@@ -184,6 +188,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.args.output,
             f"{ts_start}_{self.params.seeker.metric}_{self.params.initialization}_{self.params.seeker.seed}",
         )
+        os.makedirs(self.p_log, exist_ok=True)
 
         # Create parameters file in p_log
         param_file = os.path.join(self.p_log, "parameters.yaml")
@@ -206,8 +211,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Start the main processing in a QThread
         self.run_thread = RunWorker(self)
-        self.run_thread.status_update.connect(self.status.showMessage)
+        self.run_thread.s_start_time.connect(self.update_start_time)
+        self.run_thread.s_status.connect(self.status.showMessage)
+
         self.run_thread.start()
+
+    def update_start_time(self, start_time):
+        """
+        update the system start time based on the signal from run thread.
+        """
+        self.td_start = start_time
+        if hasattr(self, "piano_roll"):
+            self.piano_roll.td_start = start_time
 
     def write_log(self, filename: str, *args):
         with open(filename, mode="a", newline="") as file:

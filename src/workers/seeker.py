@@ -290,8 +290,9 @@ class Seeker(Worker):
                     console.log(
                         f"{self.tag} getting [italic bold]{self.params.metric}[/italic bold] embedding for '{pf_new}'"
                     )
+                    sys = "test" if hasattr(self.params, "system") else "live"
                     embedding = panther.send_embedding(
-                        pf_new, model=self.params.metric, mode=self.params.system
+                        pf_new, model=self.params.metric, mode=sys
                     )
                     console.log(
                         f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"

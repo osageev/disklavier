@@ -1,12 +1,12 @@
 import os
 import mido
+import time
 from queue import PriorityQueue
 from datetime import datetime, timedelta
 
 from .worker import Worker
 from utils import basename, console
-from utils.midi import csv_to_midi, TICKS_PER_BEAT
-from utils.udp import send_udp
+from utils.midi import csv_to_midi, TICKS_PER_BEAT, get_msg_time
 
 from typing import Optional, Tuple
 
@@ -55,7 +55,7 @@ class Scheduler(Worker):
         self,
         pf_midi: str,
         q_piano: PriorityQueue,
-        q_max: Optional[PriorityQueue] = None,
+        q_gui: Optional[PriorityQueue] = None,
     ) -> Tuple[float, float]:
         midi_in = mido.MidiFile(pf_midi)
         # number of seconds/ticks from the start of playback to start playing the file
@@ -108,9 +108,10 @@ class Scheduler(Worker):
                     #         f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
                     #     )
                     q_piano.put((tt_abs, msg))
-                    if q_max is not None:
-                        tick_delay = mido.second2tick(10, TICKS_PER_BEAT, self.tempo)
-                        q_max.put((tt_abs - tick_delay, msg))
+                    if q_gui is not None:
+                        # TODO: make this 10 seconds a global parameter
+                        tt_delay = mido.second2tick(10, TICKS_PER_BEAT, self.tempo)
+                        q_gui.put((tt_abs - tt_delay, msg))
                     # edge case, but it does happen sometimes that multiple recorded notes start at 0, resulting in one note getting bumped to time -1
                     if tt_abs < 0:
                         tt_abs = 0
@@ -129,9 +130,7 @@ class Scheduler(Worker):
         self.queued_files.append(basename(pf_midi))
         ts_seg_len = mido.tick2second(tt_sum, TICKS_PER_BEAT, self.tempo)
 
-        console.log(
-            f"{self.tag} added {ts_seg_len:.03f} seconds of music to queue"
-        )
+        console.log(f"{self.tag} added {ts_seg_len:.03f} seconds of music to queue")
 
         _ = self._copy_midi(pf_midi)
 
@@ -168,7 +167,7 @@ class Scheduler(Worker):
             tick_track.append(mm_transition)
         tick_track.append(mido.MetaMessage("end_of_track", time=1))
 
-        midi.tracks.append(tick_track )
+        midi.tracks.append(tick_track)
 
         # write to file
         midi.save(pf_midi)
@@ -189,10 +188,9 @@ class Scheduler(Worker):
         # Adjust ts_offset to the next interval
         if ts_offset % ts_interval < ts_beat_length * N_BEATS_TRANSITION_OFFSET:
             ts_offset = ((ts_offset // ts_interval) + 1) * ts_interval
-        seg_range = range(
-            n_stamps
-        )  # if self.recording_mode else range(1, n_stamps + 1)
-        self.ts_transitions.extend([ts_offset + i * ts_interval for i in seg_range])
+        self.ts_transitions.extend(
+            [ts_offset + i * ts_interval for i in range(n_stamps)]
+        )
 
         if self.verbose:
             console.log(
@@ -272,13 +270,13 @@ class Scheduler(Worker):
             out_path,
             verbose=self.verbose,
         )
-    
+
     def get_current_file(self) -> str:
         now = datetime.now()
         for i, ts_transition in enumerate(self.ts_transitions):
             transition_time = self.td_start + timedelta(seconds=ts_transition)
             # console.log(f"{self.tag} checking {now.strftime('%y-%m-%d %H:%M:%S')} against {transition_time.strftime('%y-%m-%d %H:%M:%S')}")
             if now < transition_time:
-                return self.queued_files[i-1]
+                return self.queued_files[i - 1]
 
         return ""

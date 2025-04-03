@@ -1,33 +1,21 @@
-import sys
-import time
-import math
+from datetime import datetime, timedelta
 import mido
+import time
 from queue import Queue
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtWidgets import QApplication, QGraphicsView, QGraphicsScene, QWidget
 from PySide6.QtCore import Qt, QThread, Signal, QRectF, QPointF, QTimer, QObject
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QFont
 
+from utils import console
+from utils.midi import TICKS_PER_BEAT
+
+from typing import Optional
+
 
 @dataclass
 class Note:
-    """
-    represents a note in the piano roll.
-
-    parameters
-    ----------
-    pitch : int
-        midi note number.
-    velocity : int
-        note velocity (0-127).
-    start_time : float
-        time when the note started (in ms).
-    end_time : Optional[float]
-        time when the note ended (in ms), or none if still active.
-    """
-
     pitch: int
     velocity: int
     start_time: float
@@ -38,28 +26,57 @@ class Note:
 
 
 class PianoRollBuilder(QThread):
-    note_on_signal = Signal(int, int)
+    tag = "[#90EE90]pr bld[/#90EE90]:"
+    note_on_signal = Signal(mido.Message)
     note_off_signal = Signal(int)
 
-    def __init__(self, midi_queue: Queue):
+    def __init__(self, midi_queue: Queue, bpm: int, td_start: datetime):
         super().__init__()
         self.queue = midi_queue
+        self.bpm = bpm
+        self.td_start = td_start
         self.running = True
+        self.tempo = mido.bpm2tempo(bpm)
 
     def run(self):
         """
         process messages from the queue and emit signals for note events.
         """
+        console.log(
+            f"{self.tag} start time is {self.td_start.strftime('%H:%M:%S.%f')[:-3]}"
+        )
+
         while self.running:
             if not self.queue.empty():
-                message = self.queue.get()
+                tt_abs, message = self.queue.get()
+
+                # convert ticks to seconds
+                ts_abs = mido.tick2second(tt_abs, TICKS_PER_BEAT, self.tempo)
+
+                # calculate when to send the message
+                td_now = datetime.now()
+                dt_sleep = self.td_start + timedelta(seconds=ts_abs) - td_now
+
+                # sleep until the correct time if needed
+                if dt_sleep.total_seconds() > 0:
+                    console.log(
+                        f"{self.tag} waiting {dt_sleep.total_seconds():.3f}s to process message: {message}"
+                    )
+                    time.sleep(dt_sleep.total_seconds())
+
+                # now emit the signal for the appropriate note event
                 if message.type == "note_on" and message.velocity > 0:
-                    self.note_on_signal.emit(message.note, message.velocity)
+                    self.note_on_signal.emit(message)
                 elif message.type == "note_off" or (
                     message.type == "note_on" and message.velocity == 0
                 ):
                     self.note_off_signal.emit(message.note)
-            time.sleep(0.001)  # Small sleep to prevent CPU hogging
+
+                console.log(
+                    f"{self.tag} processed message {message} at time {datetime.now().strftime('%H:%M:%S.%f')[:-3]}"
+                )
+
+            time.sleep(0.001)  # small sleep to prevent cpu hogging
 
     def stop(self):
         self.running = False
@@ -73,16 +90,24 @@ class PianoRollView(QGraphicsView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        if hasattr(parent, "td_start") and parent is not None:
+            self.start_time = parent.td_start
+            self.bpm = parent.bpm
+            console.log(f"PRV using start time: {self.start_time}")
+            console.log(f"PRV using bpm: {self.bpm}")
+        else:
+            console.log(
+                f"[orange bold] no start time found, using current time [/orange bold]"
+            )
+            self.start_time = datetime.now()
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
 
         # constants
-        self.DEBUG = False
-        self.TIMESTEP = 10  # ms
-        self.ROLL_LEN_MS = 10000  # visible roll duration in ms
+        self.debug = True
+        self.timestep_ms = 10  # ms
+        self.ROLL_LEN_MS = 10000  # visible roll duration in ms # TODO: make this 10 seconds a global parameter
         self.MAX_NOTE_DUR_MS = 5000  # auto trim notes longer than this
-
-        # graphical constants
         self.MIN_NOTE_HEIGHT = 6
         self.MAX_NOTE_HEIGHT = 20
         self.MIN_KEY_WIDTH = 30
@@ -97,7 +122,7 @@ class PianoRollView(QGraphicsView):
         self.MIN_NOTE = 21  # A0
         self.MAX_NOTE = 108  # C8
         self.NOTE_RANGE = self.MAX_NOTE - self.MIN_NOTE + 1
-        self.DEFAULT_TEMPO = 60  # default tempo in BPM
+        self.default_bpm = 60  # default tempo in BPM
 
         # variables
         self.window_height = 600
@@ -110,7 +135,7 @@ class PianoRollView(QGraphicsView):
         self.notes = []
         self.active_notes = {}
         self.playing_notes = [0] * self.NOTE_RANGE
-        self.current_tempo = self.DEFAULT_TEMPO
+        self.current_tempo = self.default_bpm
         self.tempo_scale = 1.0
 
         # appearance settings
@@ -120,10 +145,10 @@ class PianoRollView(QGraphicsView):
         # update timer
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_time)
-        self.timer.start(self.TIMESTEP)
+        self.timer.start(self.timestep_ms)
 
         # calculate dimensions based on initial size
-        self.resize(800, 600)
+        self.resize(800, 1000)
 
     def resizeEvent(self, event):
         """
@@ -138,7 +163,7 @@ class PianoRollView(QGraphicsView):
         self.window_height = self.height()
         self.window_width = self.width()
         self.calculate_dimensions()
-        self.scene.setSceneRect(0, 0, self.window_height, self.window_width)
+        self._scene.setSceneRect(0, 0, self.window_height, self.window_width)
 
     def calculate_dimensions(self):
         """
@@ -182,9 +207,6 @@ class PianoRollView(QGraphicsView):
         return start_x <= self.key_width and end_x >= self.key_width
 
     def update_playing_notes(self):
-        """
-        update the state of which notes are currently playing.
-        """
         # reset all playing notes
         self.playing_notes = [0] * self.NOTE_RANGE
 
@@ -201,10 +223,7 @@ class PianoRollView(QGraphicsView):
                 note.is_playing = False
 
     def update_time(self):
-        """
-        update the current time and manage notes.
-        """
-        self.current_time += self.TIMESTEP
+        self.current_time += self.timestep_ms
 
         # check for stuck notes and end them if they've been active too long
         for note_num, note in list(self.active_notes.items()):
@@ -219,113 +238,64 @@ class PianoRollView(QGraphicsView):
         self.update_playing_notes()
 
         # redraw
-        self.scene.update()
+        self._scene.update()
 
-    def note_on(self, note, velocity):
-        """
-        handle note on event.
-
-        parameters
-        ----------
-        note : int
-            midi note number.
-        velocity : int
-            note velocity (0-127).
-        """
+    def note_on(self, message):
+        console.log(f"received note_on message {message}")
         # check if note already active and end it first
-        if note in self.active_notes:
-            if self.DEBUG:
-                print(f"Warning: Note {note} already active, ending previous note")
-            self.note_off(note)
+        if message.note in self.active_notes:
+            if self.debug:
+                print(
+                    f"Warning: Note {message.note} already active, ending previous note"
+                )
+            self.note_off(message.note)
 
-        new_note = Note(note, velocity, self.current_time)
+        # use current_time as the note's start time
+        new_note = Note(message.note, message.velocity, self.current_time)
         self.notes.append(new_note)
-        self.active_notes[note] = new_note
+        self.active_notes[message.note] = new_note
 
-        if self.DEBUG:
-            print(f"Note ON: {note} velocity: {velocity} time: {self.current_time}")
+        if self.debug:
+            print(
+                f"Note ON: {message.note} velocity: {message.velocity} time: {self.current_time}"
+            )
 
-    def note_off(self, note):
-        """
-        handle note off event.
+    def note_off(self, pitch: int):
+        console.log(f"received note_off at {pitch}")
+        if pitch in self.active_notes:
+            self.active_notes[pitch].end_time = self.current_time
+            self.active_notes[pitch].is_active = False
 
-        parameters
-        ----------
-        note : int
-            midi note number.
-        """
-        if note in self.active_notes:
-            self.active_notes[note].end_time = self.current_time
-            self.active_notes[note].is_active = False
-
-            if self.DEBUG:
-                duration = self.current_time - self.active_notes[note].start_time
-                print(f"Note OFF: {note} duration: {duration} ms")
-
-            del self.active_notes[note]
-        elif self.DEBUG:
-            print(f"Warning: Received noteOff for inactive note: {note}")
+            del self.active_notes[pitch]
+        elif self.debug:
+            print(f"Warning: Received noteOff for inactive note: {pitch}")
 
     def set_tempo(self, bpm):
-        """
-        set the tempo for playback.
-
-        parameters
-        ----------
-        bpm : float
-            tempo in beats per minute.
-        """
         if bpm > 0:
-            if self.DEBUG:
+            if self.debug:
                 print(f"Tempo changed to: {bpm} BPM")
             self.current_tempo = bpm
             # calculate tempo scale factor: 60bpm = 1.0, 120bpm = 2.0, etc.
-            self.tempo_scale = self.current_tempo / self.DEFAULT_TEMPO
-        elif self.DEBUG:
+            self.tempo_scale = self.current_tempo / self.default_bpm
+        elif self.debug:
             print(f"Invalid tempo value: {bpm}")
 
     def cleanup(self):
-        """
-        clean up any active notes.
-        """
         active_note_nums = list(self.active_notes.keys())
-        if self.DEBUG:
+        if self.debug:
             print(f"Cleaning up {len(active_note_nums)} active notes")
 
         for note_num in active_note_nums:
             self.note_off(int(note_num))
 
     def drawBackground(self, painter, rect):
-        """
-        draw the piano roll background.
-
-        parameters
-        ----------
-        painter : QPainter
-            painter object.
-        rect : QRectF
-            rectangle to paint in.
-        """
         super().drawBackground(painter, rect)
 
-        # draw grid
         self.draw_grid(painter)
-
-        # draw notes
         self.draw_notes(painter)
-
-        # draw keyboard
         self.draw_keyboard(painter)
 
     def draw_keyboard(self, painter):
-        """
-        draw the piano keyboard.
-
-        parameters
-        ----------
-        painter : QPainter
-            painter object.
-        """
         # keyboard background
         painter.fillRect(0, 0, self.key_width, self.window_width, QColor(25, 25, 25))
 
@@ -360,14 +330,6 @@ class PianoRollView(QGraphicsView):
                 painter.fillRect(0, y, self.black_key_width, self.note_height, color)
 
     def draw_grid(self, painter):
-        """
-        draw the grid for the piano roll.
-
-        parameters
-        ----------
-        painter : QPainter
-            painter object.
-        """
         # draw main background
         painter.fillRect(
             self.key_width,
@@ -430,14 +392,6 @@ class PianoRollView(QGraphicsView):
         painter.drawLine(current_x, 0, current_x, self.window_width)
 
     def draw_notes(self, painter):
-        """
-        draw the notes on the piano roll.
-
-        parameters
-        ----------
-        painter : QPainter
-            painter object.
-        """
         visible_start_time = self.current_time - self.ROLL_LEN_MS
 
         for note in self.notes:
@@ -480,56 +434,54 @@ class PianoRollView(QGraphicsView):
 
 
 class PianoRollWidget(QWidget):
-    """
-    widget that contains the piano roll view and handles midi input.
+    tag = "[#90FF00]pr wgt[/#90FF00]:"
 
-    parameters
-    ----------
-    message_queue : Queue
-        queue containing midi messages.
-    parent : QWidget, optional
-        parent widget.
-    """
-
-    def __init__(self, message_queue, parent=None):
+    def __init__(self, message_queue: Queue, parent=None):
         super().__init__(parent)
         self.message_queue = message_queue
+        if parent is not None:
+            self.td_start = parent.td_start
+            self.bpm = parent.args.bpm
+            console.log(f"{self.tag} using start time: {self.td_start}")
+            console.log(f"{self.tag} using bpm: {self.bpm}")
+        else:
+            self.td_start = datetime.now()
+            console.log(
+                f"{self.tag}[orange bold] no start time found, using current time: {self.td_start} [/orange bold]"
+            )
 
         # setup layout
         self.setMinimumSize(800, 600)
 
         # create piano roll view
-        self.piano_roll = PianoRollView(self)
+        self.pr_view = PianoRollView(self)
 
         # create worker thread
-        self.worker = PianoRollBuilder(message_queue)
-        self.worker.note_on_signal.connect(self.piano_roll.note_on)
-        self.worker.note_off_signal.connect(self.piano_roll.note_off)
-        self.worker.start()
+        self.pr_builder = PianoRollBuilder(message_queue, self.bpm, self.td_start)
+        self.pr_builder.note_on_signal.connect(self.pr_view.note_on)
+        self.pr_builder.note_off_signal.connect(self.pr_view.note_off)
+        self.pr_builder.start()
+
+    def update_start_time(self, start_time: datetime):
+        """
+        update the start time for both the widget and view.
+        """
+        self.td_start = start_time
+        self.pr_view.start_time = start_time
+        console.log(f"{self.tag} updated start time to {start_time}")
 
     def resizeEvent(self, event):
-        """
-        handle resize events.
-
-        parameters
-        ----------
-        event : QResizeEvent
-            resize event.
-        """
-        self.piano_roll.setGeometry(0, 0, self.width(), self.height())
+        self.pr_view.setGeometry(0, 0, self.width(), self.height())
 
     def closeEvent(self, event):
-        """
-        handle close events and clean up resources.
-
-        parameters
-        ----------
-        event : QCloseEvent
-            close event.
-        """
-        self.worker.stop()
-        self.piano_roll.cleanup()
+        self.pr_builder.stop()
+        self.pr_view.cleanup()
         super().closeEvent(event)
+
+
+###############################################################################
+########################## NOT USED ###########################################
+###############################################################################
 
 
 class MidiListener(QObject):

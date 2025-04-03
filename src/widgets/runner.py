@@ -1,6 +1,5 @@
 import os
 from PySide6 import QtCore
-from utils import console
 from datetime import datetime, timedelta
 import csv
 import time
@@ -9,6 +8,7 @@ from multiprocessing import Process
 from queue import PriorityQueue
 
 import workers
+from utils import console
 from utils.panther import send_embedding
 
 
@@ -17,7 +17,9 @@ class RunWorker(QtCore.QThread):
     worker thread that handles the main application run loop.
     """
 
-    status_update = QtCore.Signal(str)
+    s_status = QtCore.Signal(str)
+    s_start_time = QtCore.Signal(datetime)
+    s_switch_to_pr = QtCore.Signal(object)
 
     def __init__(self, main_window):
         super().__init__()
@@ -28,6 +30,9 @@ class RunWorker(QtCore.QThread):
         self.workers = main_window.workers
         self.td_system_start = main_window.td_system_start
 
+        # Connect signals
+        self.s_switch_to_pr.connect(self.main_window.switch_to_piano_roll)
+
         # File paths from main window
         self.p_log = main_window.p_log
         self.p_playlist = main_window.p_playlist
@@ -36,20 +41,9 @@ class RunWorker(QtCore.QThread):
         self.pf_player_query = main_window.pf_player_query
         self.pf_player_accompaniment = main_window.pf_player_accompaniment
         self.pf_schedule = main_window.pf_schedule
-        self.pf_max = main_window.pf_max
         self.pf_playlist = main_window.pf_playlist
 
     def write_log(self, filename: str, *args):
-        """
-        write a row to a csv log file.
-
-        parameters
-        ----------
-        filename : str
-            path to the log file.
-        *args : any
-            data to write to the log.
-        """
         with open(filename, mode="a", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(args)
@@ -111,7 +105,9 @@ class RunWorker(QtCore.QThread):
 
         q_playback = PriorityQueue()
         q_gui = PriorityQueue()
+
         td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
+        self.s_start_time.emit(td_start)
         ts_queue = (
             self.args.bpm * (self.params.n_beats_per_segment + 1) / 60
         )  # time in queue in seconds
@@ -133,6 +129,8 @@ class RunWorker(QtCore.QThread):
                 self.workers.audio_recorder.stop_recording()
             raise FileExistsError("Couldn't initialize MIDI recording file")
 
+		# Switch to piano roll view using signal
+        self.s_switch_to_pr.emit(q_gui)
         try:
             # add seed to queue
             ts_seg_len, ts_seg_start = self.workers.scheduler.enqueue_midi(
@@ -202,7 +200,7 @@ class RunWorker(QtCore.QThread):
                 if current_file != self.workers.scheduler.get_current_file():
                     current_file = self.workers.scheduler.get_current_file()
                     console.log(f"{self.tag} now playing '{current_file}'")
-                    self.status_update.emit(f"now playing '{current_file}'")
+                    self.s_status.emit(f"now playing '{current_file}'")
 
                 if q_playback.qsize() < self.params.n_min_queue_length:
                     pf_next_file, similarity = self.workers.seeker.get_next()

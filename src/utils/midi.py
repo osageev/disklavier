@@ -6,6 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from scipy.ndimage import zoom
+from datetime import datetime, timedelta
 
 from typing import Dict, Tuple, List
 
@@ -655,3 +656,17 @@ def change_tempo_and_trim(
     mid.tracks = new_tracks
     mid.save(output_file)
     return os.path.isfile(output_file)
+
+
+def get_msg_time(
+    msg, offset: int = 0, start: datetime | None = None, tempo: int = 60
+) -> datetime:
+    if not start:
+        start = datetime.now()
+        console.log(f"[yellow]no start time found, using current time: {start}[/yellow]")
+    console.log(f"msg: {msg}")
+    time_seconds = timedelta(seconds=mido.tick2second(msg.time, TICKS_PER_BEAT, tempo))
+    offset_seconds = timedelta(seconds=mido.tick2second(offset, TICKS_PER_BEAT, tempo))
+    console.log(f"message time: {time_seconds}\t offset_seconds: {offset_seconds}\tstart: {start}")
+    console.log(f"start + time_seconds + offset_seconds: {start + time_seconds + offset_seconds}")
+    return start + time_seconds + offset_seconds

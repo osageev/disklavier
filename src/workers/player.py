@@ -140,13 +140,14 @@ class Player(Worker):
                     f"{self.tag} absolute time is {tt_abs} ticks (delta is {ts_abs:.03f} seconds)"
                 )
 
-            # if self.verbose:
-            #     ts_abs_message_time = mido.tick2second(
-            #         tt_abs, TICKS_PER_BEAT, self.tempo
-            #     )
-            #     console.log(
-            #         f"{self.tag} \ttotal time should be {self.td_start.strftime('%H:%M:%S.%f')} + {ts_abs_message_time:.02f} = {(self.td_start + timedelta(seconds=ts_abs_message_time)).strftime(('%H:%M:%S.%f'))}"
-            #     )
+            # may want to comment this if testing other player features
+            if self.verbose:
+                ts_abs_message_time = mido.tick2second(
+                    tt_abs, TICKS_PER_BEAT, self.tempo
+                )
+                console.log(
+                    f"{self.tag} \ttotal time should be {self.td_start.strftime('%H:%M:%S.%f')} + {ts_abs_message_time:.02f} = {(self.td_start + timedelta(seconds=ts_abs_message_time)).strftime(('%H:%M:%S.%f'))}"
+                )
 
             td_now = datetime.now()
             if not self.first_note:
