@@ -332,7 +332,7 @@ class Seeker(Worker):
             self.faiss_index.add(embedding)  # type: ignore
             self.filenames.append(query_file)
             self.filename_to_index[query_file] = len(self.filenames) - 1
-            console.log(f"{self.tag} added '{query_file}' to index")
+            console.log(f"{self.tag} added [dark_red bold]{query_file}[/dark_red bold] to index")
         query_embedding = np.array(
             embedding,
             dtype=np.float32,
@@ -349,7 +349,7 @@ class Seeker(Worker):
             console.log(f"{self.tag} indices:\n\t", indices[0][:10])
             console.log(f"{self.tag} similarities:\n\t", similarities[0][:10])
 
-        # reformat and DONT filter shifted files as it often sounds bad
+        # reformat and DONT filter shifted files
         indices, similarities = zip(
             *[
                 (i, d)
@@ -368,9 +368,13 @@ class Seeker(Worker):
         if self.params.match != "current":
             played_files.append(query_file)
         for idx, similarity in zip(indices, similarities):
+            if self.filenames[idx] == query_file:
+                # this should always skip the first file
+                continue
             segment_name = str(self.filenames[idx])
             if "player" in query_file:
                 next_file = f"{segment_name}.mid"
+                console.log(f"{self.tag} found player match: '{next_file}'")
                 break
             # dont replay files
             if segment_name in played_files:
@@ -393,7 +397,7 @@ class Seeker(Worker):
             # no shift because it sounds bad
             if (
                 next_segment_name not in played_files
-                and segment_name.endswith("s00")
+                # and segment_name.endswith("s00")
                 # and next_track == last_track
             ):
                 next_file = f"{segment_name}.mid"

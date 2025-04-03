@@ -128,8 +128,6 @@ class Player(Worker):
         while queue.qsize() > 0:
             # Check for velocity updates from recorder
             velocity_updated = self.check_velocity_updates()
-
-            # Adjust playback based on velocity if needed
             if velocity_updated:
                 self.adjust_playback_based_on_velocity()
 
