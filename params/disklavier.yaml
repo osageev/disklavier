@@ -2,7 +2,7 @@ n_beats_per_segment: 8
 n_transitions: 4
 n_min_queue_length: 50
 startup_delay: 10
-initialization: "kickstart" # kickstart random recording audio
+initialization: "recording" # kickstart random recording audio
 # kickstart_path: "data/datasets/20250320/augmented/20241229-094-10_0091-0096_t00s00.mid" # path to midi or matches.json
 kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid" # path to midi or matches.json
 scheduler:

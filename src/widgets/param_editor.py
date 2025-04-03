@@ -1,18 +1,20 @@
 import os
-import yaml
-from omegaconf import OmegaConf
+import omegaconf
 from PySide6 import QtWidgets, QtCore, QtGui
 from utils import console
-from datetime import datetime, timedelta
-import csv
-import time
-from threading import Thread, Event
-from multiprocessing import Process
-from queue import PriorityQueue
-import workers
-from utils import midi
-from utils.panther import send_embedding
-from dataclasses import dataclass
+
+blocked_params = [
+    "n_beats_per_segment",
+    "tag",
+    "lead_bar",
+    "tick_1",
+    "tick_2",
+    "sample_rate",
+    "verbose",
+    "midi_port",
+    "record",
+    "channels",
+]
 
 
 class ParameterEditorWidget(QtWidgets.QWidget):
@@ -33,6 +35,13 @@ class ParameterEditorWidget(QtWidgets.QWidget):
                 "clf-4note",
                 "clf-speed",
                 "clf-tpose",
+            ],
+            "seeker.match": [
+                "current",
+                "next",
+                "prev",
+                "next 2",
+                "prev 2",
             ],
         }
 
@@ -99,22 +108,34 @@ class ParameterEditorWidget(QtWidgets.QWidget):
             return
 
         # Display top-level parameters
-        for key in self.params.keys():
-            if isinstance(self.params[key], (int, float, str, bool)):
+        keys = list(self.params.keys())
+        keys.sort()
+        for key in keys:
+            if (
+                isinstance(self.params[key], (int, float, str, bool))
+                and key not in blocked_params
+            ):
                 self.add_param_row(layout, key, self.params[key])
-            elif isinstance(self.params[key], (dict, OmegaConf)):
+            elif isinstance(
+                self.params[key],
+                (dict, omegaconf.OmegaConf, omegaconf.dictconfig.DictConfig),
+            ):
                 # Create section header
                 section_group = QtWidgets.QGroupBox(key)
                 section_layout = QtWidgets.QVBoxLayout(section_group)
 
                 # Add nested parameters
+                key_added = False
                 for subkey in self.params[key].keys():
-                    full_key = f"{key}.{subkey}"
-                    self.add_param_row(
-                        section_layout, full_key, self.params[key][subkey]
-                    )
+                    if subkey not in blocked_params:
+                        full_key = f"{key}.{subkey}"
+                        self.add_param_row(
+                            section_layout, full_key, self.params[key][subkey]
+                        )
+                        key_added = True
 
-                layout.addWidget(section_group)
+                if key_added:
+                    layout.addWidget(section_group)
 
     def add_param_row(self, layout, key, value):
         """
@@ -241,6 +262,5 @@ class ParameterEditorWidget(QtWidgets.QWidget):
         handle the start button click.
         """
         params = self.get_updated_params()
+        console.log(f"params: {params}")
         self.parent().save_and_start(params)  # type: ignore
-
-

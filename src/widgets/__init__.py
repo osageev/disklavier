@@ -43,6 +43,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, args, params):
         self.args = args
         self.params = params
+        self.params.bpm = self.args.bpm
         self.td_system_start = datetime.now()
 
         QtWidgets.QMainWindow.__init__(self)
@@ -58,7 +59,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # status bar
         self.status = self.statusBar()
-        self.status.showMessage("Parameter editor loaded")
+        self.status.showMessage("parameter editor loaded")
 
         # Window dimensions
         geometry = self.screen().availableGeometry()
@@ -145,7 +146,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         scheduler = workers.Scheduler(
             self.params.scheduler,
-            self.args.bpm,
+            self.params.bpm,
             self.p_log,
             self.p_playlist,
             self.td_system_start,
@@ -157,16 +158,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.args.tables,
             self.args.dataset_path,
             self.p_playlist,
-            self.args.bpm,
+            self.params.bpm,
         )
-        player = workers.Player(self.params.player, self.args.bpm, self.td_system_start)
+        player = workers.Player(self.params.player, self.params.bpm, self.td_system_start)
         midi_recorder = workers.MidiRecorder(
             self.params.recorder,
-            self.args.bpm,
+            self.params.bpm,
             self.pf_player_query,
         )
         audio_recorder = workers.AudioRecorder(
-            self.params.audio, self.args.bpm, self.p_log
+            self.params.audio, self.params.bpm, self.p_log
         )
         self.workers = Staff(seeker, player, scheduler, midi_recorder, audio_recorder)
 
@@ -213,7 +214,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.run_thread = RunWorker(self)
         self.run_thread.s_start_time.connect(self.update_start_time)
         self.run_thread.s_status.connect(self.status.showMessage)
-
         self.run_thread.start()
 
     def update_start_time(self, start_time):

@@ -60,7 +60,7 @@ class PianoRollBuilder(QThread):
                 # sleep until the correct time if needed
                 if dt_sleep.total_seconds() > 0:
                     console.log(
-                        f"{self.tag} waiting {dt_sleep.total_seconds():.3f}s to process message: {message}"
+                        f"{self.tag} waiting {dt_sleep.total_seconds():.3f} s to send message: {message}"
                     )
                     time.sleep(dt_sleep.total_seconds())
 
@@ -71,10 +71,6 @@ class PianoRollBuilder(QThread):
                     message.type == "note_on" and message.velocity == 0
                 ):
                     self.note_off_signal.emit(message.note)
-
-                console.log(
-                    f"{self.tag} processed message {message} at time {datetime.now().strftime('%H:%M:%S.%f')[:-3]}"
-                )
 
             time.sleep(0.001)  # small sleep to prevent cpu hogging
 
@@ -93,8 +89,6 @@ class PianoRollView(QGraphicsView):
         if hasattr(parent, "td_start") and parent is not None:
             self.start_time = parent.td_start
             self.bpm = parent.bpm
-            console.log(f"PRV using start time: {self.start_time}")
-            console.log(f"PRV using bpm: {self.bpm}")
         else:
             console.log(
                 f"[orange bold] no start time found, using current time [/orange bold]"
@@ -241,7 +235,6 @@ class PianoRollView(QGraphicsView):
         self._scene.update()
 
     def note_on(self, message):
-        console.log(f"received note_on message {message}")
         # check if note already active and end it first
         if message.note in self.active_notes:
             if self.debug:
@@ -255,20 +248,14 @@ class PianoRollView(QGraphicsView):
         self.notes.append(new_note)
         self.active_notes[message.note] = new_note
 
-        if self.debug:
-            print(
-                f"Note ON: {message.note} velocity: {message.velocity} time: {self.current_time}"
-            )
-
     def note_off(self, pitch: int):
-        console.log(f"received note_off at {pitch}")
         if pitch in self.active_notes:
             self.active_notes[pitch].end_time = self.current_time
             self.active_notes[pitch].is_active = False
 
             del self.active_notes[pitch]
         elif self.debug:
-            print(f"Warning: Received noteOff for inactive note: {pitch}")
+            print(f"warning: received noteOff for inactive note: {pitch}")
 
     def set_tempo(self, bpm):
         if bpm > 0:
@@ -441,7 +428,7 @@ class PianoRollWidget(QWidget):
         self.message_queue = message_queue
         if parent is not None:
             self.td_start = parent.td_start
-            self.bpm = parent.args.bpm
+            self.bpm = parent.params.bpm
             console.log(f"{self.tag} using start time: {self.td_start}")
             console.log(f"{self.tag} using bpm: {self.bpm}")
         else:

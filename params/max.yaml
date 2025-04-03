@@ -31,16 +31,12 @@ recorder:
   verbose: False
   tick_1: "data/MetronomeUp.wav"
   tick_2: "data/Metronome.wav"
-  midi_port: "LPK25"
-  record: 67 # left pedal
+  midi_port: "from Max 1"
+  record: -1 # ???
 audio:
   tag: "[#af005f]audio [/#af005f]:"
   verbose: True
   sample_rate: 44100
   channels: 1
-  midi_port: "Disklavier"
-  record: 67 # left pedal
-max:
-  tag: "[#0066cc]max   [/#0066cc]:"
-  verbose: False
   midi_port: "to Max 1"
+  record: -1 # ???
