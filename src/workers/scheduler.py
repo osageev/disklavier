@@ -3,6 +3,7 @@ import mido
 import time
 from queue import PriorityQueue
 from datetime import datetime, timedelta
+from PySide6.QtCore import Signal
 
 from .worker import Worker
 from utils import basename, console
@@ -112,7 +113,13 @@ class Scheduler(Worker):
                     if q_gui is not None:
                         # TODO: make this 10 seconds a global parameter
                         tt_delay = mido.second2tick(10, TICKS_PER_BEAT, self.tempo)
-                        q_gui.put((tt_abs - tt_delay, similarity if similarity is not None else 1.0, msg))
+                        q_gui.put(
+                            (
+                                tt_abs - tt_delay,
+                                similarity if similarity is not None else 1.0,
+                                msg,
+                            )
+                        )
                     # edge case, but it does happen sometimes that multiple recorded notes start at 0, resulting in one note getting bumped to time -1
                     if tt_abs < 0:
                         tt_abs = 0

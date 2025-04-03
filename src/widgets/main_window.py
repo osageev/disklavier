@@ -17,7 +17,6 @@ from widgets.piano_roll import PianoRollWidget
 from typing import Optional
 
 
-
 class MainWindow(QtWidgets.QMainWindow):
     tag = "[white]main[/white]  :"
     workers: Staff
@@ -144,7 +143,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.p_playlist,
             self.params.bpm,
         )
-        player = workers.Player(self.params.player, self.params.bpm, self.td_system_start)
+        player = workers.Player(
+            self.params.player, self.params.bpm, self.td_system_start
+        )
         midi_recorder = workers.MidiRecorder(
             self.params.recorder,
             self.params.bpm,
@@ -159,6 +160,10 @@ class MainWindow(QtWidgets.QMainWindow):
         console.log(f"{self.tag} switching to piano roll view")
         self.piano_roll = PianoRollWidget(q_gui, self)
         self.setCentralWidget(self.piano_roll)
+        if hasattr(self, "run_thread") and self.run_thread is not None:
+            self.run_thread.s_transition_times.connect(
+                self.piano_roll.pr_view.update_transitions
+            )
         self.status.showMessage("piano roll view activated")
 
     def save_and_start(self, params):

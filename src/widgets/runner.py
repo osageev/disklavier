@@ -1,11 +1,11 @@
 import os
-from PySide6 import QtCore
-from datetime import datetime, timedelta
 import csv
 import time
+from PySide6 import QtCore
 from threading import Thread
-from multiprocessing import Process
 from queue import PriorityQueue
+from multiprocessing import Process
+from datetime import datetime, timedelta
 
 import workers
 from workers import Staff
@@ -21,6 +21,7 @@ class RunWorker(QtCore.QThread):
     s_status = QtCore.Signal(str)
     s_start_time = QtCore.Signal(datetime)
     s_switch_to_pr = QtCore.Signal(object)
+    s_transition_times = QtCore.Signal(list)
 
     def __init__(self, main_window):
         super().__init__()
@@ -124,6 +125,8 @@ class RunWorker(QtCore.QThread):
             ts_recording_len if self.params.initialization == "recording" else 0,
         ):
             console.log(f"{self.tag} successfully initialized recording")
+            console.log(f"transition times: {self.staff.scheduler.ts_transitions}")
+            self.s_transition_times.emit(self.staff.scheduler.ts_transitions)
         else:
             console.log(f"{self.tag} [red]error initializing recording, exiting")
             if self.e_audio_stop is not None:
@@ -208,6 +211,8 @@ class RunWorker(QtCore.QThread):
                     ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
                         pf_next_file, q_playback, q_gui, similarity
                     )
+                    console.log(f"transition times: {self.staff.scheduler.ts_transitions}")
+                    self.s_transition_times.emit(self.staff.scheduler.ts_transitions)
                     ts_queue += ts_seg_len
                     console.log(f"{self.tag} queue time is now {ts_queue:.01f} seconds")
                     n_files += 1

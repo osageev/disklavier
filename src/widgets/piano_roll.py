@@ -4,9 +4,9 @@ import time
 from queue import Queue
 from dataclasses import dataclass
 
-from PySide6.QtWidgets import QApplication, QGraphicsView, QGraphicsScene, QWidget
-from PySide6.QtCore import Qt, QThread, Signal, QRectF, QPointF, QTimer, QObject
-from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QFont
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QWidget
+from PySide6.QtCore import QThread, Signal, QTimer, QObject
+from PySide6.QtGui import QPainter, QColor, QPen, QFont
 
 from utils import console
 from utils.midi import TICKS_PER_BEAT
@@ -103,6 +103,7 @@ class PianoRollView(QGraphicsView):
         "playing": QColor(255, 128, 128),
         "grid": QColor(178, 178, 178, 128),
         "background": QColor(38, 38, 38),
+        "transition": QColor(0, 200, 0, 128),
     }
     MIN_NOTE = 21  # A0
     MAX_NOTE = 108  # C8
@@ -122,6 +123,7 @@ class PianoRollView(QGraphicsView):
     playing_notes = [0] * NOTE_RANGE
     current_tempo = default_bpm
     tempo_scale = 1.0
+    transition_times = []  # ms
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -278,12 +280,31 @@ class PianoRollView(QGraphicsView):
         for note_num in active_note_nums:
             self.note_off(int(note_num))
 
+    def update_transitions(self, transitions: list[float]):
+        console.log(f"updating transitions: {transitions}")
+        self.transition_times = [
+            t * 1000 for t in transitions
+        ]  # convert to milliseconds
+
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
 
         self.draw_grid(painter)
+        self.draw_transition_lines(painter)  # draw transition lines before notes
         self.draw_notes(painter)
         self.draw_keyboard(painter)
+
+    def draw_transition_lines(self, painter):
+        """
+        draw vertical green lines at transition points.
+        """
+        painter.setPen(QPen(self.KEY_COLORS["transition"], 2))
+        for transition_time in self.transition_times:
+            x = self.time_to_x(transition_time)
+            if (
+                self.key_width <= x <= self.window_height
+            ):  # only draw if in visible area
+                painter.drawLine(x, 0, x, self.window_width)
 
     def draw_keyboard(self, painter):
         # keyboard background
@@ -458,11 +479,19 @@ class PianoRollWidget(QWidget):
         # create piano roll view
         self.pr_view = PianoRollView(self)
 
+        # connect transition signal if parent has it
+        if parent is not None and hasattr(parent, "s_transition_times"):
+            console.log(f"{self.tag} connecting transition signal")
+            parent.s_transition_times.connect(self.pr_view.update_transitions)
+        else:
+            console.log(f"{self.tag} [yellow]no transition signal found[/yellow]")
+
         # create worker thread
         self.pr_builder = PianoRollBuilder(message_queue, self.bpm, self.td_start)
         self.pr_builder.note_on_signal.connect(self.pr_view.note_on)
         self.pr_builder.note_off_signal.connect(self.pr_view.note_off)
         self.pr_builder.start()
+
 
     def update_start_time(self, start_time: datetime):
         """
