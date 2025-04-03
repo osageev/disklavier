@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 import workers
 from utils import console, midi
-from utils.panther import calc_embedding
+from utils.panther import send_embedding
 from utils.udp import send_udp
 
 tag = "[white]main[/white]  :"
@@ -40,7 +40,6 @@ def main(args, params):
     pf_player_query = os.path.join(p_log, f"player-query.mid")
     pf_player_accompaniment = os.path.join(p_log, f"player-accompaniment.mid")
     pf_schedule = os.path.join(p_log, f"schedule.mid")
-    pf_max = os.path.join(p_log, f"max.mid")
 
     # copy old recording if replaying
     if args.replay and params.initialization == "recording":
@@ -77,7 +76,6 @@ def main(args, params):
     midi_stop_event = None
     audio_recorder = workers.AudioRecorder(params.audio, args.bpm, p_log)
     audio_stop_event = None
-    max = workers.Max(params.max, args.bpm, td_system_start, pf_max)
 
     # data setup
     match params.initialization:
@@ -97,7 +95,7 @@ def main(args, params):
         case "audio":
             pf_player_query = pf_player_query.replace(".mid", ".wav")
             ts_recording_len = audio_recorder.record_query(pf_player_query)
-            embedding = calc_embedding(pf_player_query, model="clap")
+            embedding = send_embedding(pf_player_query, model="clap")
             console.log(f"{tag} got embedding {embedding.shape} from pantherino")
             best_match, best_similarity = seeker.get_match(embedding)
             console.log(
@@ -154,10 +152,6 @@ def main(args, params):
 
     # run
     try:
-        # start max
-        max.td_start = td_start
-        max_stop_event = max.play(q_max)
-
         # add seed to queue
         ts_seg_len, ts_seg_start = scheduler.enqueue_midi(pf_seed, q_playback, q_max)
         ts_queue += ts_seg_len
@@ -269,10 +263,6 @@ def main(args, params):
     process_metronome.join(timeout=0.5)
     if args.verbose:
         console.log(f"{tag} metronome stopped")
-
-    # stop max
-    if max_stop_event is not None:
-        max.stop()
 
     # close raw notes file
     scheduler.raw_notes_file.close()

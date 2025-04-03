@@ -233,7 +233,7 @@ class Scheduler(Worker):
 
     def _get_next_transition(self) -> Tuple[float, int]:
         if self.verbose:
-            console.log(f"{self.tag} transition times:\n\t{self.ts_transitions[-5:]}")
+            console.log(f"{self.tag} transition times:\n\t{[f'{t:07.03f} s -> {str(self.td_start + timedelta(seconds=t))}' for t in self.ts_transitions[-5:]]}")
         ts_offset = self.ts_transitions[
             self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
         ]
