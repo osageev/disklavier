@@ -124,12 +124,16 @@ class PianoRollView(QGraphicsView):
     current_tempo = default_bpm
     tempo_scale = 1.0
     transition_times = []  # ms
+    recording_offset = 0  # ms, offset for recording start time
 
     def __init__(self, parent=None):
         super().__init__(parent)
         if hasattr(parent, "td_start") and parent is not None:
             self.start_time = parent.td_start
             self.bpm = parent.bpm
+            # if parent has recording offset, set it
+            if hasattr(parent, "recording_offset"):
+                self.recording_offset = parent.recording_offset
         else:
             console.log(
                 f"[orange bold] no start time found, using current time [/orange bold]"
@@ -195,8 +199,23 @@ class PianoRollView(QGraphicsView):
         )
 
     def time_to_x(self, time_ms: float) -> float:
-        # adjust time based on tempo scale
-        adjusted_time_ms = (time_ms - self.current_time) * self.tempo_scale
+        """
+        convert a time in milliseconds to an x-coordinate on the screen.
+
+        parameters
+        ----------
+        time_ms : float
+            time in milliseconds.
+
+        returns
+        -------
+        float
+            x-coordinate on screen.
+        """
+        # adjust time based on tempo scale and recording offset
+        adjusted_time_ms = (
+            time_ms - self.current_time - self.recording_offset
+        ) * self.tempo_scale
         return self.key_width + (
             (adjusted_time_ms + self.roll_len_ms) / self.roll_len_ms
         ) * (self.window_height - self.key_width)
@@ -281,7 +300,6 @@ class PianoRollView(QGraphicsView):
             self.note_off(int(note_num))
 
     def update_transitions(self, transitions: list[float]):
-        console.log(f"updating transitions: {transitions}")
         self.transition_times = [
             t * 1000 for t in transitions
         ]  # convert to milliseconds
@@ -431,6 +449,10 @@ class PianoRollView(QGraphicsView):
             alpha = 0.25 + (note.velocity / 127) * 0.75
 
             if note.is_active:
+                color = QColor(77, 77, 77, int(alpha * 255))
+            elif note.is_playing:
+                color = QColor(255, 128, 128, int(alpha * 255))
+            else:
                 if note.similarity < 0.8:
                     color = QColor(255, 255, 0, int(alpha * 255))
                 else:
@@ -438,14 +460,10 @@ class PianoRollView(QGraphicsView):
                     # when similarity is 1.0, we get the original dark gray (77,77,77)
                     # when similarity is 0.8, we get yellow (255,255,0)
                     t = (note.similarity - 0.8) / 0.2  # normalize to 0-1 range
-                    r = int(77 + (255 - 77) * (1 - t))
-                    g = int(77 + (255 - 77) * (1 - t))
-                    b = int(77 + (0 - 77) * (1 - t))
+                    r = int(128 + (255 - 128) * (1 - t))
+                    g = int(204 + (255 - 204) * (1 - t))
+                    b = int(255 + (0 - 255) * (1 - t))
                     color = QColor(r, g, b, int(alpha * 255))
-            elif note.is_playing:
-                color = QColor(255, 128, 128, int(alpha * 255))
-            else:
-                color = QColor(128, 204, 255, int(alpha * 255))
 
             painter.fillRect(start_x, y, note_width, self.note_height, color)
 
@@ -457,14 +475,15 @@ class PianoRollView(QGraphicsView):
 class PianoRollWidget(QWidget):
     tag = "[#90FF00]pr wgt[/#90FF00]:"
 
-    def __init__(self, message_queue: Queue, parent=None):
+    def __init__(self, message_queue: Queue, offset: float = 0, parent=None):
         super().__init__(parent)
         self.message_queue = message_queue
+        self.recording_offset = offset * 1000
         if parent is not None:
             self.td_start = parent.td_start
             self.bpm = parent.params.bpm
             console.log(
-                f"{self.tag} using start time: {self.td_start} and bpm: {self.bpm}"
+                f"{self.tag} using start time: {self.td_start}, bpm: {self.bpm}, recording offset: {self.recording_offset}"
             )
         else:
             self.td_start = datetime.now()
@@ -491,7 +510,6 @@ class PianoRollWidget(QWidget):
         self.pr_builder.note_on_signal.connect(self.pr_view.note_on)
         self.pr_builder.note_off_signal.connect(self.pr_view.note_off)
         self.pr_builder.start()
-
 
     def update_start_time(self, start_time: datetime):
         """

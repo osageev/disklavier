@@ -20,7 +20,7 @@ class RunWorker(QtCore.QThread):
 
     s_status = QtCore.Signal(str)
     s_start_time = QtCore.Signal(datetime)
-    s_switch_to_pr = QtCore.Signal(object)
+    s_switch_to_pr = QtCore.Signal(object, float)
     s_transition_times = QtCore.Signal(list)
 
     def __init__(self, main_window):
@@ -31,6 +31,7 @@ class RunWorker(QtCore.QThread):
         self.params = main_window.params
         self.staff: Staff = main_window.workers
         self.td_system_start = main_window.td_system_start
+        self.recording_offset = 0
 
         # Connect signals
         self.s_switch_to_pr.connect(self.main_window.switch_to_piano_roll)
@@ -65,6 +66,7 @@ class RunWorker(QtCore.QThread):
                         raise ValueError("no recording found")
                 else:
                     ts_recording_len = self.staff.midi_recorder.run()
+                self.recording_offset = ts_recording_len
                 self.pf_seed = self.pf_player_query
             case "audio":
                 self.pf_player_query = self.pf_player_query.replace(".mid", ".wav")
@@ -133,8 +135,8 @@ class RunWorker(QtCore.QThread):
                 self.staff.audio_recorder.stop_recording()
             raise FileExistsError("Couldn't initialize MIDI recording file")
 
-		# Switch to piano roll view using signal
-        self.s_switch_to_pr.emit(q_gui)
+        # Switch to piano roll view using signal
+        self.s_switch_to_pr.emit(q_gui, self.recording_offset)
         try:
             # add seed to queue
             ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
@@ -211,7 +213,9 @@ class RunWorker(QtCore.QThread):
                     ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
                         pf_next_file, q_playback, q_gui, similarity
                     )
-                    console.log(f"transition times: {self.staff.scheduler.ts_transitions}")
+                    console.log(
+                        f"transition times: {self.staff.scheduler.ts_transitions}"
+                    )
                     self.s_transition_times.emit(self.staff.scheduler.ts_transitions)
                     ts_queue += ts_seg_len
                     console.log(f"{self.tag} queue time is now {ts_queue:.01f} seconds")
