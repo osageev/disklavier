@@ -140,11 +140,8 @@ class Player(Worker):
 
             # may want to comment this if testing other player features
             if self.verbose:
-                ts_abs_message_time = mido.tick2second(
-                    tt_abs, TICKS_PER_BEAT, self.tempo
-                )
                 console.log(
-                    f"{self.tag} \ttotal time should be {self.td_start.strftime('%H:%M:%S.%f')} + {ts_abs_message_time:.02f} = {(self.td_start + timedelta(seconds=ts_abs_message_time)).strftime(('%H:%M:%S.%f'))}"
+                    f"{self.tag} \ttotal time should be {self.td_start.strftime('%H:%M:%S.%f')} + {ts_abs:.02f} = {(self.td_start + timedelta(seconds=ts_abs)).strftime(('%H:%M:%S.%f'))}"
                 )
 
             td_now = datetime.now()
@@ -158,7 +155,7 @@ class Player(Worker):
                 console.log(
                     f"{self.tag} \tit is {td_now.strftime('%H:%M:%S.%f')} and the last note was played at {self.td_last_note.strftime('%H:%M:%S.%f')}. I will sleep for [{dt_tag}]{dt_sleep.total_seconds()}[/{dt_tag}]s"
                 )
-            self.td_last_note = self.td_last_note + timedelta(seconds=ts_abs)
+            self.td_last_note += timedelta(seconds=ts_abs)
 
             if dt_sleep.total_seconds() > 0:
                 if self.verbose:

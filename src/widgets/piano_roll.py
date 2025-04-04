@@ -47,27 +47,33 @@ class PianoRollBuilder(QThread):
         )
 
         while self.running:
-            if not self.queue.empty():
-                tt_abs, sim, message = self.queue.get()
+            if self.queue.qsize() == 0:
+                time.sleep(0.001)  # small sleep to prevent cpu hogging
+            else:
+                tt_abs, (sim, message) = self.queue.get()
                 ts_abs = mido.tick2second(tt_abs, TICKS_PER_BEAT, self.tempo)
 
                 # calculate when to send the message
-                note_start = self.td_start + timedelta(seconds=ts_abs)
-                dt_sleep = note_start - datetime.now()
+                now = datetime.now()
+                dt_sleep = self.td_start + timedelta(seconds=ts_abs) - now
 
                 # sleep until the correct time if needed
                 if dt_sleep.total_seconds() > 0:
                     # console.log(
-                    #     f"{self.tag} waiting {dt_sleep.total_seconds():.3f} s to send message: {message}"
+                    #     f"{self.tag} \twaiting until {(now + dt_sleep).strftime("%H:%M:%S.%f")[:-3]} to play message: ({message})"
                     # )
                     time.sleep(dt_sleep.total_seconds())
+                # else:
+                #     console.log(
+                #         f"{self.tag} \tplaying message: ({message}) for {self.td_start + timedelta(seconds=ts_abs)} at {now.strftime('%H:%M:%S.%f')[:-3]}"
+                #     )
 
                 # now emit the signal for the appropriate note event
                 if message.type == "note_on" and message.velocity > 0:
                     note = Note(
                         message.note,
                         message.velocity,
-                        note_start.timestamp(),
+                        now.timestamp(),
                         similarity=sim,
                     )
                     self.note_on_signal.emit(note)
@@ -75,8 +81,6 @@ class PianoRollBuilder(QThread):
                     message.type == "note_on" and message.velocity == 0
                 ):
                     self.note_off_signal.emit(message.note)
-
-            time.sleep(0.001)  # small sleep to prevent cpu hogging
 
     def stop(self):
         self.running = False
@@ -476,7 +480,7 @@ class PianoRollWidget(QWidget):
             self.td_start = parent.td_start
             self.bpm = parent.params.bpm
             console.log(
-                f"{self.tag} using start time: {self.td_start}, bpm: {self.bpm}"
+                f"{self.tag} using start time: {self.td_start.strftime('%H:%M:%S.%f')[:-3]}, bpm: {self.bpm}"
             )
         else:
             self.td_start = datetime.now()

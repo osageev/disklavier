@@ -1,6 +1,6 @@
 import os
 import mido
-import time
+import pretty_midi
 from queue import PriorityQueue
 from datetime import datetime, timedelta
 from PySide6.QtCore import Signal
@@ -74,7 +74,7 @@ class Scheduler(Worker):
             )
 
         console.log(
-            f"{self.tag} adding file {self.n_files_queued} to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s)"
+            f"{self.tag} adding file {self.n_files_queued} to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s -> {self.td_start + timedelta(seconds=ts_offset):%H:%M:%S.%f})"
         )
 
         # add messages to queue first so that the player has access ASAP
@@ -116,8 +116,7 @@ class Scheduler(Worker):
                         q_gui.put(
                             (
                                 tt_abs - tt_delay,
-                                similarity if similarity is not None else 1.0,
-                                msg,
+                                (similarity if similarity is not None else 1.0, msg),
                             )
                         )
                     # edge case, but it does happen sometimes that multiple recorded notes start at 0, resulting in one note getting bumped to time -1

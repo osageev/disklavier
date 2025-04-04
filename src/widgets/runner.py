@@ -103,9 +103,7 @@ class RunWorker(QtCore.QThread):
             # TODO: implement playlist mode using generated csvs
             raise NotImplementedError("playlist mode not implemented")
 
-        ts_queue = (
-            self.args.bpm * (self.params.n_beats_per_segment + 1) / 60
-        )  # time in queue in seconds
+        ts_queue = 0
 
         q_playback = PriorityQueue()
         q_gui = PriorityQueue()
@@ -157,7 +155,9 @@ class RunWorker(QtCore.QThread):
             process_metronome = Process(target=metronome.tick, name="metronome")
 
             td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
-            console.log(f"{self.tag} start time set to {td_start.strftime('%y-%m-%d %H:%M:%S')}")
+            console.log(
+                f"{self.tag} start time set to {td_start.strftime('%y-%m-%d %H:%M:%S')}"
+            )
             self.s_start_time.emit(td_start)
             self.staff.scheduler.td_start = td_start
             metronome.td_start = td_start
@@ -186,13 +186,18 @@ class RunWorker(QtCore.QThread):
             # play for set number of transitions
             # TODO: move this to be managed by scheduler and track scheduler state instead
             current_file = ""
+            last_time = time.time()
             while n_files < self.params.n_transitions:
+                current_time = time.time()
+                elapsed = current_time - last_time
+                last_time = current_time
+
                 if current_file != self.staff.scheduler.get_current_file():
                     current_file = self.staff.scheduler.get_current_file()
                     console.log(f"{self.tag} now playing '{current_file}'")
                     self.s_status.emit(f"now playing '{current_file}'")
 
-                if q_playback.qsize() < self.params.n_min_queue_length:
+                if ts_queue < self.params.startup_delay * 2:
                     pf_next_file, similarity = self.staff.seeker.get_next()
                     ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
                         pf_next_file, q_playback, q_gui, similarity
@@ -211,8 +216,8 @@ class RunWorker(QtCore.QThread):
                         similarity,
                     )
 
-                time.sleep(0.1)
-                ts_queue -= 0.1
+                time.sleep(0.001)
+                ts_queue -= elapsed
                 if not thread_player.is_alive():
                     console.log(f"{self.tag} player ran out of notes, exiting")
                     thread_player.join(0.1)

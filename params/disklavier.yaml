@@ -44,7 +44,3 @@ audio:
   channels: 1
   midi_port: "Disklavier"
   record: 67 # left pedal
-max:
-  tag: "[#0066cc]max   [/#0066cc]:"
-  verbose: False
-  midi_port: "to Max 1"
