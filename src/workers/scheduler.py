@@ -74,7 +74,7 @@ class Scheduler(Worker):
             )
 
         console.log(
-            f"{self.tag} adding file {self.n_files_queued} to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s, so {str(self.td_start + timedelta(seconds=ts_offset))})"
+            f"{self.tag} adding file {self.n_files_queued} to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s)"
         )
 
         # add messages to queue first so that the player has access ASAP
@@ -144,7 +144,7 @@ class Scheduler(Worker):
 
         return ts_seg_len, ts_offset
 
-    def init_schedule(self, pf_midi: str, offset_s: float = 0) -> bool:
+    def init_schedule(self, pf_midi: str, offset_s: float = 0):
         """Initialize a MIDI file to hold a playback recording."""
         if self.verbose:
             console.log(f"{self.tag} initializing output file with offset {offset_s} s")
@@ -180,8 +180,6 @@ class Scheduler(Worker):
         # write to file
         midi.save(pf_midi)
 
-        return os.path.isfile(pf_midi)
-
     def _gen_transitions(
         self,
         ts_offset: float = 0,
@@ -202,11 +200,8 @@ class Scheduler(Worker):
 
         if self.verbose:
             console.log(
-                f"{self.tag} segment interval is {ts_interval:.03f} seconds (from {self.td_start})",
-                [
-                    f"{t:07.03f}s -> {str(self.td_start + timedelta(seconds=t))}"
-                    for t in self.ts_transitions
-                ],
+                f"{self.tag} segment interval is {ts_interval:.03f} seconds",
+                [f"{t:07.03f} s" for t in self.ts_transitions],
             )
 
         transitions = []
@@ -239,7 +234,9 @@ class Scheduler(Worker):
 
     def _get_next_transition(self) -> Tuple[float, int]:
         if self.verbose:
-            console.log(f"{self.tag} transition times:\n\t{[f'{t:07.03f} s -> {str(self.td_start + timedelta(seconds=t))}' for t in self.ts_transitions[-5:]]}")
+            console.log(
+                f"{self.tag} transition times:\n\t{[f'{t:07.03f} s' for t in self.ts_transitions[-5:]]}"
+            )
         ts_offset = self.ts_transitions[
             self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
         ]

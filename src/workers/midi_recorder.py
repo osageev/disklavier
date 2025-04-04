@@ -150,18 +150,30 @@ class MidiRecorder(Worker):
                             name="recorder metronome",
                         )
                         self.metro_thread.start()
+                        t_recording_start = datetime.now()
 
-                # record note on/off
                 elif self.is_recording and msg.type in ["note_on", "note_off"]:
                     current_time = datetime.now()
                     if len(self.recorded_notes) == 0:
                         # set times to start from this point
                         start_time = datetime.now()
+                        # time since last beat
+
+                        # calculate ticks since the start of the previous beat
+                        time_since_recording = (
+                            start_time - t_recording_start
+                        ).total_seconds()
+                        beats_elapsed = time_since_recording * self.bpm / 60.0
+                        fraction_of_beat = beats_elapsed % 1.0
+                        ticks_since_prev_beat = int(
+                            fraction_of_beat * TICKS_PER_BEAT
+                        )
+
                         if self.verbose:
                             console.log(
-                                f"{self.tag} first note received at {start_time.strftime('%H:%M:%S.%f')}"
+                                f"{self.tag} first note received at {start_time.strftime('%H:%M:%S.%f')} ({(start_time - t_recording_start).total_seconds():.02f} s) ({ticks_since_prev_beat} ticks into first beat)"
                             )
-                        msg = msg.copy(time=0)
+                        msg = msg.copy(time=ticks_since_prev_beat)
                     else:
                         msg = msg.copy(
                             time=int(

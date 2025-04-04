@@ -2,8 +2,8 @@ n_beats_per_segment: 8
 n_transitions: 4
 n_min_queue_length: 50
 startup_delay: 10
-initialization: "random" # kickstart random recording
-kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid" # path to midi or matches.json
+initialization: "recording" # kickstart random recording
+kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid"
 scheduler:
   tag: "[green]schedl[/green]:"
   verbose: True
@@ -11,8 +11,10 @@ scheduler:
 seeker:
   tag: "[yellow]seeker[/yellow]:"
   verbose: True
-  seed: 12346
+  seed: 1000
+  system: "synth"
   mode: "best" # best easy repeat random sequential playlist graph
+  match: "current"
   metric: "specdiff" # pitch-histogram specdiff clf-4note clf-speed clf-tpose
   graph_steps: 9
   graph_track_revisit_interval: 3
@@ -28,15 +30,15 @@ metronome:
   do_tick: True
 recorder:
   tag: "[#d70000]record[/#d70000]:"
-  verbose: False
+  verbose: True
   tick_1: "data/MetronomeUp.wav"
   tick_2: "data/Metronome.wav"
-  midi_port: "LPK25"
+  midi_port: 'LPK25'
   record: 64 # sustain
 audio:
   tag: "[#af005f]audio [/#af005f]:"
   verbose: True
   sample_rate: 44100
   channels: 1
-  midi_port: "to Max 1"
-  record: 64 # sustain
+  midi_port: 'Disklavier'
+  record: 64

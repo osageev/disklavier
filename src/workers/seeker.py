@@ -1,19 +1,18 @@
 import os
+import json
 import torch
 import faiss
 import numpy as np
 import pandas as pd
+import networkx as nx
 from shutil import copy2
 from pretty_midi import PrettyMIDI
 from scipy.spatial.distance import cosine
-import json
-import networkx as nx
 
 from .worker import Worker
 from utils import basename, console, panther
 from utils.models import Classifier
 from utils.modes import find_path
-from utils.udp import send_udp
 
 SUPPORTED_EXTENSIONS = (".mid", ".midi")
 EMBEDDING_SIZES = {
@@ -233,7 +232,6 @@ class Seeker(Worker):
 
         self.played_files.append(os.path.basename(next_file))
 
-        send_udp(f"setSim {similarity}", "/sim")
         full_path = os.path.join(self.p_dataset, next_file)
         return full_path, similarity
 
@@ -279,60 +277,23 @@ class Seeker(Worker):
                 embedding = self.faiss_index.reconstruct(self.filename_to_index[query_file])  # type: ignore
             except KeyError:
                 embedding = self.faiss_index.reconstruct(self.filenames.index(query_file))  # type: ignore
-        except (ValueError, KeyError) as e:
-            if hasattr(self, "pf_recording"):
-                pf_new = self.params.pf_recording
-            else:
-                pf_new = self.played_files[-1]
+        except (ValueError, KeyError):
+            pf_new = self.played_files[-1]
+            # if "player" in pf_new:
+            #     pf_new = self.augment_recording(pf_new)
+
             console.log(
                 f"{self.tag}[yellow] unable to find embedding for '{query_file}', calculating manually from '{pf_new}'"
             )
-            match self.params.metric:
-                case "specdiff" | "clf-4note" | "clf-speed" | "clf-tpose" | "clap":
-                    console.log(
-                        f"{self.tag} getting [italic bold]{self.params.metric}[/italic bold] embedding for '{pf_new}'"
-                    )
-                    sys = "test" if hasattr(self.params, "system") else "live"
-                    embedding = panther.send_embedding(
-                        pf_new, model=self.params.metric, mode=sys
-                    )
-                    console.log(
-                        f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
-                    )
-
-                    if self.params.metric != "specdiff" and self.model is not None:
-                        console.log(
-                            f"{self.tag} applying {self.params.metric} model to embedding"
-                        )
-                        embedding = (
-                            self.model(torch.from_numpy(embedding), return_hidden=True)
-                            .detach()
-                            .numpy()
-                        )
-                        console.log(
-                            f"{self.tag} got {self.params.metric} embedding {embedding.shape}"
-                        )
-                case "clamp":
-                    raise NotImplementedError("CLaMP model is not currently supported")
-                case "pitch-histogram":
-                    if self.verbose:
-                        console.log(f"{self.tag} using pitch histogram metric")
-                    embedding = PrettyMIDI(
-                        self.params.pf_recording
-                    ).get_pitch_class_histogram(True, True)
-                    embedding = embedding.reshape(1, -1)
-                    console.log(f"{self.tag} {embedding}")
-                case _:
-                    console.log(f"{self.tag} unsupported metric: {self.params.metric}")
-                    raise ValueError(
-                        f"{self.tag} unsupported metric: {self.params.metric}"
-                    )
 
             # Add the new embedding to the index and update filenames list and dictionary
+            embedding = self._get_embedding(pf_new)
             self.faiss_index.add(embedding)  # type: ignore
             self.filenames.append(query_file)
             self.filename_to_index[query_file] = len(self.filenames) - 1
-            console.log(f"{self.tag} added [dark_red bold]{query_file}[/dark_red bold] to index")
+            console.log(
+                f"{self.tag} added [dark_red bold]{query_file}[/dark_red bold] to index"
+            )
         query_embedding = np.array(
             embedding,
             dtype=np.float32,
@@ -396,7 +357,8 @@ class Seeker(Worker):
                     break
             # no shift because it sounds bad
             if (
-                next_segment_name not in played_files
+                next_segment_name
+                not in played_files
                 # and segment_name.endswith("s00")
                 # and next_track == last_track
             ):
@@ -725,6 +687,152 @@ class Seeker(Worker):
                         file_path = f"{q}.mid"
                         return file_path, 0.0
         return "", 0.0
+
+    def _get_embedding(self, pf_midi: str) -> np.ndarray:
+        match self.params.metric:
+            case "specdiff" | "clf-4note" | "clf-speed" | "clf-tpose" | "clap":
+                console.log(
+                    f"{self.tag} getting [italic bold]{self.params.metric}[/italic bold] embedding for '{pf_midi}'"
+                )
+                embedding = panther.send_embedding(
+                    pf_midi, model=self.params.metric, mode=self.params.system
+                )
+                console.log(
+                    f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
+                )
+
+                if self.params.metric != "specdiff" and self.model is not None:
+                    console.log(
+                        f"{self.tag} applying {self.params.metric} model to embedding"
+                    )
+                    embedding = (
+                        self.model(torch.from_numpy(embedding), return_hidden=True)
+                        .detach()
+                        .numpy()
+                    )
+                    console.log(
+                        f"{self.tag} got {self.params.metric} embedding {embedding.shape}"
+                    )
+            case "clamp":
+                raise NotImplementedError("CLaMP model is not currently supported")
+            case "pitch-histogram":
+                if self.verbose:
+                    console.log(f"{self.tag} using pitch histogram metric")
+                embedding = PrettyMIDI(
+                    self.params.pf_recording
+                ).get_pitch_class_histogram(True, True)
+                embedding = embedding.reshape(1, -1)
+                console.log(f"{self.tag} {embedding}")
+            case _:
+                console.log(f"{self.tag} unsupported metric: {self.params.metric}")
+                raise ValueError(f"{self.tag} unsupported metric: {self.params.metric}")
+
+        return embedding
+
+    def augment_recording(self, pf_midi: str) -> str:
+        """
+        augment a midi recording with variations of the original.
+
+        Parameters
+        ----------
+        pf_midi : str
+            path to midi file.
+
+        Returns
+        -------
+        str
+            path to the original midi file.
+        """
+        import mido
+        import os
+        from utils.midi import (
+            create_first_half_twice,
+            create_second_half_twice,
+            create_last_beat_repeats,
+        )
+
+        console.log(f"{self.tag} augmenting recording '{pf_midi}'")
+        midi = mido.MidiFile(pf_midi)
+
+        # calculate total time in ticks
+        total_ticks = 0
+        for msg in midi.tracks[0]:
+            total_ticks += msg.time
+
+        # calculate number of beats (ticks per beat = 220)
+        ticks_per_beat = 220
+        total_beats = total_ticks / ticks_per_beat
+        console.log(f"{self.tag} detected {total_beats:.2f} beats in midi file")
+
+        # create output directory if it doesn't exist
+        output_dir = os.path.dirname(pf_midi)
+        base_name = os.path.splitext(os.path.basename(pf_midi))[0]
+
+        # create augmentations
+        augmentations = {
+            "first_half_twice": create_first_half_twice(midi),
+            "second_half_twice": create_second_half_twice(midi),
+            "last_beat_x8": create_last_beat_repeats(midi, 8, 1),
+            "last_two_beats_x4": create_last_beat_repeats(midi, 4, num_beats=2),
+        }
+
+        # if recording starts too close to second beat, skip augmentation
+        first_note_time = 0
+        for msg in midi.tracks[0]:
+            if msg.type == "note_on" and msg.velocity > 0:
+                first_note_time = msg.time
+                break
+
+        console.log(f"{self.tag} first note time: {first_note_time}")
+        if ticks_per_beat * 7 / 8 < first_note_time < ticks_per_beat:
+            console.log(
+                f"{self.tag} first note too close to second beat, skipping augmentation"
+            )
+        else:
+            # add padding to original and save
+            original_padded = self._add_beat_padding(midi, ticks_per_beat)
+            original_path = os.path.join(output_dir, f"{base_name}_original_padded.mid")
+            original_padded.save(original_path)
+            console.log(f"{self.tag} saved padded original to '{original_path}'")
+
+        # save augmentations
+        for name, midi_obj in augmentations.items():
+            # add padding
+            padded = self._add_beat_padding(midi_obj, ticks_per_beat)
+            output_path = os.path.join(output_dir, f"{base_name}_{name}.mid")
+            padded.save(output_path)
+            console.log(f"{self.tag} saved augmentation '{name}' to '{output_path}'")
+
+        raise Exception("test")
+        return pf_midi
+
+    def _add_beat_padding(self, midi, ticks_per_beat):
+        """
+        add a beat of silence to the beginning of a midi file.
+
+        Parameters
+        ----------
+        midi : mido.MidiFile
+            midi file to pad.
+        ticks_per_beat : int
+            ticks per beat.
+
+        Returns
+        -------
+        mido.MidiFile
+            padded midi file.
+        """
+
+        from copy import deepcopy
+
+        padded_midi = deepcopy(midi)
+
+        # add silence at the beginning (adjust first message time)
+        if len(padded_midi.tracks[0]) > 0:
+            first_msg = padded_midi.tracks[0][0]
+            first_msg.time += ticks_per_beat
+
+        return padded_midi
 
     def transform(self, midi_file: str = "") -> str:
         pf_in = self.base_file(self.played_files[-1]) if midi_file == "" else midi_file
