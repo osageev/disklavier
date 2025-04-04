@@ -52,25 +52,33 @@ class MainWindow(QtWidgets.QMainWindow):
         # self.setFixedSize(int(geometry.width() * 0.8), int(geometry.height() * 0.8))
 
     def _build_timer(self):
-        # Create time label
-        self.time_label = QtWidgets.QLabel()
-        self.time_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        self.time_label.setMinimumWidth(100)
+        # Create velocity label (left side)
+        self.velocity_label = QtWidgets.QLabel("Velocity: <b>0.0</b>")
+        self.velocity_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.velocity_label.setMinimumWidth(120)
+        font = self.velocity_label.font()
+        font.setPointSize(font.pointSize() + 1)
+        self.velocity_label.setFont(font)
+        self.toolbar.addWidget(self.velocity_label)
 
-        # Add spacer to push time label to the right
+        # Add spacer between velocity and time
         spacer = QtWidgets.QWidget()
         spacer.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-
         self.toolbar.addWidget(spacer)
+
+        # Create time label (right side)
+        self.time_label = QtWidgets.QLabel()
+        self.time_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+        self.time_label.setMinimumWidth(100)
         self.toolbar.addWidget(self.time_label)
 
-        # Timer to update the time
+        # Timer to update the time and velocity
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self._update_time)
-        self.timer.start(1000)  # update every second
+        self.timer.start(100)  # update every 100ms for smoother velocity updates
 
         # Initial time update
         self._update_time()
@@ -84,6 +92,22 @@ class MainWindow(QtWidgets.QMainWindow):
         delta = datetime.now() - self.td_system_start
         delta_text = f"{delta.seconds//3600:02d}:{(delta.seconds//60)%60:02d}:{delta.seconds%60:02d}"
         self.time_label.setText(time_text + " | " + delta_text)
+
+        # Update velocity display if workers are initialized
+        if hasattr(self, "workers") and hasattr(self.workers, "midi_recorder"):
+            avg_vel = self.workers.midi_recorder.avg_velocity
+
+            # Determine color based on velocity
+            if avg_vel < 40:
+                color = "light blue"
+            elif avg_vel < 80:
+                color = "orange"
+            else:
+                color = "red"
+
+            self.velocity_label.setText(
+                f"Velocity: <b><font color='{color}'>{avg_vel:.1f}</font></b>"
+            )
 
     def init_fs(self):
         """
