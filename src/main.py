@@ -12,7 +12,6 @@ from datetime import datetime, timedelta
 import workers
 from utils import console, midi
 from utils.panther import send_embedding
-from utils.udp import send_udp
 
 tag = "[white]main[/white]  :"
 
@@ -121,72 +120,61 @@ def main(args, params):
         # TODO: implement playlist mode using generated csvs
         raise NotImplementedError("playlist mode not implemented")
 
-    seeker.played_files.append(pf_seed)
-
-    q_playback = PriorityQueue()
-    q_max = PriorityQueue()
-    td_start = datetime.now() + timedelta(seconds=params.startup_delay)
     ts_queue = (
         args.bpm * (params.n_beats_per_segment + 1) / 60
     )  # time in queue in seconds
-    n_files = 1  # number of files played so far
-    send_udp(f"setTempo {args.bpm}", "/ctrl")
-
-    scheduler.td_start = td_start
-
-    # start audio recording in a separate thread
-    # TODO: fix ~1-beat delay in audio recording startup
-    audio_stop_event = audio_recorder.start_recording(td_start)
-
+    q_playback = PriorityQueue()
     # calculate first few transitions
-    if scheduler.init_schedule(
+    scheduler.init_schedule(
         pf_schedule,
         ts_recording_len if params.initialization == "recording" else 0,
-    ):
-        console.log(f"{tag} successfully initialized recording")
-    else:
-        console.log(f"{tag} [red]error initializing recording, exiting")
-        if audio_stop_event is not None:
-            audio_recorder.stop_recording()
-        raise FileExistsError("Couldn't initialize MIDI recording file")
+    )
+    console.log(f"{tag} successfully initialized recording")
+
+    # add seed to queue
+    ts_seg_len, ts_seg_start = scheduler.enqueue_midi(pf_seed, q_playback)
+    ts_queue += ts_seg_len
+    seeker.played_files.append(pf_seed)
+    n_files = 1  # number of files played so far
+    console.log(f"{tag} enqueued seed at {ts_seg_start}")
+    write_log(
+        pf_playlist,
+        n_files,
+        datetime.fromtimestamp(ts_seg_start).strftime("%y-%m-%d %H:%M:%S"),
+        pf_seed,
+        "----",
+    )
+
+    # add first match to queue
+    pf_next_file, similarity = seeker.get_next()
+    ts_seg_len, ts_seg_start = scheduler.enqueue_midi(pf_next_file, q_playback)
+    ts_queue += ts_seg_len
+    n_files += 1
+    write_log(
+        pf_playlist,
+        n_files,
+        datetime.fromtimestamp(
+            td_system_start.timestamp()
+            + timedelta(seconds=ts_seg_start).total_seconds()
+        ).strftime("%y-%m-%d %H:%M:%S"),
+        pf_next_file,
+        similarity,
+    )
 
     # run
     try:
-        # add seed to queue
-        ts_seg_len, ts_seg_start = scheduler.enqueue_midi(pf_seed, q_playback, q_max)
-        ts_queue += ts_seg_len
-        console.log(f"{tag} enqueued seed at {ts_seg_start}")
-        console.log(
-            f"{tag} sys start is {td_system_start.timestamp()}, reg start is {td_start.timestamp()}"
-        )
-        write_log(
-            pf_playlist,
-            n_files,
-            datetime.fromtimestamp(ts_seg_start).strftime("%y-%m-%d %H:%M:%S"),
-            pf_seed,
-            "----",
-        )
+        td_start = datetime.now() + timedelta(seconds=params.startup_delay / 2)
+        # start metronome
+        console.log(f"{tag} starting metronome for {td_start}")
+        metronome = workers.Metronome(params.metronome, args.bpm, td_start)
+        process_metronome = Process(target=metronome.tick, name="metronome")
+        process_metronome.start()
 
-        # preload first match
-        # TODO: check if this is necessary
-        if params.initialization == "recording" or params.seeker.mode == "graph":
-            pf_next_file, similarity = seeker.get_next()
-            ts_seg_len, ts_seg_start = scheduler.enqueue_midi(
-                pf_next_file, q_playback, q_max
-            )
-            ts_queue += ts_seg_len
-            n_files += 1
-            write_log(
-                pf_playlist,
-                n_files,
-                datetime.fromtimestamp(
-                    td_system_start.timestamp()
-                    + timedelta(seconds=ts_seg_start).total_seconds()
-                ).strftime("%y-%m-%d %H:%M:%S"),
-                pf_next_file,
-                similarity,
-            )
+        scheduler.td_start = td_start
 
+        # start audio recording in a separate thread
+        # TODO: fix ~1-beat delay in audio recording startup
+        audio_stop_event = audio_recorder.start_recording(td_start)
         # start player
         player.td_start = td_start
         player.td_last_note = td_start
@@ -198,10 +186,6 @@ def main(args, params):
         # connect recorder to player for velocity updates
         player.set_recorder(midi_recorder)
 
-        # start metronome
-        metronome = workers.Metronome(params.metronome, args.bpm, td_start)
-        process_metronome = Process(target=metronome.tick, name="metronome")
-        process_metronome.start()
 
         # play for set number of transitions
         # TODO: move this to be managed by scheduler and track scheduler state instead
@@ -214,7 +198,7 @@ def main(args, params):
             if q_playback.qsize() < params.n_min_queue_length:
                 pf_next_file, similarity = seeker.get_next()
                 ts_seg_len, ts_seg_start = scheduler.enqueue_midi(
-                    pf_next_file, q_playback, q_max
+                    pf_next_file, q_playback
                 )
                 ts_queue += ts_seg_len
                 console.log(f"{tag} queue time is now {ts_queue:.01f} seconds")

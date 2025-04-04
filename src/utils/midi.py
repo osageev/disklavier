@@ -654,4 +654,201 @@ def change_tempo_and_trim(
 
     mid.tracks = new_tracks
     mid.save(output_file)
+
     return os.path.isfile(output_file)
+
+
+def create_first_half_twice(midi):
+    """
+    create a midi file with the first half repeated twice.
+
+    Parameters
+    ----------
+    midi : mido.MidiFile
+        original midi file.
+
+    Returns
+    -------
+    mido.MidiFile
+        new midi file with the first half played twice.
+    """
+    return beat_repeats(midi, mode="first_half", repeats=2, num_beats=0)
+
+
+def create_second_half_twice(midi):
+    """
+    create a midi file with the second half repeated twice.
+
+    Parameters
+    ----------
+    midi : mido.MidiFile
+        original midi file.
+
+    Returns
+    -------
+    mido.MidiFile
+        new midi file with the second half played twice.
+    """
+    return beat_repeats(midi, mode="second_half", repeats=2, num_beats=0)
+
+
+def create_last_beat_repeats(midi: mido.MidiFile, repeats: int, num_beats: int = 1):
+    """
+    create a midi file with the last beat(s) repeated multiple times.
+
+    Parameters
+    ----------
+    midi : mido.MidiFile
+        original midi file.
+    repeats : int
+        number of times to repeat the section.
+    num_beats : int
+        number of beats to repeat.
+
+    Returns
+    -------
+    mido.MidiFile
+        new midi file with the last beat(s) repeated.
+    """
+    return beat_repeats(midi, mode="last", repeats=repeats, num_beats=num_beats)
+
+
+def beat_repeats(
+    midi: mido.MidiFile, mode: str = "last", repeats: int = 1, num_beats: int = 1
+) -> mido.MidiFile:
+    """
+    create a midi file with beats repeated multiple times.
+
+    Parameters
+    ----------
+    midi : mido.MidiFile
+        original midi file.
+    mode : str
+        mode to use for selecting beats ("last" or "first").
+    repeats : int
+        number of times to repeat the section.
+    num_beats : int
+        number of beats to repeat.
+
+    Returns
+    -------
+    mido.MidiFile
+        new midi file with the specified beats repeated.
+    """
+    new_midi = mido.MidiFile(ticks_per_beat=TICKS_PER_BEAT)
+    new_track = mido.MidiTrack()
+    new_midi.tracks.append(new_track)
+
+    # calculate total ticks and convert messages to absolute timing
+    total_ticks = 0
+    absolute_msgs = []
+    for msg in midi.tracks[0]:
+        if hasattr(msg, "time"):
+            total_ticks += msg.time
+            absolute_msgs.append((total_ticks, msg.copy()))
+        else:
+            # handle meta messages without timing
+            absolute_msgs.append((total_ticks, msg.copy()))
+
+    # round to nearest even number of beats
+    total_beats = total_ticks / TICKS_PER_BEAT
+    rounded_beats = round(total_beats / 2) * 2  # Round to nearest even number
+    rounded_ticks = int(rounded_beats * TICKS_PER_BEAT)
+    console.log(
+        f"rounding file from {total_beats:.2f} beats to {rounded_beats} beats ({total_ticks} to {rounded_ticks} ticks)"
+    )
+
+    # determine section to repeat based on mode
+    if mode == "last":
+        section_start = max(0, rounded_ticks - (num_beats * TICKS_PER_BEAT))
+        section_end = rounded_ticks
+        console.log(
+            f"repeating last {num_beats} beats ({section_start}-{section_end} ticks)"
+        )
+    elif mode == "first":
+        section_start = 0
+        section_end = min(rounded_ticks, num_beats * TICKS_PER_BEAT)
+        console.log(
+            f"repeating first {num_beats} beats ({section_start}-{section_end} ticks)"
+        )
+    else:
+        # default to first half / second half
+        if mode == "first_half":
+            section_start = 0
+            section_end = rounded_ticks // 2
+        else:  # second half
+            section_start = rounded_ticks // 2
+            section_end = rounded_ticks
+        console.log(f"repeating {mode} ({section_start}-{section_end} ticks)")
+
+    # filter messages in the selected section
+    section_msgs = [
+        (tick, msg)
+        for tick, msg in absolute_msgs
+        if section_start <= tick <= section_end
+    ]
+
+    if not section_msgs:
+        console.log("no messages found in selected section")
+        return new_midi
+
+    # convert section to relative timing
+    relative_section = []
+    prev_tick = section_start
+
+    # handle notes that are already playing at section start
+    active_notes = {}
+    for tick, msg in absolute_msgs:
+        if tick >= section_start:
+            break
+        if msg.type == "note_on" and msg.velocity > 0:
+            active_notes[(msg.channel, msg.note)] = True
+        elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+            key = (msg.channel, msg.note)
+            if key in active_notes:
+                del active_notes[key]
+
+    # add note_off messages for any active notes before starting the section
+    for channel, note in active_notes:
+        relative_section.append(
+            mido.Message("note_off", note=note, channel=channel, velocity=0, time=0)
+        )
+
+    # convert absolute to relative timing for the section
+    for i, (tick, msg) in enumerate(section_msgs):
+        msg_copy = msg.copy()
+        if hasattr(msg_copy, "time"):
+            msg_copy.time = tick - prev_tick
+            prev_tick = tick
+        relative_section.append(msg_copy)
+
+    # make sure all notes are turned off at the end of the section
+    active_notes = {}
+    for msg in relative_section:
+        if msg.type == "note_on" and msg.velocity > 0:
+            active_notes[(msg.channel, msg.note)] = True
+        elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+            key = (msg.channel, msg.note)
+            if key in active_notes:
+                del active_notes[key]
+
+    # add note_off messages for any active notes at the end of the section
+    for channel, note in active_notes:
+        relative_section.append(
+            mido.Message("note_off", note=note, channel=channel, velocity=0, time=0)
+        )
+
+    # repeat the section the specified number of times
+    for rep in range(repeats):
+        for i, msg in enumerate(relative_section):
+            if rep == 0 and i == 0:
+                # keep timing of first message in first repetition
+                new_track.append(msg.copy())
+            else:
+                msg_copy = msg.copy()
+                if i == 0:
+                    # first message of each subsequent repetition starts immediately
+                    msg_copy.time = 0
+                new_track.append(msg_copy)
+
+    return new_midi
