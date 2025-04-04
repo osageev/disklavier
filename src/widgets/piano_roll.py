@@ -124,16 +124,12 @@ class PianoRollView(QGraphicsView):
     current_tempo = default_bpm
     tempo_scale = 1.0
     transition_times = []  # ms
-    recording_offset = 0  # ms, offset for recording start time
 
     def __init__(self, parent=None):
         super().__init__(parent)
         if hasattr(parent, "td_start") and parent is not None:
             self.start_time = parent.td_start
             self.bpm = parent.bpm
-            # if parent has recording offset, set it
-            if hasattr(parent, "recording_offset"):
-                self.recording_offset = parent.recording_offset
         else:
             console.log(
                 f"[orange bold] no start time found, using current time [/orange bold]"
@@ -213,9 +209,7 @@ class PianoRollView(QGraphicsView):
             x-coordinate on screen.
         """
         # adjust time based on tempo scale and recording offset
-        adjusted_time_ms = (
-            time_ms - self.current_time - self.recording_offset
-        ) * self.tempo_scale
+        adjusted_time_ms = (time_ms - self.current_time) * self.tempo_scale
         return self.key_width + (
             (adjusted_time_ms + self.roll_len_ms) / self.roll_len_ms
         ) * (self.window_height - self.key_width)
@@ -475,15 +469,14 @@ class PianoRollView(QGraphicsView):
 class PianoRollWidget(QWidget):
     tag = "[#90FF00]pr wgt[/#90FF00]:"
 
-    def __init__(self, message_queue: Queue, offset: float = 0, parent=None):
+    def __init__(self, message_queue: Queue, parent=None):
         super().__init__(parent)
         self.message_queue = message_queue
-        self.recording_offset = offset * 1000
         if parent is not None:
             self.td_start = parent.td_start
             self.bpm = parent.params.bpm
             console.log(
-                f"{self.tag} using start time: {self.td_start}, bpm: {self.bpm}, recording offset: {self.recording_offset}"
+                f"{self.tag} using start time: {self.td_start}, bpm: {self.bpm}"
             )
         else:
             self.td_start = datetime.now()

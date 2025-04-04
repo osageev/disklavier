@@ -157,16 +157,13 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.workers = Staff(seeker, player, scheduler, midi_recorder, audio_recorder)
 
-    def switch_to_piano_roll(self, q_gui: Queue, offset: float = 0):
+    def switch_to_piano_roll(self, q_gui: Queue):
         console.log(f"{self.tag} switching to piano roll view")
-        self.piano_roll = PianoRollWidget(q_gui, offset, self)
+        self.piano_roll = PianoRollWidget(q_gui, self)
         self.setCentralWidget(self.piano_roll)
         if hasattr(self, "run_thread") and self.run_thread is not None:
             self.run_thread.s_transition_times.connect(
                 self.piano_roll.pr_view.update_transitions
-            )
-            console.log(
-                f"{self.tag} recording offset: {self.run_thread.recording_offset} seconds"
             )
         self.status.showMessage("piano roll view activated")
 

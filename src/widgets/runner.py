@@ -20,7 +20,7 @@ class RunWorker(QtCore.QThread):
 
     s_status = QtCore.Signal(str)
     s_start_time = QtCore.Signal(datetime)
-    s_switch_to_pr = QtCore.Signal(object, float)
+    s_switch_to_pr = QtCore.Signal(object)
     s_transition_times = QtCore.Signal(list)
 
     def __init__(self, main_window):
@@ -31,7 +31,6 @@ class RunWorker(QtCore.QThread):
         self.params = main_window.params
         self.staff: Staff = main_window.workers
         self.td_system_start = main_window.td_system_start
-        self.recording_offset = 0
 
         # Connect signals
         self.s_switch_to_pr.connect(self.main_window.switch_to_piano_roll)
@@ -66,7 +65,6 @@ class RunWorker(QtCore.QThread):
                         raise ValueError("no recording found")
                 else:
                     ts_recording_len = self.staff.midi_recorder.run()
-                self.recording_offset = ts_recording_len
                 self.pf_seed = self.pf_player_query
             case "audio":
                 self.pf_player_query = self.pf_player_query.replace(".mid", ".wav")
@@ -105,79 +103,72 @@ class RunWorker(QtCore.QThread):
             # TODO: implement playlist mode using generated csvs
             raise NotImplementedError("playlist mode not implemented")
 
-        self.staff.seeker.played_files.append(self.pf_seed)
+        ts_queue = (
+            self.args.bpm * (self.params.n_beats_per_segment + 1) / 60
+        )  # time in queue in seconds
 
         q_playback = PriorityQueue()
         q_gui = PriorityQueue()
 
-        td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
-        self.s_start_time.emit(td_start)
-        ts_queue = (
-            self.args.bpm * (self.params.n_beats_per_segment + 1) / 60
-        )  # time in queue in seconds
-        n_files = 1  # number of files played so far
-
-        self.staff.scheduler.td_start = td_start
-
-        # start audio recording in a separate thread
-        self.e_audio_stop = self.staff.audio_recorder.start_recording(td_start)
-
-        if self.staff.scheduler.init_schedule(
+        self.staff.scheduler.init_schedule(
             self.pf_schedule,
             ts_recording_len if self.params.initialization == "recording" else 0,
-        ):
-            console.log(f"{self.tag} successfully initialized recording")
-            console.log(f"transition times: {self.staff.scheduler.ts_transitions}")
-            self.s_transition_times.emit(self.staff.scheduler.ts_transitions)
-        else:
-            console.log(f"{self.tag} [red]error initializing recording, exiting")
-            if self.e_audio_stop is not None:
-                self.staff.audio_recorder.stop_recording()
-            raise FileExistsError("Couldn't initialize MIDI recording file")
+        )
+        self.s_transition_times.emit(self.staff.scheduler.ts_transitions)
+        console.log(f"{self.tag} successfully initialized recording")
 
-        # Switch to piano roll view using signal
-        self.s_switch_to_pr.emit(q_gui, self.recording_offset)
+        # add seed to queue
+        ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
+            self.pf_seed, q_playback, q_gui, 1.0
+        )
+        ts_queue += ts_seg_len
+        self.staff.seeker.played_files.append(self.pf_seed)
+        n_files = 1  # number of files played so far
+        self.write_log(
+            self.pf_playlist,
+            n_files,
+            datetime.fromtimestamp(ts_seg_start).strftime("%y-%m-%d %H:%M:%S"),
+            self.pf_seed,
+            "----",
+        )
+
+        # add first match to queue
+        pf_next_file, similarity = self.staff.seeker.get_next()
+        ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
+            pf_next_file, q_playback, q_gui, similarity
+        )
+        ts_queue += ts_seg_len
+        n_files += 1
+        self.write_log(
+            self.pf_playlist,
+            n_files,
+            datetime.fromtimestamp(
+                self.td_system_start.timestamp()
+                + timedelta(seconds=ts_seg_start).total_seconds()
+            ).strftime("%y-%m-%d %H:%M:%S"),
+            pf_next_file,
+            similarity,
+        )
+
         try:
-            # add seed to queue
-            ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
-                self.pf_seed, q_playback, q_gui, 1.0
+            metronome = workers.Metronome(
+                self.params.metronome, self.params.bpm, self.td_system_start
             )
-            ts_queue += ts_seg_len
-            console.log(f"{self.tag} enqueued seed at {ts_seg_start:.03f}")
-            console.log(
-                f"{self.tag} sys start is {self.td_system_start.strftime('%y-%m-%d %H:%M:%S')}, reg start is {td_start.strftime('%y-%m-%d %H:%M:%S')}"
-            )
-            self.write_log(
-                self.pf_playlist,
-                n_files,
-                datetime.fromtimestamp(ts_seg_start).strftime("%y-%m-%d %H:%M:%S"),
-                self.pf_seed,
-                "----",
-            )
+            process_metronome = Process(target=metronome.tick, name="metronome")
 
-            # preload first match
-            # TODO: check if this is necessary
-            if (
-                self.params.initialization == "recording"
-                or self.params.seeker.mode == "graph"
-            ):
-                pf_next_file, similarity = self.staff.seeker.get_next()
-                ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
-                    pf_next_file, q_playback, q_gui, similarity
-                )
-                ts_queue += ts_seg_len
-                n_files += 1
-                self.write_log(
-                    self.pf_playlist,
-                    n_files,
-                    datetime.fromtimestamp(
-                        self.td_system_start.timestamp()
-                        + timedelta(seconds=ts_seg_start).total_seconds()
-                    ).strftime("%y-%m-%d %H:%M:%S"),
-                    pf_next_file,
-                    similarity,
-                )
+            td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
+            console.log(f"{self.tag} start time set to {td_start.strftime('%y-%m-%d %H:%M:%S')}")
+            self.s_start_time.emit(td_start)
+            self.staff.scheduler.td_start = td_start
+            metronome.td_start = td_start
+            process_metronome.start()
 
+            # start audio recording in a separate thread
+            # TODO: fix ~1-beat delay in audio recording startup
+            self.e_audio_stop = self.staff.audio_recorder.start_recording(td_start)
+
+            # Switch to piano roll view using signal
+            self.s_switch_to_pr.emit(q_gui)
             # start player
             self.staff.player.td_start = td_start
             self.staff.player.td_last_note = td_start
@@ -192,13 +183,6 @@ class RunWorker(QtCore.QThread):
             # connect recorder to player for velocity updates
             self.staff.player.set_recorder(self.staff.midi_recorder)
 
-            # start metronome
-            metronome = workers.Metronome(
-                self.params.metronome, self.params.bpm, td_start
-            )
-            process_metronome = Process(target=metronome.tick, name="metronome")
-            process_metronome.start()
-
             # play for set number of transitions
             # TODO: move this to be managed by scheduler and track scheduler state instead
             current_file = ""
@@ -212,9 +196,6 @@ class RunWorker(QtCore.QThread):
                     pf_next_file, similarity = self.staff.seeker.get_next()
                     ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
                         pf_next_file, q_playback, q_gui, similarity
-                    )
-                    console.log(
-                        f"transition times: {self.staff.scheduler.ts_transitions}"
                     )
                     self.s_transition_times.emit(self.staff.scheduler.ts_transitions)
                     ts_queue += ts_seg_len
