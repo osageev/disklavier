@@ -16,7 +16,7 @@ seeker:
   seed: 98787611
   system: "live"
   mode: "best" # best easy repeat random sequential playlist graph
-  match: "prev" # current, next, prev, next 2, prev 2
+  match: "next" # current, next, prev, next 2, prev 2
   metric: "specdiff" # pitch-histogram specdiff clf-4note clf-speed clf-tpose
   graph_steps: 9
   graph_track_revisit_interval: 3

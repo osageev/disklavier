@@ -1,8 +1,12 @@
 import torch
 import torch.nn as nn
 
+from utils import console
+
 
 class Classifier(nn.Module):
+    tag = "[#ffafaf]clf   [/#ffafaf]:"
+
     def __init__(self, input_dim, hidden_dims, output_dim, activation_fn=nn.SiLU):
         super(Classifier, self).__init__()
         layers = []
@@ -19,3 +23,23 @@ class Classifier(nn.Module):
         if return_hidden:
             return hidden_representation
         return self.output_layer(hidden_representation)
+
+    def embed(self, path: str) -> torch.Tensor:
+        """
+        Generate an embedding for the given file path.
+
+        Parameters
+        ----------
+        path : str
+            Path to the file containing the input tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            The embedding tensor.
+        """
+        console.log(f"{self.tag} generating embedding for '{path}'")
+        x = torch.load(path, weights_only=True)
+        if x.dim() == 1:
+            x = x.unsqueeze(0).reshape(-1, 768)
+        return self.forward(x, return_hidden=True).detach().cpu()

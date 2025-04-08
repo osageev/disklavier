@@ -15,6 +15,8 @@ from utils.midi import trim_piano_roll, upsample_piano_roll
 from utils.novelty import gen_ssm_and_novelty
 from workers import Seeker, Scheduler
 
+TRIM_ROLL = False
+
 CONSTANTS = {
     "system": "test",
     "bpm": 60,
@@ -22,15 +24,18 @@ CONSTANTS = {
     "n_beats_per_segment": 8,
     "n_transitions": 16,
     "n_min_queue_length": 100,
+    "match": "current",
     "startup_delay": 10,
     "initialization": "kickstart",
     "kickstart_path": "data/datasets/test/test/intervals-060-09_1_t00s00.mid",
+    "graph_track_revisit_interval": 3
 }
 
 OPTIONS = {
-    "dataset": ["20250110", "20250320", "20250320-c10", "20250320-c100"],
+    "dataset": ["20250320"],#, "20250320-c10"],
+    "match": ["current", "next"],
     "mode": ["best", "graph"],
-    "metric": ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-tpose"],
+    "metric": ["pitch-histogram", "specdiff"],#, "clf-4note", "clf-speed", "clf-tpose"],
     "graph_steps": [5, 9],
 }
 
@@ -46,20 +51,26 @@ def main(args):
 
     clean_conf = OmegaConf.load("params/live_template.yaml")
     for i, setting in enumerate(settings):
+        print(f"running with settings:\n\t{setting}")
         params = OmegaConf.merge(clean_conf, CONSTANTS, setting)
         params.tables = os.path.join(args.data_dir, params.dataset)
         params.dataset_path = os.path.join(params.tables, "augmented")
         params.scheduler.n_beats_per_segment = params.n_beats_per_segment
         params.seeker.system = params.system
         params.scheduler.system = params.system
-        print(f"running with settings:")
+        params.seeker.match = params.match
+        params.seeker.mode = params.mode
+        params.seeker.metric = params.metric
+        params.seeker.graph_steps = params.graph_steps
+        params.seeker.graph_track_revisit_interval = params.graph_track_revisit_interval
+        print(f"build config:")
         print(OmegaConf.to_yaml(params))
 
-        start_time = datetime.now()
         start_str = start_time.strftime("%Y%m%d_%H%M%S")
         output_dir = f"data/tests/compare/{start_str}/{i}"
         os.makedirs(output_dir, exist_ok=True)
         print(f"output will be saved to '{output_dir}'")
+        OmegaConf.save(params, os.path.join(output_dir, "config.yaml"))
         p_log = os.path.join(
             output_dir,
             f"{start_str}",
@@ -90,13 +101,9 @@ def main(args):
         n_files = 1
         scheduler.td_start = td_start
 
-        if scheduler.init_schedule(
+        scheduler.init_schedule(
             os.path.join(output_dir, "schedule.mid"),
-        ):
-            print(f"successfully initialized recording")
-        else:
-            print(f"[red]error initializing recording, exiting")
-            raise FileExistsError("Couldn't initialize MIDI recording file")
+        )
 
         # load queue
         similarities = []
@@ -172,8 +179,11 @@ def main(args):
         plt.figure(figsize=(12, 4))
 
         # trim and upsample piano roll to fixed resolution
-        trimmed_roll = trim_piano_roll(piano_roll)
-        upsampled_roll = upsample_piano_roll(trimmed_roll)
+        if TRIM_ROLL:
+            trimmed_roll = trim_piano_roll(piano_roll)
+            upsampled_roll = upsample_piano_roll(trimmed_roll)
+        else:
+            upsampled_roll = upsample_piano_roll(piano_roll)
         plt.imshow(upsampled_roll, aspect="auto", origin="lower", cmap="gray_r")
 
         # add vertical lines at transition times
@@ -195,7 +205,7 @@ def main(args):
         )  # stretch x-axis to match piano roll width
         plt.plot(
             x,
-            (1 - novelty / novelty.max()) * 17,
+            (1 - novelty / novelty.max()) * 100,
             "g",
             linewidth=1.0,
             alpha=0.7,

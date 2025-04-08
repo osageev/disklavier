@@ -129,7 +129,7 @@ class Scheduler(Worker):
         self.queued_files.append(basename(pf_midi))
         ts_seg_len = mido.tick2second(tt_sum, TICKS_PER_BEAT, self.tempo)
 
-        console.log(f"{self.tag} added {ts_seg_len:.03f} seconds of music to queue")
+        # console.log(f"{self.tag} added {ts_seg_len:.03f} seconds of music to queue")
 
         _ = self._copy_midi(pf_midi)
 

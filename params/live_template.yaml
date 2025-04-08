@@ -12,6 +12,7 @@ seeker:
   tag: "[yellow]seeker[/yellow]:"
   verbose: False
   seed: 0
+  match: "current" # current next prev 'next 2' 'prev 2'
   mode: "best" # best easy repeat random sequential playlist graph
   metric: "specdiff" # pitch-histogram specdiff clf-4note clf-speed clf-tpose
   graph_steps: 9

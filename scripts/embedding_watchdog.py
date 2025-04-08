@@ -16,7 +16,7 @@ from ml.specdiff.model import SpectrogramDiffusion, config
 from utils import basename, console
 
 SUPPORTED_EXTENSIONS = (".mid", ".midi", ".wav")
-
+REQUIRES_SPECDIFF = ("clf-4note", "clf-speed", "clf-tpose")
 
 class UploadHandler(FileSystemEventHandler):
     tag = "[#5f00af]panthr[/#5f00af]:"
@@ -28,9 +28,9 @@ class UploadHandler(FileSystemEventHandler):
         console.log(f"{self.tag} loading clap model")
         self.clap = Clap()
         self.models["clap"] = self.clap
-        # console.log(f"{self.tag} loading clamp model")
-        # self.clamp = Clamp()
-        # self.models["clamp"] = self.clamp
+        console.log(f"{self.tag} loading clamp model")
+        self.clamp = Clamp()
+        self.models["clamp"] = self.clamp
         console.log(f"{self.tag} loading specdiff model")
         self.specdiff = SpectrogramDiffusion(config)  # weird way to do this but w/e
         self.models["specdiff"] = self.specdiff
@@ -72,19 +72,31 @@ class UploadHandler(FileSystemEventHandler):
         console.log(f"{self.tag}[green] initialization complete")
 
     def on_created(self, event):
-        if str(event.src_path).endswith(SUPPORTED_EXTENSIONS):
-            # TODO: filetype/model input type compatibility typechecking
-            time.sleep(0.5)  # allow file to finish uploading
-            requested_model = basename(str(event.src_path)).split("_")[-1]
+        uploaded_file = str(event.src_path)
+        if not uploaded_file.endswith(SUPPORTED_EXTENSIONS):
+            return
+
+        # TODO: filetype/model input type compatibility typechecking
+        time.sleep(0.5)  # allow file to finish uploading
+        requested_model = basename(uploaded_file).split("_")[-1]
+        console.log(
+            f"{self.tag} sending file '{event.src_path}' to be embedded by {requested_model}"
+        )
+        if requested_model in REQUIRES_SPECDIFF:
+            pre_embed = self.specdiff.embed(uploaded_file)
+            tmp_path = f"{os.path.splitext(uploaded_file)[0]}_tmp.pt"
+            torch.save(pre_embed, tmp_path)
             console.log(
-                f"{self.tag} sending file '{event.src_path}' to be embedded by {requested_model}"
+                f"{self.tag} wrote pre-embedding to '{tmp_path}'"
             )
-            embedding = self.models[requested_model].embed(str(event.src_path))
-            console.log(f"{self.tag} got embedding {embedding.shape}")
-            torch.save(embedding, f"{os.path.splitext(event.src_path)[0]}.pt")
-            console.log(
-                f"{self.tag} wrote embedding to '{os.path.splitext(event.src_path)[0]}.pt'"
-            )
+            uploaded_file = tmp_path
+
+        embedding = self.models[requested_model].embed(uploaded_file)
+        console.log(f"{self.tag} got embedding {embedding.shape}")
+        torch.save(embedding, f"{os.path.splitext(event.src_path)[0]}.pt")
+        console.log(
+            f"{self.tag} wrote embedding to '{os.path.splitext(event.src_path)[0]}.pt'"
+        )
 
 
 def monitor_folder(args):
@@ -111,13 +123,6 @@ if __name__ == "__main__":
         type=str,
         default="data/outputs/uploads",
         help="path to monitor for changes",
-    )
-    parser.add_argument(
-        "-m",
-        "--model",
-        type=str,
-        default="specdiff",
-        help="model to use for embedding generation",
     )
     args = parser.parse_args()
 
