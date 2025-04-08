@@ -4,7 +4,7 @@ import subprocess
 from unidecode import unidecode
 from rich.console import Console
 from transformers import AutoTokenizer
-from .utils import CLaMP, MusicPatchilizer
+from .utils_old import CLaMP, MusicPatchilizer
 
 console = Console(log_time_format="%m-%d %H:%M:%S.%f")
 
