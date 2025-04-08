@@ -517,7 +517,10 @@ class PianoRollWidget(QWidget):
         console.log(f"{self.tag} updated start time to {start_time}")
 
     def resizeEvent(self, event):
-        self.pr_view.setGeometry(0, 0, self.width(), self.height())
+        # Adjust geometry to account for potentially hidden areas like status bar
+        parent_height = self.height()
+        parent_width = self.width()
+        self.pr_view.setGeometry(0, 0, parent_width, parent_height)
 
     def closeEvent(self, event):
         self.pr_builder.stop()

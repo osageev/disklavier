@@ -44,6 +44,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # status bar
         self.status = self.statusBar()
         self.status.showMessage("parameter editor loaded")
+        self.status.setVisible(True)  # Ensure it's always visible by default
+
+        # Add buttons to status bar
+        self.stop_btn = QtWidgets.QPushButton("Stop")
+        self.stop_btn.clicked.connect(self.stop_clicked)
+        self.stop_btn.setEnabled(False)  # Disabled by default
+        self.status.addPermanentWidget(self.stop_btn)
+        self.start_btn = QtWidgets.QPushButton("Start")
+        self.start_btn.clicked.connect(self.start_clicked)
+        self.status.addPermanentWidget(self.start_btn)
 
         # Window dimensions
         geometry = self.screen().availableGeometry()
@@ -202,6 +212,9 @@ class MainWindow(QtWidgets.QMainWindow):
             )
         self.status.showMessage("piano roll view activated")
 
+        # Ensure status bar is visible
+        self.status.setVisible(True)
+
     def save_and_start(self, params):
         """
         save parameters to yaml file and start the application
@@ -243,9 +256,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # Start the main processing in a QThread
         self.run_thread = RunWorker(self)
         self.run_thread.s_start_time.connect(self.update_start_time)
-        # Connect status signal to both status bar and toolbar label
         self.run_thread.s_status.connect(self.update_status)
         self.run_thread.start()
+
+        # Enable stop button now that system is running
+        self.stop_btn.setEnabled(True)
+        self.start_btn.setEnabled(False)
+
+        # Make sure status bar is visible
+        self.status.setVisible(True)
 
     def update_start_time(self, start_time):
         """
@@ -305,19 +324,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Stop the run thread if it exists
         if self.run_thread is not None and self.run_thread.isRunning():
+            self.run_thread.shutdown()
             self.run_thread.requestInterruption()
             self.run_thread.wait(1000)  # Wait up to 1 second for thread to finish
 
-        # Stop MIDI recording
-        if hasattr(self, "midi_stop_event") and self.midi_stop_event is not None:
-            self.workers.midi_recorder.stop_recording()
-            if self.p_log:
-                pf_player_accompaniment = os.path.join(
-                    self.p_log, "player-accompaniment.mid"
-                )
-                self.workers.midi_recorder.save_midi(pf_player_accompaniment)
-
         console.log(f"{self.tag} workers cleaned up")
+
+        # Update button states
+        self.stop_btn.setEnabled(False)
+        self.start_btn.setEnabled(True)
+
+    def stop_clicked(self):
+        self.cleanup_workers()
+
+        self.status.showMessage("stopped")
+        self.status_label.setText("Stopped")
+
+        # Return to parameter editor (original state)
+        if hasattr(self, "piano_roll"):
+            self.param_editor = ParameterEditorWidget(self.params, self)
+            self.setCentralWidget(self.param_editor)
+            self.status.showMessage("returned to parameter editor")
 
     def closeEvent(self, event):
         self.cleanup_workers()
@@ -327,3 +354,11 @@ class MainWindow(QtWidgets.QMainWindow):
         super().resizeEvent(event)
         self.window_height = self.height()
         self.window_width = self.width()
+
+    def start_clicked(self):
+        """
+        handle the start button click.
+        """
+        params = self.param_editor.get_updated_params()
+        console.log(f"params: {params}")
+        self.save_and_start(params)

@@ -14,7 +14,7 @@ blocked_params = [
     "midi_port",
     "record",
     "channels",
-    "system"
+    "system",
 ]
 
 
@@ -86,19 +86,6 @@ class ParameterEditorWidget(QtWidgets.QWidget):
 
         scroll_area.setWidget(container)
         main_layout.addWidget(scroll_area)
-
-        # Bottom buttons
-        btn_frame = QtWidgets.QFrame()
-        btn_layout = QtWidgets.QHBoxLayout(btn_frame)
-        btn_layout.setContentsMargins(0, 10, 0, 0)
-
-        start_btn = QtWidgets.QPushButton("Start")
-        start_btn.clicked.connect(self.start_clicked)
-
-        btn_layout.addStretch()
-        btn_layout.addWidget(start_btn)
-
-        main_layout.addWidget(btn_frame)
 
     def display_params(self, layout):
         """
@@ -258,11 +245,3 @@ class ParameterEditorWidget(QtWidgets.QWidget):
             self.params[section][subkey] = value
         else:
             self.params[key] = value
-
-    def start_clicked(self):
-        """
-        handle the start button click.
-        """
-        params = self.get_updated_params()
-        console.log(f"params: {params}")
-        self.parent().save_and_start(params)  # type: ignore

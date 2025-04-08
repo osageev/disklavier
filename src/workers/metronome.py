@@ -72,3 +72,6 @@ class Metronome(Worker, QtCore.QThread):
         """
         self.running = False
         self.wait()  # Wait for the thread to finish
+        pygame.mixer.quit()
+        pygame.quit()
+        console.log(f"{self.tag} metronome stopped")

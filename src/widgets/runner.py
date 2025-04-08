@@ -3,13 +3,13 @@ import csv
 import time
 from PySide6 import QtCore
 from threading import Thread
+from rich.table import Table
 from queue import PriorityQueue
-from multiprocessing import Process
 from datetime import datetime, timedelta
 
 import workers
 from workers import Staff
-from utils import console
+from utils import console, midi
 from utils.panther import send_embedding
 
 
@@ -22,6 +22,9 @@ class RunWorker(QtCore.QThread):
     s_start_time = QtCore.Signal(datetime)
     s_switch_to_pr = QtCore.Signal(object)
     s_transition_times = QtCore.Signal(list)
+
+    q_playback = PriorityQueue()
+    q_gui = PriorityQueue()
 
     def __init__(self, main_window):
         super().__init__()
@@ -44,6 +47,11 @@ class RunWorker(QtCore.QThread):
         self.pf_player_accompaniment = main_window.pf_player_accompaniment
         self.pf_schedule = main_window.pf_schedule
         self.pf_playlist = main_window.pf_playlist
+
+        # metronome
+        self.metronome = workers.Metronome(
+            self.params.metronome, self.params.bpm, self.td_system_start
+        )
 
     def write_log(self, filename: str, *args):
         with open(filename, mode="a", newline="") as file:
@@ -104,8 +112,6 @@ class RunWorker(QtCore.QThread):
             raise NotImplementedError("playlist mode not implemented")
 
         ts_queue = 0
-        q_playback = PriorityQueue()
-        q_gui = PriorityQueue()
 
         self.staff.scheduler.init_schedule(
             self.pf_schedule,
@@ -116,7 +122,7 @@ class RunWorker(QtCore.QThread):
 
         # add seed to queue
         ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
-            self.pf_seed, q_playback, q_gui, 1.0
+            self.pf_seed, self.q_playback, self.q_gui, 1.0
         )
         ts_queue += ts_seg_len
         self.staff.seeker.played_files.append(self.pf_seed)
@@ -132,7 +138,7 @@ class RunWorker(QtCore.QThread):
         # add first match to queue
         pf_next_file, similarity = self.staff.seeker.get_next()
         ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
-            pf_next_file, q_playback, q_gui, similarity
+            pf_next_file, self.q_playback, self.q_gui, similarity
         )
         ts_queue += ts_seg_len
         n_files += 1
@@ -148,32 +154,28 @@ class RunWorker(QtCore.QThread):
         )
 
         try:
-            metronome = workers.Metronome(
-                self.params.metronome, self.params.bpm, self.td_system_start
-            )
-
             td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
             console.log(
                 f"{self.tag} start time set to {td_start.strftime('%y-%m-%d %H:%M:%S')}"
             )
             self.s_start_time.emit(td_start)
             self.staff.scheduler.td_start = td_start
-            metronome.td_start = td_start
-            metronome.start()  # Start the QThread directly
+            self.metronome.td_start = td_start
+            self.metronome.start()  # Start the QThread directly
 
             # start audio recording in a separate thread
             # TODO: fix ~1-beat delay in audio recording startup
             self.e_audio_stop = self.staff.audio_recorder.start_recording(td_start)
 
             # Switch to piano roll view using signal
-            self.s_switch_to_pr.emit(q_gui)
+            self.s_switch_to_pr.emit(self.q_gui)
             # start player
             self.staff.player.td_start = td_start
             self.staff.player.td_last_note = td_start
-            thread_player = Thread(
-                target=self.staff.player.play, name="player", args=(q_playback,)
+            self.thread_player = Thread(
+                target=self.staff.player.play, name="player", args=(self.q_playback,)
             )
-            thread_player.start()
+            self.thread_player.start()
 
             # start midi recording
             self.midi_stop_event = self.staff.midi_recorder.start_recording(td_start)
@@ -198,7 +200,7 @@ class RunWorker(QtCore.QThread):
                 if ts_queue < self.params.startup_delay * 2:
                     pf_next_file, similarity = self.staff.seeker.get_next()
                     ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
-                        pf_next_file, q_playback, q_gui, similarity
+                        pf_next_file, self.q_playback, self.q_gui, similarity
                     )
                     self.s_transition_times.emit(self.staff.scheduler.ts_transitions)
                     ts_queue += ts_seg_len
@@ -216,33 +218,86 @@ class RunWorker(QtCore.QThread):
 
                 time.sleep(0.001)
                 ts_queue -= elapsed
-                if not thread_player.is_alive():
+                if not self.thread_player.is_alive():
                     console.log(f"{self.tag} player ran out of notes, exiting")
-                    thread_player.join(0.1)
+                    self.thread_player.join(0.1)
                     break
-
-            metronome.stop()
 
             # all necessary files queued, wait for playback to finish
             console.log(f"{self.tag} waiting for playback to finish...")
-            while q_playback.qsize() > 0:
+            while self.q_playback.qsize() > 0:
                 if current_file != self.staff.scheduler.get_current_file():
                     current_file = self.staff.scheduler.get_current_file()
                     console.log(f"{self.tag} now playing '{current_file}'")
                     self.s_status.emit(f"now playing '{current_file}'")
                 time.sleep(0.1)
-            thread_player.join(timeout=0.1)
+            self.thread_player.join(timeout=0.1)
+            console.log(f"{self.tag} playback complete")
+            self.s_status.emit("playback complete")
         except KeyboardInterrupt:
             console.log(f"{self.tag}[yellow] CTRL + C detected, saving and exiting...")
-            # dump queue to stop player
-            while q_playback.qsize() > 0:
-                try:
-                    _ = q_playback.get()
-                except:
-                    if self.args.verbose:
-                        console.log(
-                            f"{self.tag} [yellow]ouch! tried to dump queue but failed"
-                        )
-                    pass
-            thread_player.join(timeout=0.1)
-            console.log(f"{self.tag} exiting")
+
+        self.shutdown()
+
+    def shutdown(self):
+        console.log(f"{self.tag}[yellow] shutdown called, saving and exiting...")
+        # dump queue to stop player
+        while self.q_playback.qsize() > 0:
+            try:
+                _ = self.q_playback.get()
+            except:
+                if self.args.verbose:
+                    console.log(
+                        f"{self.tag} [yellow]ouch! tried to dump queue but failed"
+                    )
+                pass
+
+        if hasattr(self, "thread_player"):
+            self.thread_player.join(timeout=0.1)
+
+        console.log(f"{self.tag} stopping metronome")
+        self.metronome.stop()
+        console.log(f"{self.tag} metronome stopped")
+
+        # run complete, save and exit
+        # close raw notes file
+        self.staff.scheduler.raw_notes_file.close()
+
+        # Stop audio recording if it's running
+        if self.e_audio_stop is not None:
+            console.log(f"{self.tag} stopping audio recording")
+            self.staff.audio_recorder.stop_recording()
+
+        # Stop MIDI passive recording if its running
+        if self.midi_stop_event is not None:
+            console.log(f"{self.tag} stopping MIDI recording")
+            self.staff.midi_recorder.stop_recording()
+            self.staff.midi_recorder.save_midi(self.pf_player_accompaniment)
+
+        # convert queue to midi
+        _ = self.staff.scheduler.queue_to_midi(self.pf_system_recording)
+        _ = midi.combine_midi_files(
+            [self.pf_system_recording, self.pf_player_accompaniment, self.pf_schedule],
+            self.pf_master_recording,
+        )
+
+        # print playlist
+        table = Table(title="PLAYLIST")
+        with open(self.pf_playlist, mode="r") as file:
+            headers = file.readline().strip().split(",")
+            for header in headers:
+                table.add_column(header)
+
+            for line in file:
+                row = line.strip().split(",")
+                row[2] = os.path.basename(row[2])  # only print filenames
+                table.add_row(*row)
+        console.print(table)
+
+        # plot piano roll if master recording exists
+        if os.path.exists(self.pf_master_recording):
+            console.log(f"{self.tag} generating piano roll visualization")
+            midi.generate_piano_roll(self.pf_master_recording)
+
+        console.save_text(os.path.join(self.p_log, f"{self.td_system_start}.log"))
+        console.log(f"{self.tag}[green bold] shutdown complete, exiting")

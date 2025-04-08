@@ -18,6 +18,7 @@ seeker:
   metric: "specdiff" # pitch-histogram specdiff clf-4note clf-speed clf-tpose
   graph_steps: 9
   graph_track_revisit_interval: 3
+  block_shift: False
 player:
   tag: "[blue]player[/blue]:"
   verbose: False
