@@ -46,13 +46,6 @@ class Seeker(Worker):
     playlist: dict[str, dict[str, list[tuple[str, float]]]] = {}
     # force pitch match after finding next segment
     pitch_match = False
-    # supported ml models for post-processing embeddings
-    model = None
-    model_list = [
-        "clf-4note",
-        "clf-speed",
-        "clf-tpose",
-    ]
     # path tracking variables
     current_path: list[tuple[str, float]] = []
     path_position: int = 0
@@ -194,10 +187,7 @@ class Seeker(Worker):
                 next_file = self._get_neighbor()
             case "graph":
                 # TODO: FIX THIS
-                if "player" in self.played_files[-1]:
-                    next_file, similarity = self._get_best(hop=False)
-                else:
-                    next_file, similarity = self._get_graph()
+                next_file, similarity = self._get_graph()
             case "random" | "shuffle" | _:
                 next_file = self._get_random()
 
@@ -252,7 +242,7 @@ class Seeker(Worker):
 
         query_file = basename(self.played_files[-1])
 
-        if self.params.match != "current" and "player" not in query_file:
+        if self.params.match != "current" and query_file in self.filenames:
             track, segment, augmentation = query_file.split("_")
             new_query_file = self.neighbor_table.loc[
                 f"{track}_{segment}", self.params.match
@@ -263,11 +253,6 @@ class Seeker(Worker):
                     f"{self.tag} finding match for '{new_query_file}' instead of '{query_file}' due to match mode {self.params.match}"
                 )
                 query_file = new_query_file
-
-        if self.verbose:
-            console.log(
-                f"{self.tag} extracted '{self.played_files[-1]}' -> '{query_file}'"
-            )
 
         # load query embedding
         # first, look in existing index
@@ -304,7 +289,7 @@ class Seeker(Worker):
         query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
 
         # query index
-        if self.verbose and "player" not in query_file:
+        if self.verbose and query_file in self.filenames:
             console.log(f"{self.tag} querying with key '{query_file}'")
         similarities, indices = self.faiss_index.search(query_embedding, 1000)  # type: ignore
         if self.verbose:
@@ -413,7 +398,6 @@ class Seeker(Worker):
             console.log(
                 f"{self.tag} unable to find neighbor for '{current_file}', choosing randomly"
             )
-
         return self._get_random()
 
     def _get_graph(self) -> tuple[str, float]:
@@ -426,6 +410,19 @@ class Seeker(Worker):
         tuple[str, float]
             The next segment in the path to play and its similarity value.
         """
+        seed_file = self.played_files[-1]
+        seed_key = basename(seed_file)
+        seed_track = seed_key.split("_")[0]
+        console.log(f"{self.tag} using seed file '{seed_file}' for graph navigation")
+
+        try:
+            test = self.filename_to_index[seed_key]
+        except KeyError:
+            console.log(
+                f"{self.tag} unable to find embedding for '{seed_key}', calculating best match"
+            )
+            next_file, similarity = self._get_best(hop=False)
+            return next_file, similarity
 
         # path already calculated, progress along the path
         if (
@@ -439,11 +436,6 @@ class Seeker(Worker):
             )
             console.log(self.current_path[-5:])
             return next_file, next_sim
-
-        seed_file = self.played_files[-1]
-        seed_key = basename(seed_file)
-        seed_track = seed_key.split("_")[0]
-        console.log(f"{self.tag} using seed file '{seed_file}' for graph navigation")
 
         e = self.faiss_index.reconstruct(self.filename_to_index[seed_key])  # type: ignore
         seed_embedding = np.array([e])
@@ -491,7 +483,7 @@ class Seeker(Worker):
         # load relevant graph files
         # TODO: build this path programmatically
         graph_path = os.path.join(
-            "data", "datasets", "20250320", "graphs", f"{seed_track}.json"
+            os.path.dirname(self.p_dataset), "graphs", f"{seed_track}.json"
         )
         console.log(f"{self.tag} loading source graph from '{graph_path}'")
         with open(graph_path, "r") as f:
@@ -512,7 +504,9 @@ class Seeker(Worker):
 
                 # get node embeddings
                 try:
-                    node_indices = [self.filename_to_index[node] for node in nodes]
+                    node_indices = [
+                        self.filename_to_index[basename(node)] for node in nodes
+                    ]
                 except KeyError as e:
                     # If a key is not found, add it to the mapping and log the error
                     missing_node = str(e).strip("'")
@@ -525,7 +519,9 @@ class Seeker(Worker):
                     }
                     # Try again with the updated mapping
                     node_indices = [
-                        self.filename_to_index.get(node, self.filenames.index(node))
+                        self.filename_to_index.get(
+                            node, self.filenames.index(basename(node))
+                        )
                         for node in nodes
                     ]
                 node_embs = np.vstack(
@@ -870,9 +866,10 @@ class Seeker(Worker):
                 clf.load_state_dict(
                     torch.load(
                         os.path.join("data", "models", self.params.metric + ".pth"),
-                        weights_only=True,
-                        map_location=torch.device("cpu"),
-                    )
+                        weights_only=False,
+                        map_location=torch.device("cuda:0"),
+                    ),
+                    strict=False,
                 )
                 clf.eval()
 

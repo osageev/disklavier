@@ -100,18 +100,24 @@ def pitch_histograms(all_files: List[str], output_path: str) -> bool:
         True if the pitch histograms were calculated successfully, False otherwise.
     """
 
+    num_files = len(all_files)
+    # initialize faiss index
+    faiss_path = os.path.join(os.path.dirname(output_path), "pitch-histogram.faiss")
+    index = faiss.IndexFlatIP(12)
+    vecs = np.zeros((num_files, 12), dtype=np.float32)
+
     with h5py.File(output_path, "w") as f:
-        console.log(f"creating pitch histograms for {len(all_files)} files")
+        console.log(f"creating pitch histograms for {num_files} files")
 
         d_filenames = f.create_dataset(
             "filenames",
-            (len(all_files), 1),
+            (num_files, 1),
             dtype=h5py.string_dtype(encoding="utf-8"),
             fillvalue="",
         )
         d_histograms = f.create_dataset(
-            "pitch-histogram",
-            shape=(len(all_files), 12),
+            "embeddings",
+            shape=(num_files, 12),
             dtype=np.float32,
             fillvalue=np.zeros(12),
         )
@@ -122,17 +128,21 @@ def pitch_histograms(all_files: List[str], output_path: str) -> bool:
             MofNCompleteColumn(),
             TimeElapsedColumn(),
         )
-        update_task = progress.add_task(
-            f"generating pitch histograms", total=len(all_files)
-        )
+        update_task = progress.add_task(f"generating pitch histograms", total=num_files)
         with progress:
             for i, file in enumerate(all_files):
                 ph = PrettyMIDI(file).get_pitch_class_histogram(True, True)
                 d_histograms[i] = ph
                 d_filenames[i] = basename(file)
+                vecs[i] = ph
                 progress.advance(update_task)
 
-    return _check_hdf5(output_path, ["filenames", "pitch-histogram"])
+        console.log("copying vectors to FAISS index")
+        index.add(vecs)  # type: ignore
+        faiss.write_index(index, faiss_path)
+        console.log(f"FAISS index saved to '{faiss_path}'")
+
+    return _check_hdf5(output_path, ["filenames", "embeddings"])
 
 
 def specdiff(
@@ -420,6 +430,7 @@ def graph(
 ) -> int:
     n_graphs = 0
 
+    console.log(f"loading and normalizing embeddings from '{embeddings_path}'")
     with h5py.File(embeddings_path, "r") as f:
         embeddings = [e / np.linalg.norm(e, keepdims=True) for e in f["embeddings"]]  # type: ignore
         filenames = [str(name[0], "utf-8") for name in f["filenames"]]  # type: ignore
@@ -429,11 +440,12 @@ def graph(
     grouped_files = defaultdict(list[str])
     for filename in glob(os.path.join(data_dir, "*.mid")):
         track_name = basename(filename).split("_")[0]
-        grouped_files[track_name].append(filename)
+        grouped_files[track_name].append(basename(filename))
 
     console.log(f"grouped {len(grouped_files)} tracks:")
     for track, files in list(grouped_files.items())[-3:]:
         console.log(f"\t{track}: {len(files):04d} files")
+        console.log(f"\t{files[:3]}")
 
     console.log("building graphs")
     progress = Progress(
@@ -444,6 +456,7 @@ def graph(
         refresh_per_second=2,
     )
     prim_task = progress.add_task("generating graphs", total=len(grouped_files.items()))
+    debug_print = False
     with progress:
         for track, files in grouped_files.items():
             print(f"building graph for track {track} with {len(files)} files")
@@ -462,9 +475,20 @@ def graph(
             for i in range(len(files)):
                 for j in neighbors[i]:
                     if i < j:
-                        weight = 1 - similarity[i, j]
-                        edges.append((files[i], files[j], float(weight)))
+                        edges.append((files[i], files[j], float(1 - similarity[i, j])))
                 progress.advance(sec_task)
+
+            if not debug_print:
+                console.log(f"printing some debug stats for {track}")
+                console.log(f"\t{len(files)} files, e.g.:\n\t{files[:5]}")
+                console.log(f"\t{len(edges)} edges, e.g.:\n\t{edges[:5]}")
+                console.log(
+                    f"emb_group.shape: {emb_group.shape}, e.g.:\n\t{emb_group[:5]}"
+                )
+                console.log(f"\t{len(neighbors)} neighbors, e.g.:\n\t{neighbors[:5]}")
+                console.log(f"\t{len(similarity)} similarity matrix")
+                console.log(f"\t{similarity}")
+                debug_print = True
 
             graph = nx.Graph(name=track)
             graph.add_nodes_from(files)
@@ -475,6 +499,7 @@ def graph(
             del graph
 
             n_graphs += 1
+            progress.remove_task(sec_task)
             progress.advance(prim_task)
 
     return n_graphs

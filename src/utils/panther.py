@@ -52,10 +52,23 @@ def send_embedding(
     )
 
     # short circuit for testing
+    # '/home/finlay/disklavier/data/outputs/uploads/intervals-060-09_1_t00s00_specdiff.pt
+    #                          data/outputs/uploads/intervals-060-09_1_t00s00_specdiff.pt
     if mode == "test":
         console.log(f"{tag} moving file from '{file_path}' to '{remote_file_path}'")
-        console.log(os.getcwd())
+        if os.path.exists(pf_tensor_local):
+            os.remove(pf_tensor_local)
+        if os.path.exists(remote_file_path):
+            os.remove(remote_file_path)
         copy2(file_path, remote_file_path)
+        pf_tensor_local = os.path.abspath(remote_file_path).replace(".mid", ".pt")
+        console.log(
+            f"{tag} waiting 2 seconds for {pf_tensor_local} to be created {os.path.exists(pf_tensor_local)}"
+        )
+        time.sleep(2.0)
+        console.log(
+            f"{tag} waited 2 seonds for {pf_tensor_local} to be created {os.path.exists(pf_tensor_local)}"
+        )
     else:
         # panther login
         console.log(f"{tag} connecting to panther at {USER}@{REMOTE_HOST}:{PORT}")
