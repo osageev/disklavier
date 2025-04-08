@@ -22,10 +22,10 @@ num_transposes: 12 # 12 semitones
 
 
 # supporting tables, etc.
-representations: ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-tpose"]
+representations: ["pitch-histogram", "specdiff"] #,  "clf-4note", "clf-speed", "clf-tpose"]
 model_dir: "data/models"
 device_name: "cuda:0"
 graphs: ["specdiff"]
-n_graph_connections: 3000
+n_graph_connections: 100
 find_neighbors: true
 fix_tempo: true
