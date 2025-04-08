@@ -275,11 +275,13 @@ class Scheduler(Worker):
 
     def get_current_file(self) -> str:
         now = datetime.now()
-        for i in range(len(self.ts_transitions) -1):
+        for i in range(len(self.ts_transitions) - 1):
             td_this_trans = self.td_start + timedelta(seconds=self.ts_transitions[i])
-            td_next_trans = self.td_start + timedelta(seconds=self.ts_transitions[i+1])
-            # console.log(f"{self.tag} checking {now.strftime('%y-%m-%d %H:%M:%S')} against {td_this_trans.strftime('%y-%m-%d %H:%M:%S')} and {td_next_trans.strftime('%y-%m-%d %H:%M:%S')}")
+            td_next_trans = self.td_start + timedelta(
+                seconds=self.ts_transitions[i + 1]
+            )
+            # console.log(f"{self.tag} checking {td_this_trans.strftime('%y-%m-%d %H:%M:%S')} <= {now.strftime('%y-%m-%d %H:%M:%S')} < {td_next_trans.strftime('%y-%m-%d %H:%M:%S')}")
             if td_this_trans <= now < td_next_trans:
-                return self.queued_files[i - 1]
+                return self.queued_files[i]
 
         return ""

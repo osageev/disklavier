@@ -104,7 +104,6 @@ class RunWorker(QtCore.QThread):
             raise NotImplementedError("playlist mode not implemented")
 
         ts_queue = 0
-
         q_playback = PriorityQueue()
         q_gui = PriorityQueue()
 
@@ -227,6 +226,10 @@ class RunWorker(QtCore.QThread):
             # all necessary files queued, wait for playback to finish
             console.log(f"{self.tag} waiting for playback to finish...")
             while q_playback.qsize() > 0:
+                if current_file != self.staff.scheduler.get_current_file():
+                    current_file = self.staff.scheduler.get_current_file()
+                    console.log(f"{self.tag} now playing '{current_file}'")
+                    self.s_status.emit(f"now playing '{current_file}'")
                 time.sleep(0.1)
             thread_player.join(timeout=0.1)
         except KeyboardInterrupt:

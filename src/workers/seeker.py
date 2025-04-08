@@ -1,6 +1,5 @@
 import os
 import json
-import torch
 import faiss
 import numpy as np
 import pandas as pd
@@ -11,7 +10,6 @@ from scipy.spatial.distance import cosine
 
 from .worker import Worker
 from utils import basename, console, panther
-from utils.models import Classifier
 from utils.modes import find_path
 
 SUPPORTED_EXTENSIONS = (".mid", ".midi")
@@ -70,8 +68,6 @@ class Seeker(Worker):
         self.p_dataset = dataset_path
         self.p_playlist = playlist_path
         self.rng = np.random.default_rng(self.params.seed)
-        if self.params.metric in self.model_list:
-            self.model = self.load_model()
         if not hasattr(self, "match"):
             self.params.match = "current"
 
@@ -284,26 +280,16 @@ class Seeker(Worker):
             embedding,
             dtype=np.float32,
         ).reshape(1, -1)
-        # ensure that embedding is normalized
-        # TODO: move embedding normalization to dataset generation
-        query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
 
         # query index
         if self.verbose and query_file in self.filenames:
             console.log(f"{self.tag} querying with key '{query_file}'")
-        similarities, indices = self.faiss_index.search(query_embedding, 1000)  # type: ignore
+        indices, similarities = self._faiss_search(query_embedding)  # type: ignore
         if self.verbose:
-            console.log(f"{self.tag} indices:\n\t", indices[0][:10])
-            console.log(f"{self.tag} similarities:\n\t", similarities[0][:10])
-
-        # reformat and DONT filter shifted files
-        indices, similarities = zip(
-            *[
-                (i, d)
-                for i, d in zip(indices[0], similarities[0])
-                # if str(self.filenames[i]).endswith("s00")
-            ]
-        )
+            for i in range(10):
+                console.log(
+                    f"{self.tag} {i}: {self.filenames[indices[i]]} {similarities[i]:.05f}"
+                )
 
         # find most similar valid match
         if "player" in query_file:
@@ -416,7 +402,7 @@ class Seeker(Worker):
         console.log(f"{self.tag} using seed file '{seed_file}' for graph navigation")
 
         try:
-            test = self.filename_to_index[seed_key]
+            _ = self.filename_to_index[seed_key]
         except KeyError:
             console.log(
                 f"{self.tag} unable to find embedding for '{seed_key}', calculating best match"
@@ -444,7 +430,7 @@ class Seeker(Worker):
         console.log(
             f"{self.tag} searching for nearest segment from a different track with embedding {seed_embedding.shape}"
         )
-        similarities, indices = self.faiss_index.search(seed_embedding, 1000)  # type: ignore
+        indices, similarities = self._faiss_search(seed_embedding)
 
         # find top whatever nearest segments from different tracks (one per track)
         # TODO: alternate mode: find whatever segments from different tracks which have the highest similarities to segments from the same track as the seed file
@@ -461,7 +447,7 @@ class Seeker(Worker):
         )
         console.log(f"{self.tag} seen tracks: {seen_tracks}")
 
-        for idx, similarity in zip(indices[0], similarities[0]):
+        for idx, similarity in zip(indices, similarities):
             segment_name = str(self.filenames[idx])
             segment_track = segment_name.split("_")[0]
 
@@ -481,15 +467,13 @@ class Seeker(Worker):
             )
 
         # load relevant graph files
-        # TODO: build this path programmatically
         graph_path = os.path.join(
             os.path.dirname(self.p_dataset), "graphs", f"{seed_track}.json"
         )
         console.log(f"{self.tag} loading source graph from '{graph_path}'")
         with open(graph_path, "r") as f:
             graph_json = json.load(f)
-
-        graph = nx.node_link_graph(graph_json, edges="edges") # type: ignore
+            graph = nx.node_link_graph(graph_json, edges="edges")  # type: ignore
 
         # Try each of the top segments until a path is found
         for i, (target_segment, target_similarity) in enumerate(top_segments):
@@ -500,7 +484,9 @@ class Seeker(Worker):
             # add target node to graph if not already present
             if target_segment not in graph:
                 graph.add_node(target_segment)
-                nodes = [basename(node) for node in graph.nodes() if node != target_segment]
+                nodes = [
+                    basename(node) for node in graph.nodes() if node != target_segment
+                ]
 
                 # get node embeddings
                 try:
@@ -550,7 +536,7 @@ class Seeker(Worker):
                     max_visits=1,
                     max_updates=50,
                     allow_transpose=True,
-                    allow_shift=True,
+                    allow_shift=not self.params.block_shift,
                 )
                 if res:
                     path, cost = res
@@ -617,14 +603,16 @@ class Seeker(Worker):
         return random_file, 0.0
 
     def _get_random(self) -> str:
+        options = [
+            m for m in os.listdir(self.p_dataset) if m.endswith(SUPPORTED_EXTENSIONS)
+        ]
+        if self.params.block_shift:
+            options = [m for m in options if "s00" in str(m)]
         if self.verbose:
             console.log(
-                f"{self.tag} choosing randomly from '{self.p_dataset}':\n{[m for m in os.listdir(self.p_dataset)][:5]}"
+                f"{self.tag} choosing randomly from '{self.p_dataset}':\n{options[:5]}"
             )
-        random_file = self.rng.choice(
-            [m for m in os.listdir(self.p_dataset) if m.endswith(SUPPORTED_EXTENSIONS)],
-            1,
-        )[0]
+        random_file = self.rng.choice(options, 1)[0]
 
         # correct for missing augmentation information if not present
         if len(random_file.split("_")) < 3:
@@ -642,9 +630,6 @@ class Seeker(Worker):
                     ]
                 )
                 base_file = self.base_file(random_file)
-
-        # no shift -- too risky
-        random_file = os.path.splitext(random_file)[0][:-3] + "s00.mid"
 
         if self.verbose:
             console.log(f"{self.tag} chose random file '{random_file}'")
@@ -689,9 +674,9 @@ class Seeker(Worker):
         if self.params.metric == "pitch-histogram":
             if self.verbose:
                 console.log(f"{self.tag} using pitch histogram metric")
-            embedding = PrettyMIDI(
-                self.params.pf_recording
-            ).get_pitch_class_histogram(True, True)
+            embedding = PrettyMIDI(self.params.pf_recording).get_pitch_class_histogram(
+                True, True
+            )
             embedding = embedding.reshape(1, -1)
             console.log(f"{self.tag} {embedding}")
         else:
@@ -704,20 +689,6 @@ class Seeker(Worker):
             console.log(
                 f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
             )
-
-            if self.params.metric != "specdiff" and self.model is not None:
-                console.log(
-                    f"{self.tag} applying {self.params.metric} model to embedding"
-                )
-                embedding = (
-                    self.model(torch.from_numpy(embedding), return_hidden=True)
-                    .detach()
-                    .numpy()
-                )
-                console.log(
-                    f"{self.tag} got {self.params.metric} embedding {embedding.shape}"
-                )
-        
         return embedding
 
     def augment_recording(self, pf_midi: str) -> str:
@@ -825,6 +796,32 @@ class Seeker(Worker):
 
         return padded_midi
 
+    def _faiss_search(
+        self, query_embedding: np.ndarray, num_matches: int = 1000
+    ) -> tuple[list[int], list[float]]:
+        """
+        search the FAISS index for the most similar embeddings.
+        """
+        # ensure that embedding is normalized
+        query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
+        similarities, indices = self.faiss_index.search(query_embedding, num_matches)  # type: ignore
+
+        if self.params.block_shift:
+            indices, similarities = zip(
+                *[
+                    (i, d)
+                    for i, d in zip(indices[0], similarities[0])
+                    if str(self.filenames[i]).endswith("s00")
+                ]
+            )
+            console.log(f"{self.tag} filtered {1000-len(indices)}/1000 shifted files")
+        else:
+            indices, similarities = zip(
+                *[(i, d) for i, d in zip(indices[0], similarities[0])]
+            )
+
+        return indices, similarities
+
     def transform(self, midi_file: str = "") -> str:
         pf_in = self.base_file(self.played_files[-1]) if midi_file == "" else midi_file
         pf_out = os.path.join(
@@ -847,42 +844,11 @@ class Seeker(Worker):
         pieces = os.path.basename(filename).split("_")
         return f"{pieces[0]}_{pieces[1]}.mid"
 
-    def load_model(self):
-        match self.params.metric:
-            case "clamp":
-                raise NotImplementedError("CLaMP model is no longer supported")
-                if torch.cuda.is_available():
-                    device = torch.device("cuda")
-                    console.log(f"{self.tag} Using GPU {torch.cuda.get_device_name(0)}")
-                else:
-                    console.log(f"{self.tag} No GPU available, using the CPU instead")
-                    device = torch.device("cpu")
-                self.params.model = clamp.CLaMP.from_pretrained(clamp.CLAMP_MODEL_NAME)
-                if self.verbose:
-                    console.log(f"{self.tag} Loaded model:\n{self.params.model.eval}")
-                self.params.model = self.params.model.to(device)  # type: ignore
-            case "clf-4note" | "clf-speed" | "clf-tpose":
-                clf = Classifier(768, [128], 120)
-                clf.load_state_dict(
-                    torch.load(
-                        os.path.join("data", "models", self.params.metric + ".pth"),
-                        weights_only=False,
-                        map_location=torch.device("cuda:0"),
-                    ),
-                    strict=False,
-                )
-                clf.eval()
-
-                return clf
-            case _:
-                raise TypeError(
-                    f"{self.tag} Unsupported model specified: {self.params.metric}"
-                )
-
     def get_match(self, query_embedding: np.ndarray) -> tuple[str, float]:
         from glob import glob
 
         console.log(f"{self.tag} loading faiss index")
+        # TODO: bad! do this properly.
         faiss_index = faiss.read_index(
             "/Users/finlay/Documents/Programming/disklavier/data/tables/20250320/clap-sgm.faiss"
         )
@@ -891,22 +857,21 @@ class Seeker(Worker):
         filenames.sort()
         console.log(f"{self.tag} found {len(filenames)} files:\n\t{filenames[:5]}")
         # ensure that embedding is normalized
-        query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
         console.log(f"{self.tag} query embedding shape: {query_embedding.shape}")
         console.log(query_embedding)
 
         # get matches
-        similarities, indices = faiss_index.search(query_embedding, 3)  # type: ignore
+        indices, similarities = self._faiss_search(query_embedding)
         if self.verbose:
             console.log(f"{self.tag} indices:\n\t", indices[0])
             console.log(f"{self.tag} similarities:\n\t", similarities[0])
             for i in range(3):
-                console.log(f"{self.tag} filenames:\n\t", filenames[indices[0][i]])
+                console.log(f"{self.tag} filenames:\n\t", filenames[indices[i]])
 
         # get best match
         best_match = os.path.join(
-            self.p_dataset, basename(filenames[indices[0][0]]) + "_t00s00.mid"
+            self.p_dataset, basename(filenames[indices[0]]) + "_t00s00.mid"
         )
-        best_similarity = similarities[0][0]
+        best_similarity = similarities[0]
 
         return best_match, best_similarity

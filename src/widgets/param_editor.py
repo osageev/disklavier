@@ -14,6 +14,7 @@ blocked_params = [
     "midi_port",
     "record",
     "channels",
+    "system"
 ]
 
 
