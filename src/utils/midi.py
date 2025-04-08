@@ -860,10 +860,109 @@ def get_msg_time(
 ) -> datetime:
     if not start:
         start = datetime.now()
-        console.log(f"[yellow]no start time found, using current time: {start}[/yellow]")
+        console.log(
+            f"[yellow]no start time found, using current time: {start}[/yellow]"
+        )
     console.log(f"msg: {msg}")
     time_seconds = timedelta(seconds=mido.tick2second(msg.time, TICKS_PER_BEAT, tempo))
     offset_seconds = timedelta(seconds=mido.tick2second(offset, TICKS_PER_BEAT, tempo))
-    console.log(f"message time: {time_seconds}\t offset_seconds: {offset_seconds}\tstart: {start}")
-    console.log(f"start + time_seconds + offset_seconds: {start + time_seconds + offset_seconds}")
+    console.log(
+        f"message time: {time_seconds}\t offset_seconds: {offset_seconds}\tstart: {start}"
+    )
+    console.log(
+        f"start + time_seconds + offset_seconds: {start + time_seconds + offset_seconds}"
+    )
     return start + time_seconds + offset_seconds
+
+
+def beat_split(midi_path: str, tempo: int) -> list[dict]:
+    """
+    Group MIDI messages by beat, ensuring notes that span beat boundaries are handled correctly.
+
+    Parameters
+    ----------
+    midi_path : str
+        Path to the MIDI file.
+    tempo : int
+        Tempo in BPM.
+
+    Returns
+    -------
+    list[dict]
+        List of dictionaries, where each dictionary contains a list of MIDI messages for one beat.
+        The first dictionary (index 0) contains messages between beats 1 and 2.
+    """
+    midi = mido.MidiFile(midi_path)
+
+    # calculate ticks per second and seconds per beat
+    ticks_per_second = TICKS_PER_BEAT * tempo / 60
+    seconds_per_beat = 60 / tempo
+
+    # convert all messages to absolute timing
+    absolute_msgs = []
+    current_tick = 0
+    for msg in midi.tracks[0]:
+        current_tick += msg.time
+        absolute_msgs.append((current_tick, msg.copy()))
+
+    if not absolute_msgs:
+        console.log(f"[red]no messages found in {midi_path}[/red]")
+        return []
+
+    # find the last tick to determine number of beats
+    last_tick = absolute_msgs[-1][0]
+    num_beats = int(last_tick / TICKS_PER_BEAT) + 1
+
+    # initialize list of beats
+    beats = [
+        {
+            "notes": [],
+            "ticks": [
+                mido.MetaMessage("text", text=f"tick {i}", time=0),
+                mido.MetaMessage("text", text=f"tick {i+1}", time=TICKS_PER_BEAT),
+            ],
+        }
+        for i in range(num_beats)
+    ]
+
+    # track active notes and their start times
+    active_notes = {}  # (channel, note) -> (start_tick, start_beat)
+
+    for tick, msg in absolute_msgs:
+        # calculate which beat this message belongs to
+        beat_idx = int(tick / TICKS_PER_BEAT)
+
+        if msg.type == "note_on" and msg.velocity > 0:
+            # note on event - store start time and beat
+            active_notes[(msg.channel, msg.note)] = (tick, beat_idx)
+            beats[beat_idx]["notes"].append((tick, msg.copy()))
+        elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+            # note off event - find where the note started
+            key = (msg.channel, msg.note)
+            if key in active_notes:
+                start_tick, start_beat = active_notes[key]
+                # add note off to the same beat as note on
+                beats[start_beat]["notes"].append((tick, msg.copy()))
+                del active_notes[key]
+        else:
+            # non-note message - add to current beat
+            beats[beat_idx]["notes"].append((tick, msg.copy()))
+
+    # convert back to relative timing for each beat
+    for beat_idx, beat_msgs in enumerate(beats):
+        if not beat_msgs:
+            continue
+
+        # sort by absolute time to get correct order
+        beat_msgs.sort(key=lambda x: x[0])
+
+        # convert to relative timing
+        prev_tick = beat_idx * TICKS_PER_BEAT
+        for i, (tick, msg) in enumerate(beat_msgs):
+            msg.time = tick - prev_tick
+            prev_tick = tick
+
+        # extract just the messages in order
+        beats[beat_idx] = [msg for _, msg in beat_msgs]
+
+    return beats

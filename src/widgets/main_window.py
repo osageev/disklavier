@@ -61,7 +61,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.velocity_label.setFont(font)
         self.toolbar.addWidget(self.velocity_label)
 
-        # Add spacer between velocity and time
+        # Create status label (middle)
+        self.status_label = QtWidgets.QLabel("Initializing...")
+        self.status_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setMinimumWidth(300)
+        self.status_label.setStyleSheet(
+            "border-radius: 4px; padding: 2px 8px;"
+            # "background-color: #f0f0f0; border-radius: 4px; padding: 2px 8px;"
+        )
+        status_font = self.status_label.font()
+        status_font.setPointSize(status_font.pointSize() + 1)
+        status_font.setBold(True)
+        self.status_label.setFont(status_font)
+        self.toolbar.addWidget(self.status_label)
+
+        # Add spacer between status and time
         spacer = QtWidgets.QWidget()
         spacer.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
@@ -213,21 +227,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 yaml.dump(OmegaConf.to_container(params), f, default_flow_style=False)
 
             self.status.showMessage(f"Parameters saved to {param_file}")
+            self.status_label.setText(f"Parameters saved")
             console.log(f"{self.tag} parameters saved to '{param_file}'")
         except Exception as e:
             self.status.showMessage(f"Error saving parameters: {str(e)}")
+            self.status_label.setText(f"Error saving parameters")
             console.log(f"{self.tag} error saving parameters: {str(e)}")
 
         self.status.showMessage("initializing filesystem")
+        self.status_label.setText("Initializing filesystem")
         self.init_fs()
         self.status.showMessage("initializing workers")
+        self.status_label.setText("Initializing workers")
         self.init_workers()
         self.status.showMessage("system initialization complete")
+        self.status_label.setText("System initialization complete")
 
         # Start the main processing in a QThread
         self.run_thread = RunWorker(self)
         self.run_thread.s_start_time.connect(self.update_start_time)
-        self.run_thread.s_status.connect(self.status.showMessage)
+        # Connect status signal to both status bar and toolbar label
+        self.run_thread.s_status.connect(self.update_status)
         self.run_thread.start()
 
     def update_start_time(self, start_time):
@@ -237,6 +257,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.td_start = start_time
         if hasattr(self, "piano_roll"):
             self.piano_roll.td_start = start_time
+
+    def update_status(self, message: str):
+        """
+        update both status bar and toolbar status label with the message.
+
+        parameters
+        ----------
+        message : str
+            status message to display.
+        """
+        self.status.showMessage(message)
+        self.status_label.setText(message)
 
     def write_log(self, filename: str, *args):
         with open(filename, mode="a", newline="") as file:

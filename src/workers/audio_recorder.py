@@ -159,9 +159,9 @@ class AudioRecorder(Worker):
             # Open MIDI input port
             with mido.open_input(self.params.midi_port) as inport:  # type: ignore
                 recording_started = False
+                stream.start()
 
                 # Start audio stream once MIDI port is open
-                stream.start()
 
                 for msg in inport:
                     # Check for pedal press/release (control 67)

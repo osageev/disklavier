@@ -30,8 +30,8 @@ CONSTANTS = {
 OPTIONS = {
     "dataset": ["20250110", "20250320", "20250320-c10", "20250320-c100"],
     "mode": ["best", "graph"],
-    "metric": ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-tpose"],
-    "graph_steps": [5, 9],
+    "metric": ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-tpose", "clamp"],
+    "graph_steps": [5, 9, 17],
 }
 
 

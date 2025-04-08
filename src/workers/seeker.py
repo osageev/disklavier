@@ -22,6 +22,7 @@ EMBEDDING_SIZES = {
     "clf-speed": 128,
     "clf-tpose": 128,
     "clap": 512,
+    "clamp": 768,
 }
 
 
@@ -246,7 +247,7 @@ class Seeker(Worker):
                 f"{self.tag} finding most similar file to '{self.played_files[-1]}'"
             )
             console.log(
-                f"{self.tag} {len(self.played_files)} played files:\n{self.played_files}"
+                f"{self.tag} {len(self.played_files)} played files:\n{self.played_files[:-5]}"
             )
 
         query_file = basename(self.played_files[-1])
@@ -372,7 +373,7 @@ class Seeker(Worker):
 
     def _get_easy(self) -> str:
         if self.verbose:
-            console.log(f"{self.tag} played files: {self.played_files}")
+            console.log(f"{self.tag} played files: {self.played_files[:-5]}")
             console.log(f"{self.tag} num_repeats: {self.n_segment_repeats}")
         if self.n_segment_repeats < self.n_segment_repeats:
             console.log(f"{self.tag} transitioning to next segment")
@@ -490,13 +491,13 @@ class Seeker(Worker):
         # load relevant graph files
         # TODO: build this path programmatically
         graph_path = os.path.join(
-            "data", "datasets", "20250110", "graphs", f"{seed_track}.json"
+            "data", "datasets", "20250320", "graphs", f"{seed_track}.json"
         )
         console.log(f"{self.tag} loading source graph from '{graph_path}'")
         with open(graph_path, "r") as f:
             graph_json = json.load(f)
 
-        graph = nx.node_link_graph(graph_json, edges="links") # type: ignore
+        graph = nx.node_link_graph(graph_json, edges="edges") # type: ignore
 
         # Try each of the top segments until a path is found
         for i, (target_segment, target_similarity) in enumerate(top_segments):
@@ -507,7 +508,7 @@ class Seeker(Worker):
             # add target node to graph if not already present
             if target_segment not in graph:
                 graph.add_node(target_segment)
-                nodes = [node for node in graph.nodes() if node != target_segment]
+                nodes = [basename(node) for node in graph.nodes() if node != target_segment]
 
                 # get node embeddings
                 try:
@@ -689,44 +690,38 @@ class Seeker(Worker):
         return "", 0.0
 
     def _get_embedding(self, pf_midi: str) -> np.ndarray:
-        match self.params.metric:
-            case "specdiff" | "clf-4note" | "clf-speed" | "clf-tpose" | "clap":
-                console.log(
-                    f"{self.tag} getting [italic bold]{self.params.metric}[/italic bold] embedding for '{pf_midi}'"
-                )
-                embedding = panther.send_embedding(
-                    pf_midi, model=self.params.metric, mode=self.params.system
-                )
-                console.log(
-                    f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
-                )
+        if self.params.metric == "pitch-histogram":
+            if self.verbose:
+                console.log(f"{self.tag} using pitch histogram metric")
+            embedding = PrettyMIDI(
+                self.params.pf_recording
+            ).get_pitch_class_histogram(True, True)
+            embedding = embedding.reshape(1, -1)
+            console.log(f"{self.tag} {embedding}")
+        else:
+            console.log(
+                f"{self.tag} getting [italic bold]{self.params.metric}[/italic bold] embedding for '{pf_midi}'"
+            )
+            embedding = panther.send_embedding(
+                pf_midi, model=self.params.metric, mode=self.params.system
+            )
+            console.log(
+                f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
+            )
 
-                if self.params.metric != "specdiff" and self.model is not None:
-                    console.log(
-                        f"{self.tag} applying {self.params.metric} model to embedding"
-                    )
-                    embedding = (
-                        self.model(torch.from_numpy(embedding), return_hidden=True)
-                        .detach()
-                        .numpy()
-                    )
-                    console.log(
-                        f"{self.tag} got {self.params.metric} embedding {embedding.shape}"
-                    )
-            case "clamp":
-                raise NotImplementedError("CLaMP model is not currently supported")
-            case "pitch-histogram":
-                if self.verbose:
-                    console.log(f"{self.tag} using pitch histogram metric")
-                embedding = PrettyMIDI(
-                    self.params.pf_recording
-                ).get_pitch_class_histogram(True, True)
-                embedding = embedding.reshape(1, -1)
-                console.log(f"{self.tag} {embedding}")
-            case _:
-                console.log(f"{self.tag} unsupported metric: {self.params.metric}")
-                raise ValueError(f"{self.tag} unsupported metric: {self.params.metric}")
-
+            if self.params.metric != "specdiff" and self.model is not None:
+                console.log(
+                    f"{self.tag} applying {self.params.metric} model to embedding"
+                )
+                embedding = (
+                    self.model(torch.from_numpy(embedding), return_hidden=True)
+                    .detach()
+                    .numpy()
+                )
+                console.log(
+                    f"{self.tag} got {self.params.metric} embedding {embedding.shape}"
+                )
+        
         return embedding
 
     def augment_recording(self, pf_midi: str) -> str:

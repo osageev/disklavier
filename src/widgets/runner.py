@@ -152,7 +152,6 @@ class RunWorker(QtCore.QThread):
             metronome = workers.Metronome(
                 self.params.metronome, self.params.bpm, self.td_system_start
             )
-            process_metronome = Process(target=metronome.tick, name="metronome")
 
             td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
             console.log(
@@ -161,7 +160,7 @@ class RunWorker(QtCore.QThread):
             self.s_start_time.emit(td_start)
             self.staff.scheduler.td_start = td_start
             metronome.td_start = td_start
-            process_metronome.start()
+            metronome.start()  # Start the QThread directly
 
             # start audio recording in a separate thread
             # TODO: fix ~1-beat delay in audio recording startup

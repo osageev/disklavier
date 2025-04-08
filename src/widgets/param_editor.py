@@ -35,6 +35,7 @@ class ParameterEditorWidget(QtWidgets.QWidget):
                 "clf-4note",
                 "clf-speed",
                 "clf-tpose",
+                "clamp",
             ],
             "seeker.match": [
                 "current",

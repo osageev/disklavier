@@ -200,7 +200,7 @@ class Scheduler(Worker):
         if self.verbose:
             console.log(
                 f"{self.tag} segment interval is {ts_interval:.03f} seconds",
-                [f"{t:07.03f} s" for t in self.ts_transitions],
+                # [f"{t:07.03f} s" for t in self.ts_transitions],
             )
 
         transitions = []

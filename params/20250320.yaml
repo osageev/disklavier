@@ -26,6 +26,6 @@ representations: ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-
 model_dir: "data/models"
 device_name: "cuda:0"
 graphs: ["specdiff"]
-n_graph_connections: 1000
+n_graph_connections: 100
 find_neighbors: true
 fix_tempo: true
