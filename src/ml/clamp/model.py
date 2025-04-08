@@ -162,7 +162,7 @@ class ClampModel:
                     audio_masks=input_masks.unsqueeze(0).to(self.device),
                     get_global=get_global,
                 )
-            if not get_global:
+            if not c:
                 last_hidden_states = last_hidden_states[
                     :, : input_masks.sum().long().item(), :
                 ]
