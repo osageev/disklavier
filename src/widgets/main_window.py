@@ -65,10 +65,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_label = QtWidgets.QLabel("Initializing...")
         self.status_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.status_label.setMinimumWidth(300)
-        self.status_label.setStyleSheet(
-            "border-radius: 4px; padding: 2px 8px;"
-            # "background-color: #f0f0f0; border-radius: 4px; padding: 2px 8px;"
-        )
+        self._update_status_style("Initializing...")
         status_font = self.status_label.font()
         status_font.setPointSize(status_font.pointSize() + 1)
         status_font.setBold(True)
@@ -268,6 +265,28 @@ class MainWindow(QtWidgets.QMainWindow):
             status message to display.
         """
         self.status.showMessage(message)
+        self._update_status_style(message)
+
+    def _update_status_style(self, message: str):
+        # default style
+        style = "border-radius: 4px; padding: 2px 8px;"
+
+        # check if message matches the pattern "now playing 'x_y_tNNsNN'"
+        if "now playing" in message and "s" in message:
+            try:
+                # extract the number after 's'
+                s_index = message.rindex("s")
+                number = int(message[s_index + 1 :].split("'")[0])
+
+                # set background color based on even/odd
+                if number % 2 == 0:
+                    style += "background-color: #90EE90;"  # light green
+                else:
+                    style += "background-color: #ADD8E6;"  # light blue
+            except (ValueError, IndexError):
+                pass  # if parsing fails, use default style
+
+        self.status_label.setStyleSheet(style)
         self.status_label.setText(message)
 
     def write_log(self, filename: str, *args):
@@ -301,26 +320,10 @@ class MainWindow(QtWidgets.QMainWindow):
         console.log(f"{self.tag} workers cleaned up")
 
     def closeEvent(self, event):
-        """
-        handle the window close event.
-
-        parameters
-        ----------
-        event : QCloseEvent
-            close event.
-        """
         self.cleanup_workers()
         super().closeEvent(event)
 
     def resizeEvent(self, event):
-        """
-        handle resize events and update dimensions.
-
-        parameters
-        ----------
-        event : QResizeEvent
-            resize event.
-        """
         super().resizeEvent(event)
         self.window_height = self.height()
         self.window_width = self.width()

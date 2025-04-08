@@ -247,7 +247,7 @@ class Seeker(Worker):
                 f"{self.tag} finding most similar file to '{self.played_files[-1]}'"
             )
             console.log(
-                f"{self.tag} {len(self.played_files)} played files:\n{self.played_files[:-5]}"
+                f"{self.tag} {len(self.played_files)} played files:\n{self.played_files[-5:]}"
             )
 
         query_file = basename(self.played_files[-1])

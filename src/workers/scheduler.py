@@ -233,9 +233,7 @@ class Scheduler(Worker):
 
     def _get_next_transition(self) -> Tuple[float, int]:
         if self.verbose:
-            console.log(
-                f"{self.tag} transition times:\n\t{[f'{t:07.03f} s' for t in self.ts_transitions[-5:]]}"
-            )
+            console.log(f"{self.tag} transition times:\n\t{self.ts_transitions[-5:]}")
         ts_offset = self.ts_transitions[
             self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
         ]
@@ -277,10 +275,11 @@ class Scheduler(Worker):
 
     def get_current_file(self) -> str:
         now = datetime.now()
-        for i, ts_transition in enumerate(self.ts_transitions):
-            transition_time = self.td_start + timedelta(seconds=ts_transition)
-            # console.log(f"{self.tag} checking {now.strftime('%y-%m-%d %H:%M:%S')} against {transition_time.strftime('%y-%m-%d %H:%M:%S')}")
-            if now < transition_time:
+        for i in range(len(self.ts_transitions) -1):
+            td_this_trans = self.td_start + timedelta(seconds=self.ts_transitions[i])
+            td_next_trans = self.td_start + timedelta(seconds=self.ts_transitions[i+1])
+            # console.log(f"{self.tag} checking {now.strftime('%y-%m-%d %H:%M:%S')} against {td_this_trans.strftime('%y-%m-%d %H:%M:%S')} and {td_next_trans.strftime('%y-%m-%d %H:%M:%S')}")
+            if td_this_trans <= now < td_next_trans:
                 return self.queued_files[i - 1]
 
         return ""
