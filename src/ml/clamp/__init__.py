@@ -1,7 +1,8 @@
 import os
 import mido
 
-from utils import basename
+def basename(filename: str) -> str:
+    return os.path.splitext(os.path.basename(filename))[0]
 
 
 def msg_to_str(msg):

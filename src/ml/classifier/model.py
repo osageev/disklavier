@@ -25,20 +25,6 @@ class Classifier(nn.Module):
         return self.output_layer(hidden_representation)
 
     def embed(self, path: str) -> torch.Tensor:
-        """
-        Generate an embedding for the given file path.
-
-        Parameters
-        ----------
-        path : str
-            Path to the file containing the input tensor.
-
-        Returns
-        -------
-        torch.Tensor
-            The embedding tensor.
-        """
-        console.log(f"{self.tag} generating embedding for '{path}'")
         x = torch.load(path, weights_only=True)
         if x.dim() == 1:
             x = x.unsqueeze(0).reshape(-1, 768)

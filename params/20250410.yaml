@@ -9,7 +9,7 @@ limit: null # early stopping
 segment: true
 num_beats: 8
 lead_window_beat_frac: 8
-metronome: 10 # metronome velocity (0 for none)
+metronome: 0 # metronome velocity (0 for none)
 beats: true
 novelty: false
 
@@ -22,10 +22,10 @@ num_transposes: 12 # 12 semitones
 
 
 # supporting tables, etc.
-representations: ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-tpose", "clamp"]
+representations: ["pitch-histogram", "specdiff",  "clamp"]
 model_dir: "data/models"
 device_name: "cuda:1"
 graphs: ["specdiff"]
-n_graph_connections: 100
+n_graph_connections: 250
 find_neighbors: true
 fix_tempo: true

@@ -8,8 +8,8 @@ from watchdog.events import FileSystemEventHandler
 
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "src")))
 from ml import model_list
-from ml.clap.model import Clap
-from ml.clamp.model import Clamp
+# from ml.clap.model import Clap
+# from ml.clamp.model import Clamp
 from ml.classifier.model import Classifier
 from ml.specdiff.model import SpectrogramDiffusion, config
 
@@ -25,12 +25,12 @@ class UploadHandler(FileSystemEventHandler):
 
     def __init__(self):
         # TODO: there has to be a better way to do this
-        console.log(f"{self.tag} loading clap model")
-        self.clap = Clap()
-        self.models["clap"] = self.clap
-        console.log(f"{self.tag} loading clamp model")
-        self.clamp = Clamp()
-        self.models["clamp"] = self.clamp
+        # console.log(f"{self.tag} loading clap model")
+        # self.clap = Clap()
+        # self.models["clap"] = self.clap
+        # console.log(f"{self.tag} loading clamp model")
+        # self.clamp = Clamp()
+        # self.models["clamp"] = self.clamp
         console.log(f"{self.tag} loading specdiff model")
         self.specdiff = SpectrogramDiffusion(config)  # weird way to do this but w/e
         self.models["specdiff"] = self.specdiff

@@ -1,3 +1,4 @@
+import os
 import torch
 from diffusers.pipelines.deprecated.spectrogram_diffusion.midi_utils import (
     MidiProcessor,
@@ -6,7 +7,9 @@ from diffusers.pipelines.deprecated.spectrogram_diffusion.notes_encoder import (
     SpectrogramNotesEncoder,
 )
 
-from utils import console
+from utils import console, basename
+from utils.midi import change_tempo_and_trim
+
 
 config = {
     "device": "cuda:0",
@@ -27,12 +30,14 @@ config = {
 
 
 class SpectrogramDiffusion:
-    tag = "[#ffafaf]spcdif[/#ffafaf]:"
+    tag = "[#aaaaff]spcdif[/#aaaaff]:"
     name = "SpectrogramDiffusion"
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: dict, fix_time: bool = True, verbose: bool = False) -> None:
         console.log(f"{self.tag} initializing spectrogram diffusion model")
         self.device = config["device"]
+        self.fix_time = fix_time
+        self.verbose = verbose
         torch.set_grad_enabled(False)
         self.processor = MidiProcessor()
         self.encoder = SpectrogramNotesEncoder(**config["encoder_config"]).cuda(
@@ -45,16 +50,27 @@ class SpectrogramDiffusion:
         console.log(f"{self.tag} model initialization complete")
 
     def embed(self, path: str) -> torch.Tensor:
-        console.log(f"{self.tag} generating embedding for '{path}'")
-        console.log(f"{self.tag} tokenizing")
-        tokens = self.processor(path)
-        console.log(f"{self.tag} {len(tokens)} {len(tokens[0])}")
-        all_tokens = [torch.IntTensor(token) for token in tokens]
-        console.log(
-            f"{self.tag} generated ({len(all_tokens)}, {all_tokens[0].shape}) tokens"
-        )
+        if self.fix_time:
+            tmp_dir = os.path.join(os.path.dirname(path), "tmp")
+            os.makedirs(tmp_dir, exist_ok=True)
+            tmp_file = os.path.join(tmp_dir, basename(path))
+            change_tempo_and_trim(path, tmp_file, tempo=95.0)
+            path = tmp_file
 
-        console.log(f"{self.tag} embedding")
+        if self.verbose:
+            console.log(f"{self.tag} generating embedding for '{path}'")
+        tokens = self.processor(path)
+        if self.verbose:
+            console.log(f"{self.tag} {len(tokens)} {torch.tensor(tokens[0]).shape}")
+        all_tokens = [torch.IntTensor(token) for token in tokens]
+        if self.verbose:
+            console.log(
+                f"{self.tag} generated ({len(all_tokens)}, {all_tokens[0].shape}) tokens"
+            )
+
+        if self.verbose:
+            console.log(f"{self.tag} embedding")
+
         embeddings = []
         for i in range(0, len(all_tokens)):
             batch = all_tokens[i].view(1, -1).cuda(self.device)
@@ -63,9 +79,15 @@ class SpectrogramDiffusion:
                 tokens_embedded, tokens_mask = self.encoder(
                     encoder_input_tokens=batch, encoder_inputs_mask=tokens_mask
                 )
-            console.log(f"{self.tag} generated embedding {i} ({tokens_embedded.shape})")
-            embeddings.append(tokens_embedded[tokens_mask].detach().cpu())
-        avg_embedding = torch.cat(embeddings).mean(0, keepdim=True)
-        console.log(f"{self.tag} embedding complete {avg_embedding.shape}")
+            if self.verbose:
+                console.log(
+                    f"{self.tag} generated embedding {i} ({tokens_embedded.shape})"
+                )
 
-        return avg_embedding / torch.norm(avg_embedding, p=2, dim=1, keepdim=True)
+            embeddings.append(tokens_embedded[tokens_mask].detach().cpu())
+
+        avg_embedding = torch.cat(embeddings).mean(0, keepdim=True)
+
+        if self.verbose:
+            console.log(f"{self.tag} embedding complete {avg_embedding.shape}")
+        return avg_embedding

@@ -3,7 +3,6 @@ import os
 import math
 import torch
 import random
-from config import *
 from unidecode import unidecode
 from torch.nn import functional as F
 from transformers import (
@@ -13,6 +12,9 @@ from transformers import (
     PreTrainedModel,
     GPT2Config,
 )
+
+from ml.clamp.config import *
+
 
 try:
     import torch.distributed.nn
