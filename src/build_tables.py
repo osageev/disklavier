@@ -55,7 +55,10 @@ def main(config) -> None:
                 )
             case "specdiff":
                 resp = table_utils.specdiff(
-                    augmented_files, table_path, device_name=config.device_name
+                    augmented_files,
+                    table_path,
+                    batch_size=2,
+                    device_name=config.device_name,
                 )
             case "clf-4note" | "clf-speed" | "clf-tpose":
                 if not os.path.exists(os.path.join(config.out_dir, "specdiff.h5")):
@@ -77,6 +80,10 @@ def main(config) -> None:
                     table_path,
                     clf_path,
                     device_name=config.device_name,
+                )
+            case "clamp":
+                resp = table_utils.clamp(
+                    augmented_files, table_path, device_name=config.device_name
                 )
             case _:
                 console.log(f"skipping {rep} because it is not supported")

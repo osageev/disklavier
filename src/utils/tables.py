@@ -16,19 +16,15 @@ from rich.progress import (
     TimeElapsedColumn,
     MofNCompleteColumn,
 )
-from diffusers.pipelines.deprecated.spectrogram_diffusion.midi_utils import (
-    MidiProcessor,
-)
-from diffusers.pipelines.deprecated.spectrogram_diffusion.notes_encoder import (
-    SpectrogramNotesEncoder,
-)
 from torch.utils.data import DataLoader, TensorDataset
 
 
 from typing import List, Optional
 from . import basename, console
-from utils.midi import change_tempo_and_trim
-from utils.models import Classifier
+
+from ml.specdiff.model import SpectrogramDiffusion, config as specdiff_config
+from ml.classifier.model import Classifier
+from ml.clamp.model import Clamp3
 
 
 def build_neighbor_table(
@@ -125,8 +121,8 @@ def pitch_histograms(all_files: List[str], output_path: str) -> bool:
         progress = Progress(
             SpinnerColumn(),
             *Progress.get_default_columns(),
-            MofNCompleteColumn(),
             TimeElapsedColumn(),
+            MofNCompleteColumn(),
         )
         update_task = progress.add_task(f"generating pitch histograms", total=num_files)
         with progress:
@@ -174,53 +170,28 @@ def specdiff(
     """
 
     num_files = len(all_files)
-    device = torch.device(device_name)
-    encoder_config = {
-        "d_ff": 2048,
-        "d_kv": 64,
-        "d_model": 768,
-        "dropout_rate": 0.1,
-        "feed_forward_proj": "gated-gelu_pytorch_tanh",
-        "is_decoder": False,
-        "max_length": 2048,
-        "num_heads": 12,
-        "num_layers": 12,
-        "vocab_size": 1536,
-    }
+    all_files.sort()
+    # initialize encoder
+    specdiff_config["device"] = device_name
+    model = SpectrogramDiffusion(specdiff_config)
+
     # initialize faiss index
     faiss_path = os.path.join(os.path.dirname(output_path), "specdiff.faiss")
-    index = faiss.IndexFlatIP(encoder_config["d_model"])
-    vecs = np.zeros((num_files, encoder_config["d_model"]), dtype=np.float32)
-
-    # load tokens
-    tokens_path = os.path.join(os.path.dirname(output_path), "tokens.h5")
-    if not os.path.exists(tokens_path):
-        tok_result = _tokenize(all_files, tokens_path, fix_time)
-        if not tok_result:
-            console.log("failed to tokenize files")
-            return False
-
-    # initialize encoder
-    midi_encoder = SpectrogramNotesEncoder(**encoder_config).cuda(device=device)
-    midi_encoder.eval()
-    sd = torch.load("data/note_encoder.bin", weights_only=True)
-    midi_encoder.load_state_dict(sd)
-
-    with h5py.File(tokens_path, "r") as in_file:
-        # load input datasets
-        files = in_file["filenames"][:]  # type: ignore
-        console.log(f"processing {num_files} files, e.g.:\n{files[:5]}")
-        tokens = in_file["tokens"][:]  # type: ignore
-        console.log(f"processing {num_files} files, e.g.:\n{tokens[:5]}")
+    index = faiss.IndexFlatIP(specdiff_config["encoder_config"]["d_model"])
+    vecs = np.zeros(
+        (num_files, specdiff_config["encoder_config"]["d_model"]), dtype=np.float32
+    )
 
     with h5py.File(output_path, "w") as out_file:
         # create output datasets
         d_embeddings = out_file.create_dataset(
-            "embeddings", (num_files, encoder_config["d_model"]), fillvalue=0
+            "embeddings",
+            (num_files, specdiff_config["encoder_config"]["d_model"]),
+            fillvalue=0,
         )
         d_filenames = out_file.create_dataset(
             "filenames",
-            (num_files, 1),
+            (num_files),
             dtype=h5py.string_dtype(encoding="utf-8"),
             fillvalue="",
         )
@@ -236,25 +207,18 @@ def specdiff(
         emb_task = progress.add_task("embedding", total=num_files)
         with progress:
             for i in range(0, num_files, batch_size):
-                with torch.autocast("cuda"):
-                    batch_tokens = torch.cat(
-                        [torch.IntTensor(tokens[i : i + batch_size])]
-                    ).cuda(device=device)
-                    tokens_mask = batch_tokens > 0
-                    tokens_encoded, tokens_mask = midi_encoder(
-                        encoder_input_tokens=batch_tokens,
-                        encoder_inputs_mask=tokens_mask,
-                    )
-                embeddings = [
-                    enc[mask].mean(0).cpu().detach()
-                    for enc, mask in zip(tokens_encoded, tokens_mask)
-                ]
+                embeddings = []
+                for file in all_files[i : i + batch_size]:
+                    embeddings.append(model.embed(file))
+                embeddings = torch.cat(embeddings)
 
                 d_embeddings[i : i + batch_size] = embeddings
                 vecs[i : i + batch_size] = [
                     e / np.linalg.norm(e, keepdims=True) for e in embeddings
                 ]
-                d_filenames[i : i + batch_size] = files[i : i + batch_size]
+                d_filenames[i : i + batch_size] = [
+                    basename(f) for f in all_files[i : i + batch_size]
+                ]
                 progress.advance(emb_task, batch_size)
 
         console.log("copying vectors to FAISS index")
@@ -337,6 +301,13 @@ def classifier(
     return _check_hdf5(output_path, ["filenames", "embeddings"])
 
 
+def clamp(all_files: List[str], output_path: str, device_name: str = "cuda:0") -> bool:
+    """
+    Calculate the clamp embedding for all files.
+    """
+    return False
+
+
 def _check_hdf5(path: str, keys: List[str]) -> bool:
     with h5py.File(path, "r") as f:
         console.log(f"checking HDF5 file with keys {f.keys()} for keys: {keys}")
@@ -353,76 +324,6 @@ def _check_hdf5(path: str, keys: List[str]) -> bool:
                 for val in f[key][:5]:  # type: ignore
                     console.log(f"\t{val.shape}")
         return True
-
-
-def _tokenize(files: List[str], out_path: str, fix_time: Optional[bool] = True) -> bool:
-    """
-    Tokenize the files and save the results to an hdf5 file.
-
-    Parameters
-    ----------
-    files : List[str]
-        List of files to tokenize.
-    out_path : str
-        Path to save the tokenized files to.
-    fix_time : bool
-        Whether to change the tempo of the files such that one segment
-        fits exactly into one tokenization window.
-
-    Returns
-    -------
-    bool
-        True if the tokenization was successful, False otherwise.
-    """
-    n_files = len(files)
-    start_time = time.time()
-    processor = MidiProcessor()
-    console.log(f"tokenizing {n_files} files, e.g.:\n{files[:5]}")
-    tmp_dir = os.path.join(os.path.dirname(out_path), "tmp")
-    os.makedirs(tmp_dir, exist_ok=True)
-
-    with h5py.File(out_path, "w") as f:
-        # create datasets
-        d_tokens = f.create_dataset("tokens", (n_files, 2048), fillvalue=0)
-        d_filenames = f.create_dataset(
-            "filenames",
-            (n_files, 1),
-            dtype=h5py.string_dtype(encoding="utf-8"),
-            fillvalue="",
-        )
-
-        # tokenize while tracking progress
-        progress = Progress(
-            SpinnerColumn(),
-            *Progress.get_default_columns(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-        )
-        tok_task = progress.add_task("tokenizing", total=n_files)
-        with progress:
-            for i, file in enumerate(files):
-                if fix_time:
-                    tmp_file = os.path.join(tmp_dir, basename(file))
-                    change_tempo_and_trim(file, tmp_file, tempo=95.0)
-
-                # import pretty_midi
-                # midi = pretty_midi.PrettyMIDI(tmp_file)
-                # console.log(f"{basename(file)}: {midi.get_end_time()} s")
-                # tokens = processor(tmp_file)
-                # console.log(np.array(tokens).shape)
-                # raise Exception("stop here")
-
-                d_tokens[i] = processor(tmp_file)
-                d_filenames[i] = basename(file)
-
-                if fix_time:
-                    os.remove(tmp_file)
-
-                progress.advance(tok_task)
-
-    console.log(f"tokenized {n_files} files in {time.time() - start_time:.03f} s")
-
-    return _check_hdf5(out_path, ["filenames", "tokens"])
 
 
 def graph(
