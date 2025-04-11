@@ -99,8 +99,8 @@ def add_novelty(
     novelty_track.append(mido.MetaMessage("track_name", name="novelty", time=0))
 
     # find the index of the start and end times in the novelty curve
-    start_index = int(times[0] * 100)
-    end_index = int(times[1] * 100)
+    start_index = int(times[0] * 220)
+    end_index = int(times[1] * 220)
     novelty = novelty[start_index:end_index]
 
     # add the novelty curve to the track

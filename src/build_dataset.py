@@ -123,14 +123,15 @@ def segment_midi(
     # calculate times and stuff
     midi_pm = pretty_midi.PrettyMIDI(midi_file_path)
     total_file_length_s = midi_pm.get_end_time()
-    segment_length_s = options.num_beats * 60 / target_bpm
+    beat_length_s = 60 / target_bpm
+    segment_length_s = options.num_beats * beat_length_s
     n_segments = int(np.round(total_file_length_s / segment_length_s))
     pre_beat_window_s = (
-        segment_length_s / options.num_beats / options.lead_window_beat_frac
+        beat_length_s / options.lead_window_beat_frac
     )  # capture when first note is a bit early
 
     if options.novelty:
-        piano_roll = midi_pm.get_piano_roll()
+        piano_roll = midi_pm.get_piano_roll(fs=220)
         ssm, novelty = gen_ssm_and_novelty(midi_file_path)
         # save novelty curve
         plt.figure(figsize=(16, 4))
@@ -162,17 +163,19 @@ def segment_midi(
         )
         plt.close()
 
-    # console.log(
-    #     f"\tbreaking '{trackname}' ({total_file_length_s:.03f} s at {target_bpm} bpm) into {n_segments:03d} segments of {segment_length_s:.03f} s\n\t(pre window is {pre_beat_window_s:.03f} s)"
-    # )
+    console.log(
+        f"\tbreaking '{trackname}' ({total_file_length_s:.03f} s at {target_bpm} bpm) into {n_segments:03d} segments of {segment_length_s:.03f} s\n\t(pre window is {pre_beat_window_s:.03f} s)"
+    )
 
     new_files = []
     # -1 because the last segment often contains a mistake or isn't otherwise suitable for playback
     for n in list(range(n_segments - 1)):
+        # add one beat since tracks now start with the lead-in beat included
         start = n * segment_length_s
-        end = start + segment_length_s - pre_beat_window_s
+        end = start + segment_length_s + beat_length_s
         if n > 0:
-            start -= pre_beat_window_s
+            start += beat_length_s - pre_beat_window_s
+            
 
         # console.log(f"\t{n:03d} splitting from {start:08.03f} s to {end:07.03f} s")
 
@@ -191,13 +194,12 @@ def segment_midi(
                     start=note.start - start,
                     end=note.end - start,
                 )
+                # pad front of track to full bar for easier playback
+                if n > 0:
+                    new_note.start += pre_beat_window_s * (options.lead_window_beat_frac - 1)
+                    new_note.end += pre_beat_window_s * (options.lead_window_beat_frac - 1)
                 instrument.notes.append(new_note)
 
-        # pad front of track to full bar for easier playback
-        if n > 0:
-            for note in instrument.notes:
-                note.start += pre_beat_window_s * (options.lead_window_beat_frac - 1)
-                note.end += pre_beat_window_s * (options.lead_window_beat_frac - 1)
 
         # write out
         segment_filename = os.path.join(
@@ -391,7 +393,7 @@ def main(args) -> None:
                     zipf.write(file_path, arcname)
                     n_files += 1
     if args.augment:
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as zipf:
             for root, _, files in os.walk(p_augments):
                 random_file = random.randint(0, len(files) - 1)
                 for i, file in enumerate(files):
