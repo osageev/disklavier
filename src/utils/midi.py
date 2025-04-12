@@ -6,13 +6,16 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from scipy.ndimage import zoom
-from datetime import datetime, timedelta
 
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple
 
 from . import basename, console
 
-TICKS_PER_BEAT = 220
+# Fix import path to use proper module reference
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from params.constants import TICKS_PER_BEAT
 
 
 def get_bpm(file_path: str) -> int:
@@ -485,69 +488,6 @@ def transpose_midi(input_file_path: str, output_file_path: str, semitones: int) 
     midi.write(output_file_path)
 
 
-def semitone_transpose(
-    midi_path: str, output_dir: str, num_iterations: int = 1
-) -> List[str]:
-    """
-    Vertically shift a matrix
-    chatgpt
-
-    Parameters
-    ----------
-    midi_path : str
-        Path to the MIDI file.
-    output_dir : str
-        Path to the output directory.
-    num_iterations : int
-        Number of iterations to perform.
-
-    Returns
-    -------
-    List[str]
-        List of paths to the transposed MIDI files.
-    """
-    new_filename = Path(midi_path).stem.split("_")
-    new_filename = f"{new_filename[0]}_{new_filename[1]}"
-    lowest_note, highest_note = get_note_min_max(midi_path)
-    max_up = 108 - highest_note
-    max_down = lowest_note
-
-    # zipper up & down
-    up = 1
-    down = -1
-    new_files = []
-    for i in range(num_iterations):
-        up_filename = f"{new_filename}_u{up:02d}.mid"
-        up_filepath = os.path.join(output_dir, up_filename)
-        down_filename = f"{new_filename}_d{abs(down):02d}.mid"
-        down_filepath = os.path.join(output_dir, down_filename)
-
-        if i % 2 == 0:
-            if (
-                up > max_up
-            ):  # If exceeding max_up, adjust by switching to down immediately
-                transpose_midi(midi_path, down_filepath, down)
-                new_files.append(down_filepath)
-                down -= 1
-            else:
-                transpose_midi(midi_path, up_filepath, up)
-                new_files.append(up_filepath)
-                up += 1
-        else:
-            if (
-                abs(down) > max_down
-            ):  # If exceeding max_down, adjust by switching to up immediately
-                transpose_midi(midi_path, up_filepath, up)
-                new_files.append(up_filepath)
-                up += 1
-            else:
-                transpose_midi(midi_path, down_filepath, down)
-                new_files.append(down_filepath)
-                down -= 1
-
-    return new_files
-
-
 def change_tempo_and_trim(
     input_file: str, output_file: str, tempo: float = 93.75, cutoff_sec: float = 5.12
 ) -> bool:
@@ -659,310 +599,217 @@ def change_tempo_and_trim(
     return os.path.isfile(output_file)
 
 
-def create_first_half_twice(midi):
+def rearrange_midi(
+    midi_path: str,
+    output_path: str,
+    augmentations: list[list[int]],
+) -> list[str]:
     """
-    create a midi file with the first half repeated twice.
-
-    Parameters
-    ----------
-    midi : mido.MidiFile
-        original midi file.
-
-    Returns
-    -------
-    mido.MidiFile
-        new midi file with the first half played twice.
+    Augment a MIDI file with a given list of augmentations.
     """
-    return beat_repeats(midi, mode="first_half", repeats=2, num_beats=0)
+    bpm = get_bpm(midi_path)
+    generated_paths = []
+
+    for aug in augmentations:
+        new_aug = os.path.join(output_path, f"{'_'.join(map(str, aug))}.mid")
+        split_beats = beat_split(midi_path)
+        beat_join(split_beats, aug, bpm).write(new_aug)
+        generated_paths.append(new_aug)
+
+    return generated_paths
 
 
-def create_second_half_twice(midi):
+def beat_split(midi_path: str, bpm: int | None = None) -> dict:
     """
-    create a midi file with the second half repeated twice.
-
-    Parameters
-    ----------
-    midi : mido.MidiFile
-        original midi file.
-
-    Returns
-    -------
-    mido.MidiFile
-        new midi file with the second half played twice.
-    """
-    return beat_repeats(midi, mode="second_half", repeats=2, num_beats=0)
-
-
-def create_last_beat_repeats(midi: mido.MidiFile, repeats: int, num_beats: int = 1):
-    """
-    create a midi file with the last beat(s) repeated multiple times.
-
-    Parameters
-    ----------
-    midi : mido.MidiFile
-        original midi file.
-    repeats : int
-        number of times to repeat the section.
-    num_beats : int
-        number of beats to repeat.
-
-    Returns
-    -------
-    mido.MidiFile
-        new midi file with the last beat(s) repeated.
-    """
-    return beat_repeats(midi, mode="last", repeats=repeats, num_beats=num_beats)
-
-
-def beat_repeats(
-    midi: mido.MidiFile, mode: str = "last", repeats: int = 1, num_beats: int = 1
-) -> mido.MidiFile:
-    """
-    create a midi file with beats repeated multiple times.
-
-    Parameters
-    ----------
-    midi : mido.MidiFile
-        original midi file.
-    mode : str
-        mode to use for selecting beats ("last" or "first").
-    repeats : int
-        number of times to repeat the section.
-    num_beats : int
-        number of beats to repeat.
-
-    Returns
-    -------
-    mido.MidiFile
-        new midi file with the specified beats repeated.
-    """
-    new_midi = mido.MidiFile(ticks_per_beat=TICKS_PER_BEAT)
-    new_track = mido.MidiTrack()
-    new_midi.tracks.append(new_track)
-
-    # calculate total ticks and convert messages to absolute timing
-    total_ticks = 0
-    absolute_msgs = []
-    for msg in midi.tracks[0]:
-        if hasattr(msg, "time"):
-            total_ticks += msg.time
-            absolute_msgs.append((total_ticks, msg.copy()))
-        else:
-            # handle meta messages without timing
-            absolute_msgs.append((total_ticks, msg.copy()))
-
-    # round to nearest even number of beats
-    total_beats = total_ticks / TICKS_PER_BEAT
-    rounded_beats = round(total_beats / 2) * 2  # Round to nearest even number
-    rounded_ticks = int(rounded_beats * TICKS_PER_BEAT)
-    console.log(
-        f"rounding file from {total_beats:.2f} beats to {rounded_beats} beats ({total_ticks} to {rounded_ticks} ticks)"
-    )
-
-    # determine section to repeat based on mode
-    if mode == "last":
-        section_start = max(0, rounded_ticks - (num_beats * TICKS_PER_BEAT))
-        section_end = rounded_ticks
-        console.log(
-            f"repeating last {num_beats} beats ({section_start}-{section_end} ticks)"
-        )
-    elif mode == "first":
-        section_start = 0
-        section_end = min(rounded_ticks, num_beats * TICKS_PER_BEAT)
-        console.log(
-            f"repeating first {num_beats} beats ({section_start}-{section_end} ticks)"
-        )
-    else:
-        # default to first half / second half
-        if mode == "first_half":
-            section_start = 0
-            section_end = rounded_ticks // 2
-        else:  # second half
-            section_start = rounded_ticks // 2
-            section_end = rounded_ticks
-        console.log(f"repeating {mode} ({section_start}-{section_end} ticks)")
-
-    # filter messages in the selected section
-    section_msgs = [
-        (tick, msg)
-        for tick, msg in absolute_msgs
-        if section_start <= tick <= section_end
-    ]
-
-    if not section_msgs:
-        console.log("no messages found in selected section")
-        return new_midi
-
-    # convert section to relative timing
-    relative_section = []
-    prev_tick = section_start
-
-    # handle notes that are already playing at section start
-    active_notes = {}
-    for tick, msg in absolute_msgs:
-        if tick >= section_start:
-            break
-        if msg.type == "note_on" and msg.velocity > 0:
-            active_notes[(msg.channel, msg.note)] = True
-        elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-            key = (msg.channel, msg.note)
-            if key in active_notes:
-                del active_notes[key]
-
-    # add note_off messages for any active notes before starting the section
-    for channel, note in active_notes:
-        relative_section.append(
-            mido.Message("note_off", note=note, channel=channel, velocity=0, time=0)
-        )
-
-    # convert absolute to relative timing for the section
-    for i, (tick, msg) in enumerate(section_msgs):
-        msg_copy = msg.copy()
-        if hasattr(msg_copy, "time"):
-            msg_copy.time = tick - prev_tick
-            prev_tick = tick
-        relative_section.append(msg_copy)
-
-    # make sure all notes are turned off at the end of the section
-    active_notes = {}
-    for msg in relative_section:
-        if msg.type == "note_on" and msg.velocity > 0:
-            active_notes[(msg.channel, msg.note)] = True
-        elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-            key = (msg.channel, msg.note)
-            if key in active_notes:
-                del active_notes[key]
-
-    # add note_off messages for any active notes at the end of the section
-    for channel, note in active_notes:
-        relative_section.append(
-            mido.Message("note_off", note=note, channel=channel, velocity=0, time=0)
-        )
-
-    # repeat the section the specified number of times
-    for rep in range(repeats):
-        for i, msg in enumerate(relative_section):
-            if rep == 0 and i == 0:
-                # keep timing of first message in first repetition
-                new_track.append(msg.copy())
-            else:
-                msg_copy = msg.copy()
-                if i == 0:
-                    # first message of each subsequent repetition starts immediately
-                    msg_copy.time = 0
-                new_track.append(msg_copy)
-
-    return new_midi
-
-
-def get_msg_time(
-    msg, offset: int = 0, start: datetime | None = None, tempo: int = 60
-) -> datetime:
-    if not start:
-        start = datetime.now()
-        console.log(
-            f"[yellow]no start time found, using current time: {start}[/yellow]"
-        )
-    console.log(f"msg: {msg}")
-    time_seconds = timedelta(seconds=mido.tick2second(msg.time, TICKS_PER_BEAT, tempo))
-    offset_seconds = timedelta(seconds=mido.tick2second(offset, TICKS_PER_BEAT, tempo))
-    console.log(
-        f"message time: {time_seconds}\t offset_seconds: {offset_seconds}\tstart: {start}"
-    )
-    console.log(
-        f"start + time_seconds + offset_seconds: {start + time_seconds + offset_seconds}"
-    )
-    return start + time_seconds + offset_seconds
-
-
-def beat_split(midi_path: str, tempo: int) -> list[dict]:
-    """
-    Group MIDI messages by beat, ensuring notes that span beat boundaries are handled correctly.
+    Split a MIDI file into beats.
 
     Parameters
     ----------
     midi_path : str
         Path to the MIDI file.
-    tempo : int
-        Tempo in BPM.
 
     Returns
     -------
-    list[dict]
-        List of dictionaries, where each dictionary contains a list of MIDI messages for one beat.
-        The first dictionary (index 0) contains messages between beats 1 and 2.
+    dict
+        A dictionary of beats, where each key is an integer representing the beat number, and each value is a dictionary containing the notes and beats for that beat.
     """
-    midi = mido.MidiFile(midi_path)
-
-    # calculate ticks per second and seconds per beat
-    ticks_per_second = TICKS_PER_BEAT * tempo / 60
-    seconds_per_beat = 60 / tempo
-
-    # convert all messages to absolute timing
-    absolute_msgs = []
-    current_tick = 0
-    for msg in midi.tracks[0]:
-        current_tick += msg.time
-        absolute_msgs.append((current_tick, msg.copy()))
-
-    if not absolute_msgs:
-        console.log(f"[red]no messages found in {midi_path}[/red]")
-        return []
-
-    # find the last tick to determine number of beats
-    last_tick = absolute_msgs[-1][0]
-    num_beats = int(last_tick / TICKS_PER_BEAT) + 1
-
-    # initialize list of beats
-    beats = [
-        {
+    if bpm is None:
+        bpm = get_bpm(midi_path)
+    tempo = mido.bpm2tempo(bpm)
+    midi = pretty_midi.PrettyMIDI(midi_path)
+    beat_timings = range(
+        TICKS_PER_BEAT,
+        mido.second2tick(midi.get_end_time(), TICKS_PER_BEAT, tempo) + TICKS_PER_BEAT,
+        TICKS_PER_BEAT,
+    )
+    beats = {
+        i: {
             "notes": [],
-            "ticks": [
-                mido.MetaMessage("text", text=f"tick {i}", time=0),
-                mido.MetaMessage("text", text=f"tick {i+1}", time=TICKS_PER_BEAT),
+            "beats": [
+                mido.MetaMessage(
+                    "text",
+                    text=f"beat {i}: {mido.tick2second(b - TICKS_PER_BEAT, TICKS_PER_BEAT, tempo):.1f}",
+                    time=0,
+                ),
+                mido.MetaMessage(
+                    "text",
+                    text=f"beat {i+1}: {mido.tick2second(b, TICKS_PER_BEAT, tempo):.1f}",
+                    time=TICKS_PER_BEAT,
+                ),
             ],
         }
-        for i in range(num_beats)
-    ]
+        for i, b in enumerate(beat_timings)
+    }
 
-    # track active notes and their start times
-    active_notes = {}  # (channel, note) -> (start_tick, start_beat)
+    for instrument in midi.instruments:
+        for note in instrument.notes:
+            note_start_ticks = mido.second2tick(note.start, TICKS_PER_BEAT, tempo)
 
-    for tick, msg in absolute_msgs:
-        # calculate which beat this message belongs to
-        beat_idx = int(tick / TICKS_PER_BEAT)
+            for i, b in enumerate(beat_timings):
+                if note_start_ticks < b:
+                    note_offset = mido.tick2second(
+                        b - TICKS_PER_BEAT, TICKS_PER_BEAT, tempo
+                    )
+                    note.start -= note_offset
+                    note.end -= note_offset
+                    beats[i]["notes"].append(note)
+                    break
 
-        if msg.type == "note_on" and msg.velocity > 0:
-            # note on event - store start time and beat
-            active_notes[(msg.channel, msg.note)] = (tick, beat_idx)
-            beats[beat_idx]["notes"].append((tick, msg.copy()))
-        elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-            # note off event - find where the note started
-            key = (msg.channel, msg.note)
-            if key in active_notes:
-                start_tick, start_beat = active_notes[key]
-                # add note off to the same beat as note on
-                beats[start_beat]["notes"].append((tick, msg.copy()))
-                del active_notes[key]
-        else:
-            # non-note message - add to current beat
-            beats[beat_idx]["notes"].append((tick, msg.copy()))
-
-    # convert back to relative timing for each beat
-    for beat_idx, beat_msgs in enumerate(beats):
-        if not beat_msgs:
-            continue
-
-        # sort by absolute time to get correct order
-        beat_msgs.sort(key=lambda x: x[0])
-
-        # convert to relative timing
-        prev_tick = beat_idx * TICKS_PER_BEAT
-        for i, (tick, msg) in enumerate(beat_msgs):
-            msg.time = tick - prev_tick
-            prev_tick = tick
-
-        # extract just the messages in order
-        beats[beat_idx] = [msg for _, msg in beat_msgs]
+    # Create a list of beat indices to remove
+    beats_to_remove = []
+    for i, beat in beats.items():
+        if len(beat["notes"]) == 0:
+            beats_to_remove.append(i)
+            console.log(f"[yellow]beat {i} has no notes, removing[/yellow]")
+    
+    # Remove the empty beats after iteration is complete
+    for i in beats_to_remove:
+        del beats[i]
 
     return beats
+
+
+def beat_join(
+    beats: dict[int, dict], arrangement: list[int], bpm: int
+) -> pretty_midi.PrettyMIDI:
+    """
+    Join a dictionary of beats into a single MIDI file.
+
+    Parameters
+    ----------
+    beats : dict[int, dict]
+        A dictionary of beats, where each key is an integer representing the beat number, and each value is a dictionary containing the notes and beats for that beat.
+    arrangement: list[int]
+        A list of integers representing the arrangement of the beats.
+    bpm: int
+        The tempo of the MIDI file in beats per minute.
+
+    Returns
+    -------
+    pretty_midi.PrettyMIDI
+        A PrettyMIDI object representing the joined MIDI file.
+    """
+    ts_beat = 60 / bpm
+    pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
+    inst = pretty_midi.Instrument(program=0, name="".join(map(str, arrangement)))
+
+    for i, a in enumerate(arrangement):
+        for note in beats[a]["notes"]:
+            new_note = pretty_midi.Note(
+                velocity=note.velocity,
+                pitch=note.pitch,
+                start=note.start + i * ts_beat,
+                end=note.end + i * ts_beat,
+            )
+            inst.notes.append(new_note)
+    pm.instruments.append(inst)
+
+    return pm
+
+
+def remove_notes(
+    midi_path: str, output_path: str, amount: int | float, num_versions: int = 1
+) -> list[str]:
+    """
+    Remove notes from a MIDI file with intermediate versions.
+
+    Parameters
+    ----------
+    midi_path : str
+        Path to the input MIDI file.
+    output_path : str
+        Directory to save output files.
+    amount : int | float
+        Number or percentage of notes to remove.
+    num_versions : int, optional
+        Number of versions to create with the same amount of notes removed.
+
+    Returns
+    -------
+    list[str]
+        Paths to the new MIDI files.
+    """
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+
+    midi = pretty_midi.PrettyMIDI(midi_path)
+
+    num_notes = 0
+    for instrument in midi.instruments:
+        if not instrument.is_drum:
+            for note in instrument.notes:
+                num_notes += 1
+
+    # change from percentage to absolute number
+    if isinstance(amount, float) and amount < 1:
+        amount = int(num_notes * amount)
+
+    amount = int(amount)  # catch things like 1.3
+
+    # determine intermediate steps for note removal
+    steps = []
+    if amount <= 3:
+        # if removing 3 or fewer notes, just save the final version
+        steps = [amount]
+    else:
+        # save up to 3 intermediate versions
+        if amount % 2 == 1:  # odd
+            steps = [
+                1,
+                amount // 2 + (amount % 4 > 0),
+                amount,
+            ]  # first, middle-ish, last
+        else:  # even
+            steps = [
+                2,
+                amount // 2 + (amount % 4 > 0),
+                amount,
+            ]  # first, middle-ish, last
+
+    # Create a single random selection of indices to remove
+    all_indices = np.random.permutation(range(num_notes))
+
+    new_files = []
+    for version in range(num_versions):
+        for step in steps:
+            notes_to_remove = all_indices[:step]
+
+            new_midi = pretty_midi.PrettyMIDI(
+                initial_tempo=get_bpm(midi_path), resolution=TICKS_PER_BEAT
+            )
+            new_inst = pretty_midi.Instrument(program=0, name=f"{version+1}-{step}")
+            for instrument in midi.instruments:
+                if not instrument.is_drum:
+                    for idx, note in enumerate(instrument.notes):
+                        if idx not in notes_to_remove:
+                            new_inst.notes.append(note)
+            new_midi.instruments.append(new_inst)
+
+            pf_new = os.path.join(
+                output_path,
+                f"{os.path.basename(midi_path).split('.')[0]}_{version+1:02d}-{step:02d}.mid",
+            )
+            new_midi.write(pf_new)
+            new_files.append(pf_new)
+
+    return new_files

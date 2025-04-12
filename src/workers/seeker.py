@@ -4,6 +4,7 @@ import faiss
 import numpy as np
 import pandas as pd
 import networkx as nx
+from glob import glob
 from shutil import copy2
 from pretty_midi import PrettyMIDI
 from scipy.spatial.distance import cosine
@@ -12,16 +13,7 @@ from .worker import Worker
 from utils import basename, console, panther
 from utils.modes import find_path
 
-SUPPORTED_EXTENSIONS = (".mid", ".midi")
-EMBEDDING_SIZES = {
-    "pitch-histogram": 12,
-    "specdiff": 768,
-    "clf-4note": 128,
-    "clf-speed": 128,
-    "clf-tpose": 128,
-    "clap": 512,
-    "clamp": 768,
-}
+from params.constants import SUPPORTED_EXTENSIONS, EMBEDDING_SIZES
 
 
 class Seeker(Worker):
@@ -58,23 +50,30 @@ class Seeker(Worker):
     def __init__(
         self,
         params,
+        aug_path: str,
         table_path: str,
         dataset_path: str,
         playlist_path: str,
         bpm: int,
     ):
         super().__init__(params, bpm=bpm)
+        self.p_aug = aug_path
         self.p_table = table_path
         self.p_dataset = dataset_path
         self.p_playlist = playlist_path
         self.rng = np.random.default_rng(self.params.seed)
+
+        # some defaults
         if not hasattr(self, "match"):
             self.params.match = "current"
+        if not hasattr(self.params, "seed_rearrange"):
+            self.params.seed_rearrange = False
+        if not hasattr(self.params, "seed_remove"):
+            self.params.seed_remove = 1
 
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
 
-        # load FAISS index
         console.log(
             f"{self.tag} loading FAISS index from '{self.p_table}/{self.params.metric}.faiss'"
         )
@@ -95,6 +94,7 @@ class Seeker(Worker):
         for k, v in list(self.filename_to_index.items())[:3]:
             console.log(f"{self.tag}\t\t'{k}' -> {v}")
 
+        # load FAISS index
         self.faiss_index = faiss.read_index(
             os.path.join(self.p_table, f"{self.params.metric}.faiss")
         )
@@ -269,7 +269,7 @@ class Seeker(Worker):
             )
 
             # Add the new embedding to the index and update filenames list and dictionary
-            embedding = self._get_embedding(pf_new)
+            embedding = self.get_embedding(pf_new)
             self.faiss_index.add(embedding)  # type: ignore
             self.filenames.append(query_file)
             self.filename_to_index[query_file] = len(self.filenames) - 1
@@ -284,9 +284,10 @@ class Seeker(Worker):
         # query index
         if self.verbose and query_file in self.filenames:
             console.log(f"{self.tag} querying with key '{query_file}'")
+
         indices, similarities = self._faiss_search(query_embedding)  # type: ignore
         if self.verbose:
-            for i in range(10):
+            for i in range(3):
                 console.log(
                     f"{self.tag} {i}: {self.filenames[indices[i]]} {similarities[i]:.05f}"
                 )
@@ -670,8 +671,10 @@ class Seeker(Worker):
                         return file_path, 0.0
         return "", 0.0
 
-    def _get_embedding(self, pf_midi: str) -> np.ndarray:
-        if self.params.metric == "pitch-histogram":
+    def get_embedding(self, pf_midi: str, model: str | None = None) -> np.ndarray:
+        if not model:
+            model = str(self.params.metric)
+        if model == "pitch-histogram":
             if self.verbose:
                 console.log(f"{self.tag} using pitch histogram metric")
             embedding = PrettyMIDI(self.params.pf_recording).get_pitch_class_histogram(
@@ -681,130 +684,29 @@ class Seeker(Worker):
             console.log(f"{self.tag} {embedding}")
         else:
             console.log(
-                f"{self.tag} getting [italic bold]{self.params.metric}[/italic bold] embedding for '{pf_midi}'"
+                f"{self.tag} getting [italic bold]{model}[/italic bold] embedding for '{pf_midi}'"
             )
-            embedding = panther.send_embedding(
-                pf_midi, model=self.params.metric, mode=self.params.system
-            )
+            embedding = panther.send_embedding(pf_midi, model, self.params.system)
             console.log(
                 f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
             )
         return embedding
 
-    def augment_recording(self, pf_midi: str) -> str:
-        """
-        augment a midi recording with variations of the original.
-
-        Parameters
-        ----------
-        pf_midi : str
-            path to midi file.
-
-        Returns
-        -------
-        str
-            path to the original midi file.
-        """
-        import mido
-        import os
-        from utils.midi import (
-            create_first_half_twice,
-            create_second_half_twice,
-            create_last_beat_repeats,
-        )
-
-        console.log(f"{self.tag} augmenting recording '{pf_midi}'")
-        midi = mido.MidiFile(pf_midi)
-
-        # calculate total time in ticks
-        total_ticks = 0
-        for msg in midi.tracks[0]:
-            total_ticks += msg.time
-
-        # calculate number of beats (ticks per beat = 220)
-        ticks_per_beat = 220
-        total_beats = total_ticks / ticks_per_beat
-        console.log(f"{self.tag} detected {total_beats:.2f} beats in midi file")
-
-        # create output directory if it doesn't exist
-        output_dir = os.path.dirname(pf_midi)
-        base_name = os.path.splitext(os.path.basename(pf_midi))[0]
-
-        # create augmentations
-        augmentations = {
-            "first_half_twice": create_first_half_twice(midi),
-            "second_half_twice": create_second_half_twice(midi),
-            "last_beat_x8": create_last_beat_repeats(midi, 8, 1),
-            "last_two_beats_x4": create_last_beat_repeats(midi, 4, num_beats=2),
-        }
-
-        # if recording starts too close to second beat, skip augmentation
-        first_note_time = 0
-        for msg in midi.tracks[0]:
-            if msg.type == "note_on" and msg.velocity > 0:
-                first_note_time = msg.time
-                break
-
-        console.log(f"{self.tag} first note time: {first_note_time}")
-        if ticks_per_beat * 7 / 8 < first_note_time < ticks_per_beat:
-            console.log(
-                f"{self.tag} first note too close to second beat, skipping augmentation"
-            )
-        else:
-            # add padding to original and save
-            original_padded = self._add_beat_padding(midi, ticks_per_beat)
-            original_path = os.path.join(output_dir, f"{base_name}_original_padded.mid")
-            original_padded.save(original_path)
-            console.log(f"{self.tag} saved padded original to '{original_path}'")
-
-        # save augmentations
-        for name, midi_obj in augmentations.items():
-            # add padding
-            padded = self._add_beat_padding(midi_obj, ticks_per_beat)
-            output_path = os.path.join(output_dir, f"{base_name}_{name}.mid")
-            padded.save(output_path)
-            console.log(f"{self.tag} saved augmentation '{name}' to '{output_path}'")
-
-        raise Exception("test")
-        return pf_midi
-
-    def _add_beat_padding(self, midi, ticks_per_beat):
-        """
-        add a beat of silence to the beginning of a midi file.
-
-        Parameters
-        ----------
-        midi : mido.MidiFile
-            midi file to pad.
-        ticks_per_beat : int
-            ticks per beat.
-
-        Returns
-        -------
-        mido.MidiFile
-            padded midi file.
-        """
-
-        from copy import deepcopy
-
-        padded_midi = deepcopy(midi)
-
-        # add silence at the beginning (adjust first message time)
-        if len(padded_midi.tracks[0]) > 0:
-            first_msg = padded_midi.tracks[0][0]
-            first_msg.time += ticks_per_beat
-
-        return padded_midi
-
     def _faiss_search(
-        self, query_embedding: np.ndarray, num_matches: int = 1000
+        self,
+        query_embedding: np.ndarray,
+        num_matches: int = 1000,
+        index: faiss.IndexFlatIP | None = None,
     ) -> tuple[list[int], list[float]]:
         """
         search the FAISS index for the most similar embeddings.
         """
         # ensure that embedding is normalized
         query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
-        similarities, indices = self.faiss_index.search(query_embedding, num_matches)  # type: ignore
+        if not index:
+            similarities, indices = self.faiss_index.search(query_embedding, num_matches)  # type: ignore
+        else:
+            similarities, indices = index.search(query_embedding, num_matches)  # type: ignore
 
         if self.params.block_shift:
             indices, similarities = zip(
@@ -814,7 +716,9 @@ class Seeker(Worker):
                     if str(self.filenames[i]).endswith("s00")
                 ]
             )
-            console.log(f"{self.tag} filtered {1000-len(indices)}/1000 shifted files")
+            console.log(
+                f"{self.tag} filtered {num_matches-len(indices)}/{num_matches} shifted files"
+            )
         else:
             indices, similarities = zip(
                 *[(i, d) for i, d in zip(indices[0], similarities[0])]
@@ -844,34 +748,49 @@ class Seeker(Worker):
         pieces = os.path.basename(filename).split("_")
         return f"{pieces[0]}_{pieces[1]}.mid"
 
-    def get_match(self, query_embedding: np.ndarray) -> tuple[str, float]:
-        from glob import glob
+    def get_match(
+        self, query_embedding: np.ndarray, metric: str | None = None
+    ) -> tuple[str, float]:
+        if metric is None:
+            metric = str(self.params.metric)
+        elif metric not in EMBEDDING_SIZES.keys():
+            raise ValueError(f"metric '{metric}' not found in {EMBEDDING_SIZES.keys()}")
+        console.log(f"{self.tag} getting match using metric '{metric}'")
+        if metric != self.params.metric:
+            pf_index = os.path.join(self.p_table, f"{metric}.faiss")
+            if not os.path.isfile(pf_index):
+                raise FileNotFoundError(f"faiss index '{pf_index}' not found")
+            faiss_index = faiss.read_index(pf_index)
+            console.log(f"{self.tag}\tloaded faiss index from '{pf_index}'")
 
-        console.log(f"{self.tag} loading faiss index")
-        # TODO: bad! do this properly.
-        faiss_index = faiss.read_index(
-            "/Users/finlay/Documents/Programming/disklavier/data/tables/20250320/clap-sgm.faiss"
-        )
-        input_path = self.p_dataset.replace("augmented", "segmented")
-        filenames = list(glob(os.path.join(input_path, "*.mid")))
-        filenames.sort()
-        console.log(f"{self.tag} found {len(filenames)} files:\n\t{filenames[:5]}")
+        # TODO: embed augmented set with clap and remove this
+        if "clap" in metric:
+            input_path = self.p_dataset.replace("augmented", "segmented")
+            filenames = list(glob(os.path.join(input_path, "*.mid")))
+            filenames.sort()
+            console.log(f"{self.tag}\tfound {len(filenames)} files:\n\t{filenames[:5]}")
+        else:
+            filenames = self.filenames
+
         # ensure that embedding is normalized
-        console.log(f"{self.tag} query embedding shape: {query_embedding.shape}")
-        console.log(query_embedding)
+        console.log(f"{self.tag}\tquery embedding shape: {query_embedding.shape}")
 
         # get matches
-        indices, similarities = self._faiss_search(query_embedding)
-        if self.verbose:
-            console.log(f"{self.tag} indices:\n\t", indices[0])
-            console.log(f"{self.tag} similarities:\n\t", similarities[0])
-            for i in range(3):
-                console.log(f"{self.tag} filenames:\n\t", filenames[indices[i]])
+        indices, similarities = self._faiss_search(
+            query_embedding, index=faiss_index if "clap" in metric else None
+        )
+        for i in range(3):
+            console.log(
+                f"{self.tag}\t{indices[i]:04d}: '{filenames[indices[i]]}'\t- {similarities[i]:.4f}"
+            )
 
         # get best match
-        best_match = os.path.join(
-            self.p_dataset, basename(filenames[indices[0]]) + "_t00s00.mid"
-        )
+        if "clap" in metric:
+            best_match = os.path.join(
+                self.p_dataset, basename(filenames[indices[0]]) + "_t00s00.mid"
+            )
+        else:
+            best_match = self.filenames[indices[0]]
         best_similarity = similarities[0]
 
         return best_match, best_similarity

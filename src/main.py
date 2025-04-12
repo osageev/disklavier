@@ -10,10 +10,12 @@ from multiprocessing import Process
 from datetime import datetime, timedelta
 
 import workers
-from utils import console, midi
+from utils import console, midi, write_log
 from utils.panther import send_embedding
 
 tag = "[white]main[/white]  :"
+
+# TODO: UPDATE THIS TO MATCH RUNNER & APP
 
 
 def main(args, params):
@@ -120,9 +122,7 @@ def main(args, params):
         # TODO: implement playlist mode using generated csvs
         raise NotImplementedError("playlist mode not implemented")
 
-    ts_queue = (
-        args.bpm * (params.n_beats_per_segment + 1) / 60
-    )  # time in queue in seconds
+    ts_queue = 0
     q_playback = PriorityQueue()
     # calculate first few transitions
     scheduler.init_schedule(
@@ -131,10 +131,15 @@ def main(args, params):
     )
     console.log(f"{tag} successfully initialized recording")
 
+    # find first match
+    # this is done before adding the seed to the queue to accomodate seed
+    # augmentations for player recordings
+    seeker.played_files.append(pf_seed)
+    pf_next_file, similarity = seeker.get_next()
+
     # add seed to queue
     ts_seg_len, ts_seg_start = scheduler.enqueue_midi(pf_seed, q_playback)
     ts_queue += ts_seg_len
-    seeker.played_files.append(pf_seed)
     n_files = 1  # number of files played so far
     console.log(f"{tag} enqueued seed at {ts_seg_start}")
     write_log(
@@ -146,7 +151,6 @@ def main(args, params):
     )
 
     # add first match to queue
-    pf_next_file, similarity = seeker.get_next()
     ts_seg_len, ts_seg_start = scheduler.enqueue_midi(pf_next_file, q_playback)
     ts_queue += ts_seg_len
     n_files += 1
@@ -167,7 +171,7 @@ def main(args, params):
         # start metronome
         console.log(f"{tag} starting metronome for {td_start}")
         metronome = workers.Metronome(params.metronome, args.bpm, td_start)
-        process_metronome = Process(target=metronome.tick, name="metronome")
+        process_metronome = Process(target=metronome.run, name="metronome")
         process_metronome.start()
 
         scheduler.td_start = td_start
@@ -185,7 +189,6 @@ def main(args, params):
         midi_stop_event = midi_recorder.start_recording(td_start)
         # connect recorder to player for velocity updates
         player.set_recorder(midi_recorder)
-
 
         # play for set number of transitions
         # TODO: move this to be managed by scheduler and track scheduler state instead
@@ -289,14 +292,6 @@ def main(args, params):
     console.save_text(os.path.join(p_log, f"{ts_start}.log"))
     console.log(f"{tag}[green bold] session complete, exiting")
     return 0
-
-
-def write_log(filename: str, *args):
-    """Write the provided arguments as a row to the specified CSV file."""
-    with open(filename, mode="a", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(args)
-
 
 if __name__ == "__main__":
     # load/build arguments and parameters

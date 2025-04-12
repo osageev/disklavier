@@ -21,7 +21,7 @@ seeker:
 player:
   tag: "[blue]player[/blue]:"
   verbose: False
-  midi_port: "to Max 1"
+  midi_port: "UM-2G Port 1"
 metronome:
   tag: "[magenta]metro[/magenta] :"
   verbose: True
@@ -33,12 +33,12 @@ recorder:
   verbose: True
   tick_1: "data/MetronomeUp.wav"
   tick_2: "data/Metronome.wav"
-  midi_port: 'UM-2G Port 1'
+  midi_port: "UM-2G Port 1"
   record: 64 # sustain
 audio:
   tag: "[#af005f]audio [/#af005f]:"
   verbose: True
   sample_rate: 44100
   channels: 1
-  midi_port: 'UM-2G Port 1'
+  midi_port: "UM-2G Port 1"
   record: 64

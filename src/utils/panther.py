@@ -62,13 +62,7 @@ def send_embedding(
             os.remove(remote_file_path)
         copy2(file_path, remote_file_path)
         pf_tensor_local = os.path.abspath(remote_file_path).replace(".mid", ".pt")
-        console.log(
-            f"{tag} waiting 2 seconds for {pf_tensor_local} to be created {os.path.exists(pf_tensor_local)}"
-        )
-        time.sleep(2.0)
-        console.log(
-            f"{tag} waited 2 seonds for {pf_tensor_local} to be created {os.path.exists(pf_tensor_local)}"
-        )
+        time.sleep(0.5)
     else:
         # panther login
         console.log(f"{tag} connecting to panther at {USER}@{REMOTE_HOST}:{PORT}")
@@ -100,7 +94,7 @@ def send_embedding(
                 sftp.stat(pf_tensor_remote)
                 break
             except FileNotFoundError:
-                time.sleep(0.1)
+                time.sleep(0.01)
 
         sftp.get(pf_tensor_remote, pf_tensor_local)
         console.log(f"{tag} downloaded embedding file '{pf_tensor_local}'")
@@ -111,4 +105,4 @@ def send_embedding(
     embedding = torch.load(pf_tensor_local, weights_only=False).numpy().reshape(1, -1)
     console.log(f"{tag} loaded embedding {embedding.shape}")
 
-    return embedding
+    return embedding / np.linalg.norm(embedding, axis=1, keepdims=True)

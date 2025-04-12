@@ -9,7 +9,7 @@ from datetime import datetime
 
 import workers
 from workers import Staff
-from utils import console
+from utils import console, write_log
 from widgets.runner import RunWorker
 from widgets.param_editor import ParameterEditorWidget
 from widgets.piano_roll import PianoRollWidget
@@ -140,6 +140,8 @@ class MainWindow(QtWidgets.QMainWindow):
             console.log(f"{self.tag} creating new logging folder at '{self.p_log}'")
         self.p_playlist = os.path.join(self.p_log, "playlist")
         os.makedirs(self.p_playlist, exist_ok=True)
+        self.p_aug = os.path.join(self.p_log, "augmentations")
+        os.makedirs(self.p_aug, exist_ok=True)
 
         # specify recording files
         self.pf_master_recording = os.path.join(self.p_log, f"master-recording.mid")
@@ -164,7 +166,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pf_playlist = os.path.join(
             self.p_log, f"playlist_{self.td_system_start.strftime('%y%m%d-%H%M%S')}.csv"
         )
-        self.write_log(
+        write_log(
             self.pf_playlist, "position", "start time", "file path", "similarity"
         )
         console.log(f"{self.tag} filesystem set up complete")
@@ -184,6 +186,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         seeker = workers.Seeker(
             self.params.seeker,
+            self.p_aug,
             self.args.tables,
             self.args.dataset_path,
             self.p_playlist,
@@ -307,11 +310,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.status_label.setStyleSheet(style)
         self.status_label.setText(message)
-
-    def write_log(self, filename: str, *args):
-        with open(filename, mode="a", newline="") as file:
-            writer = csv.writer(file)
-            writer.writerow(args)
 
     def cleanup_workers(self):
         """

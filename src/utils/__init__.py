@@ -1,5 +1,6 @@
 import os
 import re
+import csv
 import time
 from threading import Event
 from rich.console import Console
@@ -72,3 +73,9 @@ def get_transformations(filename: str) -> tuple[str, dict[str, int]]:
 
 def basename(filename: str) -> str:
     return os.path.splitext(os.path.basename(filename))[0]
+
+
+def write_log(filename: str, *args):
+    with open(filename, mode="a", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(args)

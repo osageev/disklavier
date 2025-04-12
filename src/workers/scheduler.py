@@ -7,7 +7,7 @@ from PySide6.QtCore import Signal
 
 from .worker import Worker
 from utils import basename, console
-from utils.midi import csv_to_midi, TICKS_PER_BEAT, get_msg_time
+from utils.midi import csv_to_midi, TICKS_PER_BEAT
 
 from typing import Optional, Tuple
 
@@ -61,7 +61,7 @@ class Scheduler(Worker):
     ) -> Tuple[float, float]:
         midi_in = mido.MidiFile(pf_midi)
         # number of seconds/ticks from the start of playback to start playing the file
-        if self.recording_mode and "player" in basename(pf_midi):
+        if self.recording_mode and "player" in basename(pf_midi) and self.n_files_queued == 0:
             ts_offset, tt_offset = 0, 0
         else:
             ts_offset, tt_offset = self._get_next_transition()
@@ -137,7 +137,9 @@ class Scheduler(Worker):
         self.queued_files.append(basename(pf_midi))
         ts_seg_len = mido.tick2second(tt_sum, TICKS_PER_BEAT, self.tempo)
 
-        # console.log(f"{self.tag} added {ts_seg_len:.03f} seconds of music to queue")
+        console.log(
+            f"{self.tag} added {ts_seg_len:.03f} seconds of music to queue ({self.n_files_queued} files in queue)"
+        )
 
         _ = self._copy_midi(pf_midi)
 
@@ -234,6 +236,7 @@ class Scheduler(Worker):
     def _get_next_transition(self) -> Tuple[float, int]:
         if self.verbose:
             console.log(f"{self.tag} transition times:\n\t{self.ts_transitions[-5:]}")
+
         ts_offset = self.ts_transitions[
             self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
         ]
