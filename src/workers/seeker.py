@@ -63,14 +63,6 @@ class Seeker(Worker):
         self.p_playlist = playlist_path
         self.rng = np.random.default_rng(self.params.seed)
 
-        # some defaults
-        if not hasattr(self, "match"):
-            self.params.match = "current"
-        if not hasattr(self.params, "seed_rearrange"):
-            self.params.seed_rearrange = False
-        if not hasattr(self.params, "seed_remove"):
-            self.params.seed_remove = 1
-
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
 

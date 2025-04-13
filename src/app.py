@@ -80,7 +80,14 @@ def load_args(args):
         help="run again using last seed file",
     )
     args = parser.parse_args()
-    params = OmegaConf.load(f"params/{args.params}.yaml")
+
+    # first load template parameters
+    template_params = OmegaConf.load("params/template.yaml")
+
+    # then load specified parameters and merge with template
+    # (specified parameters override template parameters)
+    specific_params = OmegaConf.load(f"params/{args.params}.yaml")
+    params = OmegaConf.merge(template_params, specific_params)
 
     # handle overrides
     if args.dataset_path == None:

@@ -44,10 +44,10 @@ class RunWorker(QtCore.QThread):
         self.staff: Staff = main_window.workers
         self.td_system_start = main_window.td_system_start
 
-        # Connect signals
+        # connect signals
         self.s_switch_to_pr.connect(self.main_window.switch_to_piano_roll)
 
-        # File paths from main window
+        # file paths from main window
         self.p_log = main_window.p_log
         self.p_playlist = main_window.p_playlist
         self.pf_master_recording = main_window.pf_master_recording
