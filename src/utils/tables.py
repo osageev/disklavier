@@ -19,12 +19,13 @@ from rich.progress import (
 from torch.utils.data import DataLoader, TensorDataset
 
 
-from typing import List, Optional
+from typing import List
 from . import basename, console
 
 from ml.specdiff.model import SpectrogramDiffusion, config as specdiff_config
 from ml.classifier.model import Classifier
-from ml.clamp.model import Clamp3
+from ml.clamp.model import Clamp
+from ml.clamp.clamp_utils import M3_HIDDEN_SIZE
 
 
 def build_neighbor_table(
@@ -39,6 +40,8 @@ def build_neighbor_table(
         List of all files to build the table from.
     output_path : str
         Path to save the table to.
+    hdf_key : str
+        Key to save the table to in the HDF file.
 
     Returns
     -------
@@ -74,7 +77,7 @@ def build_neighbor_table(
             n_table.loc[basename(file)] = neighbors
             progress.advance(update_task)
 
-    n_table.to_hdf(output_path, key="neighbors", mode="w")
+    n_table.to_hdf(output_path, key=hdf_key, mode="w")
 
     return os.path.exists(output_path)
 
@@ -144,7 +147,7 @@ def pitch_histograms(all_files: List[str], output_path: str) -> bool:
 def specdiff(
     all_files: List[str],
     output_path: str,
-    fix_time: Optional[bool] = True,
+    fix_time: bool = True,
     batch_size: int = 1,
     device_name: str = "cuda:0",
 ) -> bool:
@@ -173,7 +176,7 @@ def specdiff(
     all_files.sort()
     # initialize encoder
     specdiff_config["device"] = device_name
-    model = SpectrogramDiffusion(specdiff_config)
+    model = SpectrogramDiffusion(specdiff_config, fix_time)
 
     # initialize faiss index
     faiss_path = os.path.join(os.path.dirname(output_path), "specdiff.faiss")
@@ -252,9 +255,9 @@ def classifier(
     console.log(f"loading embeddings from '{embeddings_path}'")
     # load input datasets
     with h5py.File(embeddings_path, "r") as in_file:
-        filenames = in_file["filenames"][:]  # type: ignore
+        filenames: h5py.Dataset = in_file["filenames"][:]  # type: ignore
         console.log(f"processing {num_files} files, e.g.:\n{filenames[:5]}")
-        embeddings = in_file["embeddings"][:]  # type: ignore
+        embeddings: h5py.Dataset = in_file["embeddings"][:]  # type: ignore
         console.log(f"processing {num_files} files, e.g.:\n{embeddings[:5]}")
 
     # load the classifier
@@ -305,7 +308,54 @@ def clamp(all_files: List[str], output_path: str, device_name: str = "cuda:0") -
     """
     Calculate the clamp embedding for all files.
     """
-    return False
+    num_files = len(all_files)
+    all_files.sort()
+    model = Clamp(device_name)
+
+    # initialize faiss index
+    faiss_path = os.path.join(os.path.dirname(output_path), "clamp.faiss")
+    index = faiss.IndexFlatIP(M3_HIDDEN_SIZE)
+    vecs = np.zeros((num_files, M3_HIDDEN_SIZE), dtype=np.float32)
+
+    with h5py.File(output_path, "w") as out_file:
+        # create output datasets
+        d_embeddings = out_file.create_dataset(
+            "embeddings",
+            (num_files, M3_HIDDEN_SIZE),
+            fillvalue=0,
+        )
+        d_filenames = out_file.create_dataset(
+            "filenames",
+            (num_files),
+            dtype=h5py.string_dtype(encoding="utf-8"),
+            fillvalue="",
+        )
+
+        # calculate embeddings
+        progress = Progress(
+            SpinnerColumn(),
+            *Progress.get_default_columns(),
+            TimeElapsedColumn(),
+            MofNCompleteColumn(),
+            refresh_per_second=1,
+        )
+        emb_task = progress.add_task("embedding", total=num_files)
+        with progress:
+            for i in range(num_files):
+                embedding = model.embed(all_files[i])
+                # console.log(f"embedding {i} of {num_files} has shape {embedding.shape}")
+                # console.log(embedding)
+                d_embeddings[i] = embedding
+                vecs[i] = embedding / np.linalg.norm(embedding, keepdims=True)
+                d_filenames[i] = basename(all_files[i])
+                progress.advance(emb_task)
+
+        console.log("copying vectors to FAISS index")
+        index.add(vecs)  # type: ignore
+        faiss.write_index(index, faiss_path)
+        console.log(f"FAISS index saved to '{faiss_path}'")
+
+    return _check_hdf5(output_path, ["filenames", "embeddings"])
 
 
 def _check_hdf5(path: str, keys: List[str]) -> bool:
@@ -319,7 +369,7 @@ def _check_hdf5(path: str, keys: List[str]) -> bool:
             console.log(f"{key}:")
             if key == "filenames":
                 for filename in f[key][:5]:  # type: ignore
-                    console.log(f"\t{str(filename[0], 'utf-8')}")
+                    console.log(f"\t{str(filename, 'utf-8')}")
             else:
                 for val in f[key][:5]:  # type: ignore
                     console.log(f"\t{val.shape}")
@@ -334,7 +384,7 @@ def graph(
     console.log(f"loading and normalizing embeddings from '{embeddings_path}'")
     with h5py.File(embeddings_path, "r") as f:
         embeddings = [e / np.linalg.norm(e, keepdims=True) for e in f["embeddings"]]  # type: ignore
-        filenames = [str(name[0], "utf-8") for name in f["filenames"]]  # type: ignore
+        filenames = [str(name, "utf-8") for name in f["filenames"]]  # type: ignore
     df = pd.DataFrame({"embeddings": embeddings}, index=filenames, dtype=np.float32)
 
     console.log("grouping files")

@@ -54,7 +54,7 @@ class SpectrogramDiffusion:
             tmp_dir = os.path.join(os.path.dirname(path), "tmp")
             os.makedirs(tmp_dir, exist_ok=True)
             tmp_file = os.path.join(tmp_dir, basename(path))
-            change_tempo_and_trim(path, tmp_file, tempo=95.0)
+            change_tempo_and_trim(path, tmp_file)
             path = tmp_file
 
         if self.verbose:

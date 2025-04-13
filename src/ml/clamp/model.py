@@ -6,20 +6,21 @@ import numpy as np
 from tqdm import tqdm
 from transformers import BertConfig, AutoTokenizer
 
+from ml.clamp import convert_midi2mtf
 from ml.clamp.config import *
 from ml.clamp.clamp_utils import *
 from utils import console
 
 
-class Clamp3:
-    tag = "[#a3d2ca]clamp3[/#a3d2ca]:"
+class Clamp:
+    tag = "[gold1]clamp3[/gold1]:"
     name = "CLaMP3"
 
-    def __init__(self, device: str, epoch: int = 512):
-        print(f"{self.tag} initializing {self.name} model")
+    def __init__(self, device, epoch: int = 512):
+        console.log(f"{self.tag} initializing {self.name} model")
 
         self.device = device
-        print(f"{self.tag} using device: {self.device}")
+        console.log(f"{self.tag} using device: {self.device}")
 
         # Model and configuration setup
         audio_config = BertConfig(
@@ -51,10 +52,7 @@ class Clamp3:
         self.patchilizer = M3Patchilizer()
 
         # print parameter number
-        print(
-            "Total Parameter Number: "
-            + str(sum(p.numel() for p in self.model.parameters()))
-        )
+        console.log(f"{self.tag} Total Parameter Number: {sum(p.numel() for p in self.model.parameters())}")
 
         # Load model weights
         self.model.eval()
@@ -65,7 +63,7 @@ class Clamp3:
             checkpoint_path = checkpoint_path.replace(".pth", f"_{epoch}.pth")
 
         if not os.path.exists(checkpoint_path):
-            print("No CLaMP 3 weights found. Downloading from Hugging Face...")
+            console.log(f"{self.tag} No CLaMP 3 weights found. Downloading from Hugging Face...")
             checkpoint_url = "https://huggingface.co/sander-wood/clamp3/resolve/main/weights_clamp3_saas_h_size_768_t_model_FacebookAI_xlm-roberta-base_t_length_128_a_size_768_a_layers_12_a_length_128_s_size_768_s_layers_12_p_size_64_p_length_512.pth"
             response = requests.get(checkpoint_url, stream=True)
 
@@ -82,27 +80,24 @@ class Clamp3:
                     if chunk:
                         f.write(chunk)
                         bar.update(len(chunk))
-            print("Weights file downloaded successfully.")
+            console.log(f"{self.tag} Weights file downloaded successfully.")
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-        print(
-            f"Successfully Loaded CLaMP 3 Checkpoint from Epoch {checkpoint['epoch']} with loss {checkpoint['min_eval_loss']}"
-        )
         self.model.load_state_dict(checkpoint["model"])
-        print(f"{self.tag} model loaded successfully")
+        console.log(f"{self.tag} Successfully Loaded CLaMP 3 Checkpoint from Epoch {checkpoint['epoch']} with loss {checkpoint['min_eval_loss']}")
 
     def embed(self, filename: str, get_global: bool = True) -> torch.Tensor:
         if filename.endswith(".mid"):
-            filename = convert_midi2mtf(filename, "data")
-
-        with open(filename, "r", encoding="utf-8") as f:
-            item = f.read()
-
-        if filename.endswith(".mtf"):
-            input_data = self.patchilizer.encode(item, add_special_patches=True)
-            input_data = torch.tensor(input_data)
+            mtf = convert_midi2mtf(filename, m3_compatible=True)
+            if mtf == "error":
+                raise ValueError("Error converting MIDI to MTF")
+        elif filename.endswith(".mtf"):
+            with open(filename, "r", encoding="utf-8") as f:
+                mtf = f.read()
         else:
             raise ValueError("Invalid file extension (must be .mtf or .mid)")
 
+        input_data = self.patchilizer.encode(mtf, add_special_patches=True)
+        input_data = torch.tensor(input_data)
         segment_list = []
         for i in range(0, len(input_data), PATCH_LENGTH):
             segment_list.append(input_data[i : i + PATCH_LENGTH])
@@ -156,4 +151,5 @@ class Clamp3:
             last_hidden_states_list = (
                 last_hidden_states_list.sum(dim=0) / feature_weights.sum()
             )
-        return last_hidden_states_list
+
+        return last_hidden_states_list.detach().cpu()

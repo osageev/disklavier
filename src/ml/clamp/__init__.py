@@ -1,6 +1,7 @@
 import os
 import mido
 
+
 def basename(filename: str) -> str:
     return os.path.splitext(os.path.basename(filename))[0]
 
@@ -40,9 +41,7 @@ def load_midi(filename: str, m3_compatible: bool = True) -> str:
     return "\n".join(msg_list)
 
 
-def convert_midi2mtf(
-    pf_midi_in: str, pf_midi_out: str, m3_compatible: bool = True
-) -> None:
+def convert_midi2mtf(pf_midi_in: str, m3_compatible: bool = True) -> str:
     """
     Converts MIDI files to MTF format.
     """
@@ -52,12 +51,10 @@ def convert_midi2mtf(
         if not output:
             with open("logs/midi2mtf_error_log.txt", "a", encoding="utf-8") as f:
                 f.write(pf_midi_in + "\n")
-            return
+            return "error"
         else:
-            output_file_path = os.path.join(pf_midi_out, basename(pf_midi_in) + ".mtf")
-            with open(output_file_path, "w", encoding="utf-8") as f:
-                f.write(output)
+            return output
     except Exception as e:
         with open("logs/midi2mtf_error_log.txt", "a", encoding="utf-8") as f:
             f.write(pf_midi_in + " " + str(e) + "\n")
-        pass
+        return "error"

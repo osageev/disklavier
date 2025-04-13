@@ -497,15 +497,22 @@ def change_tempo_and_trim(
     message, and trims events so that no event occurs after the specified cutoff time.
     If any note remains active at the cutoff, a note_off message is inserted.
 
-    Args:
-        input_file (str): Path to the input MIDI file.
-        output_file (str): Path where the processed MIDI file will be saved.
-        tempo (float, optional): Desired tempo in BPM. Defaults to 93.75 so that 9 beats equals 5.12s.
-        cutoff_sec (float, optional): Time in seconds after which events are trimmed.
+    Parameters
+    ----------
+    input_file : str
+        Path to the input MIDI file.
+    output_file : str
+        Path where the processed MIDI file will be saved.
+    tempo : float, optional
+        Desired tempo in BPM. Defaults to 93.75 so that 9 beats equals 5.12s.
+    cutoff_sec : float, optional
+        Time in seconds after which events are trimmed.
             Defaults to 5.12.
 
-    Returns:
-        bool: True if the output file exists after saving, False otherwise.
+    Returns
+    -------
+    bool
+        True if the output file exists after saving, False otherwise.
     """
 
     mid = mido.MidiFile(input_file)
