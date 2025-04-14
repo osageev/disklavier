@@ -28,7 +28,7 @@ class Seeker(Worker):
     n_segment_repeats: int = 0
     # playback trackers
     played_files: list[str] = []
-    allow_multiple_plays = False
+    allow_multiple_plays = True
     # playlist mode position tracker
     matches_pos: int = 0
     # TODO: i forget what this does tbh, rewrite entire playlist mode
@@ -294,21 +294,22 @@ class Seeker(Worker):
         if self.params.match != "current":
             played_files.append(query_file)
         for idx, similarity in zip(indices, similarities):
+            # this should always skip the first file
             if self.filenames[idx] == query_file:
-                # this should always skip the first file
                 continue
+
             segment_name = str(self.filenames[idx])
             if "player" in query_file:
                 next_file = f"{segment_name}.mid"
                 console.log(f"{self.tag} found player match: '{next_file}'")
                 break
+
             # dont replay files
-            if segment_name in played_files:
+            if segment_name in played_files and not self.allow_multiple_plays:
                 continue
 
             next_segment_name = self.base_file(segment_name)
             next_track = next_segment_name.split("_")[0]
-            last_track = self.played_files[-1].split("_")[0]
             # switch to different track after self.n_transition_interval segments
             if hop and self.n_segment_repeats >= self.n_transition_interval:
                 played_tracks = [file.split("_")[0] for file in self.played_files]
@@ -320,15 +321,10 @@ class Seeker(Worker):
                 else:
                     next_file = f"{segment_name}.mid"
                     break
-            # no shift because it sounds bad
-            if (
-                next_segment_name
-                not in played_files
-                # and segment_name.endswith("s00")
-                # and next_track == last_track
-            ):
-                next_file = f"{segment_name}.mid"
-                break
+            
+            # all conditions met
+            next_file = f"{segment_name}.mid"
+            break
 
         console.log(
             f"{self.tag} best match is '{next_file}' with similarity {similarity:.05f}"
