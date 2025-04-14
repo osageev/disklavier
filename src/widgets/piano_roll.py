@@ -261,7 +261,7 @@ class PianoRollView(QGraphicsView):
         # check if note already active and end it first
         if note.pitch in self.active_notes:
             if self.debug:
-                print(
+                console.log(
                     f"Warning: Note {note.pitch} already active, ending previous note"
                 )
             self.note_off(note.pitch)
@@ -277,7 +277,7 @@ class PianoRollView(QGraphicsView):
 
             del self.active_notes[pitch]
         elif self.debug:
-            print(f"warning: received noteOff for inactive note: {pitch}")
+            console.log(f"warning: received noteOff for inactive note: {pitch}")
 
     def set_tempo(self, bpm):
         if bpm > 0:

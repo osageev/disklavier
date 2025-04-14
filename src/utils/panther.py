@@ -3,6 +3,7 @@ import time
 import torch
 import paramiko
 import numpy as np
+import uuid
 from shutil import copy2
 from typing import Optional
 from utils import console
@@ -16,7 +17,7 @@ tag = "[#5f00af]panthr[/#5f00af]:"
 
 
 def send_embedding(
-    file_path: str, model: str = "specdiff", mode: Optional[str] = None
+    file_path: str, model: str = "specdiff", mode: Optional[str] = None, verbose: bool = False
 ) -> np.ndarray:
     """
     Calculates the embedding of a MIDI file using the Panther model.
@@ -43,19 +44,22 @@ def send_embedding(
 
     # add model name to the remote filename
     filename, ext = os.path.splitext(base_filename)
-    model_filename = f"{filename}_{model}{ext}"
+    random_id = str(uuid.uuid4())[:8]  # short 8-character random identifier
+    model_filename = f"{filename}_{random_id}_{model}{ext}"
     remote_file_path = os.path.join(P_REMOTE, model_filename)
     pf_tensor_remote = os.path.splitext(remote_file_path)[0] + ".pt"
     pf_tensor_local = os.path.join(local_folder, os.path.basename(pf_tensor_remote))
-    console.log(
-        f"{tag} using remote file path '{pf_tensor_remote}' and local file path '{pf_tensor_local}'"
-    )
+    if verbose:
+        console.log(
+            f"{tag} using remote file path '{pf_tensor_remote}' and local file path '{pf_tensor_local}'"
+        )
 
     # short circuit for testing
     # '/home/finlay/disklavier/data/outputs/uploads/intervals-060-09_1_t00s00_specdiff.pt
     #                          data/outputs/uploads/intervals-060-09_1_t00s00_specdiff.pt
     if mode == "test":
-        console.log(f"{tag} moving file from '{file_path}' to '{remote_file_path}'")
+        if verbose:
+            console.log(f"{tag} moving file from '{file_path}' to '{remote_file_path}'")
         if os.path.exists(pf_tensor_local):
             os.remove(pf_tensor_local)
         if os.path.exists(remote_file_path):
@@ -65,12 +69,14 @@ def send_embedding(
         time.sleep(0.5)
     else:
         # panther login
-        console.log(f"{tag} connecting to panther at {USER}@{REMOTE_HOST}:{PORT}")
+        if verbose:
+            console.log(f"{tag} connecting to panther at {USER}@{REMOTE_HOST}:{PORT}")
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(REMOTE_HOST, PORT, USER)
+        ssh.connect(hostname=REMOTE_HOST, port=PORT, username=USER)
         sftp = ssh.open_sftp()
-        console.log(f"{tag} connection opened")
+        if verbose:
+            console.log(f"{tag} connection opened")
 
         # clear old files
         try:
@@ -79,14 +85,16 @@ def send_embedding(
             sftp.remove(os.path.splitext(remote_file_path)[0] + ".pt")
             console.log(f"{tag} existing file '{remote_file_path}' deleted.")
         except FileNotFoundError:
-            console.log(
-                f"{tag} no existing file found at '{remote_file_path}', proceeding..."
-            )
+            if verbose:
+                console.log(
+                    f"{tag} no file to delete at '{remote_file_path}', proceeding..."
+                )
         # upload
         sftp.put(file_path, remote_file_path)
-        console.log(
-            f"{tag} upload complete, waiting for embedding using model '{model}'..."
-        )
+        if verbose:
+            console.log(
+                f"{tag} upload complete, waiting for embedding..."
+            )
 
         # wait for new tensor
         while 1:
@@ -103,6 +111,7 @@ def send_embedding(
         ssh.close()
 
     embedding = torch.load(pf_tensor_local, weights_only=False).numpy().reshape(1, -1)
-    console.log(f"{tag} loaded embedding {embedding.shape}")
+    if verbose:
+        console.log(f"{tag} loaded embedding {embedding.shape}")
 
     return embedding / np.linalg.norm(embedding, axis=1, keepdims=True)

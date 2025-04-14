@@ -764,16 +764,15 @@ class Seeker(Worker):
         else:
             filenames = self.filenames
 
-        # ensure that embedding is normalized
-        console.log(f"{self.tag}\tquery embedding shape: {query_embedding.shape}")
-
         # get matches
         indices, similarities = self._faiss_search(
-            query_embedding, index=faiss_index if "clap" in metric else None
+            query_embedding,
+            num_matches=2000,
+            index=faiss_index if "clap" in metric else None,
         )
         for i in range(3):
             console.log(
-                f"{self.tag}\t{indices[i]:04d}: '{filenames[indices[i]]}'\t- {similarities[i]:.4f}"
+                f"{self.tag}\t'{filenames[indices[i]]}' ({indices[i]:04d}): {similarities[i]:.4f}"
             )
 
         # get best match
@@ -782,7 +781,7 @@ class Seeker(Worker):
                 self.p_dataset, basename(filenames[indices[0]]) + "_t00s00.mid"
             )
         else:
-            best_match = self.filenames[indices[0]]
+            best_match = filenames[indices[0]]
         best_similarity = similarities[0]
 
         return best_match, best_similarity

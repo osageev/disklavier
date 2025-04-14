@@ -237,9 +237,6 @@ class Scheduler(Worker):
         return transitions
 
     def _get_next_transition(self) -> Tuple[float, int]:
-        if self.verbose:
-            console.log(f"{self.tag} transition times:\n\t{self.ts_transitions[-5:]}")
-
         ts_offset = self.ts_transitions[
             self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
         ]
@@ -248,6 +245,22 @@ class Scheduler(Worker):
             ts_offset = (
                 ts_offset if ts_offset > 0 else 0
             )  # prevent potential negative offset on first segment
+
+        # print selected range from ts_transitions
+        if self.verbose:
+            selected_idx = (
+                self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
+            )
+            start_idx = max(0, selected_idx - 2)
+            end_idx = min(len(self.ts_transitions) - 1, selected_idx + 2)
+            transitions = []
+            for i in range(start_idx, end_idx + 1):
+                t_time = self.td_start + timedelta(seconds=self.ts_transitions[i])
+                if i == selected_idx:
+                    transitions.append(f"[bold]{t_time.strftime('%H:%M:%S.%f')}[/bold]")
+                else:
+                    transitions.append(t_time.strftime("%H:%M:%S.%f"))
+            console.log(f"{self.tag} transitions: {transitions}")
 
         return ts_offset, mido.second2tick(ts_offset, TICKS_PER_BEAT, self.tempo)
 
