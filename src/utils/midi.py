@@ -688,7 +688,7 @@ def beat_split(midi_path: str, bpm: int | None = None) -> dict:
         if len(beat["notes"]) == 0:
             beats_to_remove.append(i)
             console.log(f"[yellow]beat {i} has no notes, removing[/yellow]")
-    
+
     # Remove the empty beats after iteration is complete
     for i in beats_to_remove:
         del beats[i]
@@ -820,3 +820,99 @@ def remove_notes(
             new_files.append(pf_new)
 
     return new_files
+
+
+def generate_random_midi(
+    num_bars: int, bpm: int, ticks_per_beat: int = TICKS_PER_BEAT
+) -> mido.MidiTrack:
+    """
+    generate a mido track with random midi notes.
+
+    Parameters
+    ----------
+    num_bars : int
+        number of bars to generate.
+    bpm : int
+        beats per minute for tempo calculation.
+    ticks_per_beat : int, optional
+        midi ticks per beat resolution, by default TICKS_PER_BEAT.
+
+    Returns
+    -------
+    mido.MidiTrack
+        a single track containing the generated midi events.
+    """
+    # calculate total duration in seconds assuming 4/4 time
+    seconds_per_beat = 60.0 / bpm
+    beats_per_bar = 4
+    total_seconds = num_bars * beats_per_bar * seconds_per_beat
+
+    # create a pretty_midi object and instrument
+    pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
+    instrument = pretty_midi.Instrument(program=0)
+
+    # generate random notes
+    # average 2 notes per beat
+    num_notes = int(num_bars * beats_per_bar * 2)
+    min_pitch, max_pitch = 48, 84  # C3 to C6
+    min_vel, max_vel = 50, 100
+    min_dur, max_dur = 0.1, seconds_per_beat  # sixteenth note to quarter note duration
+
+    for _ in range(num_notes):
+        start_time = np.random.uniform(
+            0, total_seconds * 0.95
+        )  # avoid notes right at the end
+        duration = np.random.uniform(min_dur, max_dur)
+        end_time = min(
+            start_time + duration, total_seconds
+        )  # ensure note ends within duration
+
+        # skip notes with near-zero duration after clamping
+        if end_time - start_time < 0.01:
+            continue
+
+        pitch = np.random.randint(min_pitch, max_pitch + 1)
+        velocity = np.random.randint(min_vel, max_vel + 1)
+
+        note = pretty_midi.Note(
+            velocity=velocity, pitch=pitch, start=start_time, end=end_time
+        )
+        instrument.notes.append(note)
+
+    pm.instruments.append(instrument)
+
+    # convert pretty_midi notes to mido messages
+    tempo = mido.bpm2tempo(bpm)
+    events = []
+    for note in instrument.notes:
+        start_tick = mido.second2tick(note.start, ticks_per_beat, tempo)
+        end_tick = mido.second2tick(note.end, ticks_per_beat, tempo)
+        # ensure end_tick is after start_tick
+        if end_tick <= start_tick:
+            end_tick = start_tick + 1  # minimum duration of 1 tick
+
+        events.append(
+            (
+                start_tick,
+                mido.Message(
+                    "note_on", note=note.pitch, velocity=note.velocity, time=0
+                ),
+            )
+        )
+        events.append(
+            (end_tick, mido.Message("note_off", note=note.pitch, velocity=0, time=0))
+        )
+
+    # sort events by absolute tick time
+    events.sort(key=lambda x: x[0])
+
+    # create mido track and convert absolute ticks to relative delta times
+    track = mido.MidiTrack()
+    last_tick = 0
+    for tick, message in events:
+        delta_time = int(round(tick - last_tick))  # use int round for delta
+        message.time = max(0, delta_time)  # ensure time is non-negative
+        track.append(message)
+        last_tick = tick
+
+    return track
