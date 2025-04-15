@@ -61,7 +61,11 @@ class Scheduler(Worker):
     ) -> Tuple[float, float]:
         midi_in = mido.MidiFile(pf_midi)
         # number of seconds/ticks from the start of playback to start playing the file
-        if self.recording_mode and "player" in basename(pf_midi) and self.n_files_queued == 0:
+        if (
+            self.recording_mode
+            and "player" in basename(pf_midi)
+            and self.n_files_queued == 0
+        ):
             ts_offset, tt_offset = 0, 0
         else:
             ts_offset, tt_offset = self._get_next_transition()
@@ -187,7 +191,6 @@ class Scheduler(Worker):
         n_stamps: int = 1,
         do_ticks: bool = True,
     ) -> list[mido.MetaMessage]:
-        """Generate transition times for 8-beat MIDI files."""
         self.tt_offset = mido.second2tick(ts_offset, TICKS_PER_BEAT, self.tempo)
         ts_interval = self.n_beats_per_segment * 60 / self.bpm
         ts_beat_length = 60 / self.bpm  # time interval for each beat
@@ -196,7 +199,7 @@ class Scheduler(Worker):
         if ts_offset % ts_interval < ts_beat_length * N_BEATS_TRANSITION_OFFSET:
             ts_offset = ((ts_offset // ts_interval) + 1) * ts_interval
         self.ts_transitions.extend(
-            [ts_offset + i * ts_interval for i in range(n_stamps)]
+            [ts_offset + i * ts_interval for i in range(n_stamps + 1)]
         )
 
         if self.verbose:
@@ -234,9 +237,6 @@ class Scheduler(Worker):
         return transitions
 
     def _get_next_transition(self) -> Tuple[float, int]:
-        if self.verbose:
-            console.log(f"{self.tag} transition times:\n\t{self.ts_transitions[-5:]}")
-
         ts_offset = self.ts_transitions[
             self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
         ]
@@ -245,6 +245,22 @@ class Scheduler(Worker):
             ts_offset = (
                 ts_offset if ts_offset > 0 else 0
             )  # prevent potential negative offset on first segment
+
+        # print selected range from ts_transitions
+        if self.verbose:
+            selected_idx = (
+                self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
+            )
+            start_idx = max(0, selected_idx - 2)
+            end_idx = min(len(self.ts_transitions) - 1, selected_idx + 2)
+            transitions = []
+            for i in range(start_idx, end_idx + 1):
+                t_time = self.td_start + timedelta(seconds=self.ts_transitions[i])
+                if i == selected_idx:
+                    transitions.append(f"[bold]{t_time.strftime('%H:%M:%S.%f')}[/bold]")
+                else:
+                    transitions.append(t_time.strftime("%H:%M:%S.%f"))
+            console.log(f"{self.tag} transitions: {transitions}")
 
         return ts_offset, mido.second2tick(ts_offset, TICKS_PER_BEAT, self.tempo)
 
@@ -276,15 +292,28 @@ class Scheduler(Worker):
             verbose=self.verbose,
         )
 
-    def get_current_file(self) -> str:
-        now = datetime.now()
-        for i in range(len(self.ts_transitions) - 1):
-            td_this_trans = self.td_start + timedelta(seconds=self.ts_transitions[i])
-            td_next_trans = self.td_start + timedelta(
-                seconds=self.ts_transitions[i + 1]
-            )
-            # console.log(f"{self.tag} checking {td_this_trans.strftime('%y-%m-%d %H:%M:%S')} <= {now.strftime('%y-%m-%d %H:%M:%S')} < {td_next_trans.strftime('%y-%m-%d %H:%M:%S')}")
-            if td_this_trans <= now < td_next_trans:
-                return self.queued_files[i]
+    def get_current_file(self) -> Optional[str]:
+        if not self.queued_files:
+            return None
 
-        return ""
+        current_time = datetime.now()
+        elapsed_seconds = (current_time - self.td_start).total_seconds()
+
+        # we haven't started playing yet
+        if elapsed_seconds < self.ts_transitions[0]:
+            return None
+
+        # find which segment we're in
+        current_segment = 0
+        for i in range(1, len(self.ts_transitions)):
+            if elapsed_seconds < self.ts_transitions[i]:
+                current_segment = i - 1
+                break
+            if i == len(self.ts_transitions) - 1:
+                current_segment = i
+
+        # make sure we have enough files
+        if current_segment < len(self.queued_files):
+            return self.queued_files[current_segment]
+
+        return None

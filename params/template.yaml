@@ -1,4 +1,6 @@
-n_transitions: 100
+n_beats_per_segment: 8
+n_transitions: 16
+startup_delay: 10
 initialization: "recording" # kickstart random recording audio
 kickstart_path: "data/datasets/20250320/augmented/20240429-068-06_0084-0091_t10s03.mid"
 # kickstart_path: "data/datasets/20250320/augmented/20241229-094-10_0091-0096_t00s00.mid"
@@ -6,8 +8,11 @@ kickstart_path: "data/datasets/20250320/augmented/20240429-068-06_0084-0091_t10s
 seed_rearrange: True
 seed_remove: 0.25
 scheduler:
-  verbose: True
+  tag: "[green]schedl[/green]:"
+  verbose: False
+  lead_bar: True
 seeker:
+  tag: "[yellow]seeker[/yellow]:"
   verbose: True
   seed: 9878761
   system: "live"
@@ -18,14 +23,26 @@ seeker:
   graph_track_revisit_interval: 3
   block_shift: True
 player:
+  tag: "[blue]player[/blue]:"
   verbose: False
   midi_port: "Disklavier"
 metronome:
+  tag: "[magenta]metro[/magenta] :"
   verbose: False
+  tick_1: "data/MetronomeUp.wav"
+  tick_2: "data/Metronome.wav"
   do_tick: True
 recorder:
+  tag: "[red]record[/red]:"
   verbose: True
+  tick_1: "data/MetronomeUp.wav"
+  tick_2: "data/Metronome.wav"
   midi_port: "Disklavier"
+  record: 67 # left pedal
 audio:
+  tag: "[#af005f]audio [/#af005f]:"
   verbose: True
+  sample_rate: 44100
+  channels: 1
   midi_port: "Disklavier"
+  record: 67 # left pedal

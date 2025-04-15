@@ -49,7 +49,7 @@ def main(args):
     settings = [dict(zip(keys, combo)) for combo in product_combo]
     print(f"running with {len(settings)} settings combinations")
 
-    clean_conf = OmegaConf.load("params/live_template.yaml")
+    clean_conf = OmegaConf.load("params/template.yaml")
     for i, setting in enumerate(settings):
         print(f"running with settings:\n\t{setting}")
         params = OmegaConf.merge(clean_conf, CONSTANTS, setting)

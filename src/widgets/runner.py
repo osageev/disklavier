@@ -1,6 +1,5 @@
 import os
 import time
-from pretty_midi import PrettyMIDI
 from PySide6 import QtCore
 from threading import Thread
 from rich.table import Table
@@ -22,8 +21,8 @@ class RunWorker(QtCore.QThread):
     tag = "[#008700]runner[/#008700]:"
 
     # session tracking
-    n_files = 0
     ts_queue = 0
+    n_files_queued = 0
     pf_augmentations = None
 
     # signals
@@ -44,10 +43,10 @@ class RunWorker(QtCore.QThread):
         self.staff: Staff = main_window.workers
         self.td_system_start = main_window.td_system_start
 
-        # Connect signals
+        # connect signals
         self.s_switch_to_pr.connect(self.main_window.switch_to_piano_roll)
 
-        # File paths from main window
+        # file paths from main window
         self.p_log = main_window.p_log
         self.p_playlist = main_window.p_playlist
         self.pf_master_recording = main_window.pf_master_recording
@@ -178,7 +177,7 @@ class RunWorker(QtCore.QThread):
             # TODO: move this to be managed by scheduler and track scheduler state instead
             current_file = ""
             last_time = time.time()
-            while self.n_files < self.params.n_transitions:
+            while self.n_files_queued < self.params.n_transitions:
                 current_time = time.time()
                 elapsed = current_time - last_time
                 last_time = current_time
@@ -288,13 +287,14 @@ class RunWorker(QtCore.QThread):
 
         self.ts_queue += ts_seg_len
         self.staff.seeker.played_files.append(file_path)
-        self.n_files += 1
+        self.n_files_queued += 1
         self.s_transition_times.emit(self.staff.scheduler.ts_transitions)
+        start_time = self.td_system_start + timedelta(seconds=ts_seg_start)
 
         write_log(
             self.pf_playlist,
-            self.n_files,
-            datetime.fromtimestamp(ts_seg_start).strftime("%y-%m-%d %H:%M:%S"),
+            self.n_files_queued,
+            start_time.strftime("%y-%m-%d %H:%M:%S"),
             file_path,
             similarity if similarity is not None else "----",
         )
@@ -323,23 +323,25 @@ class RunWorker(QtCore.QThread):
         if seed_rearrange:
             split_beats = midi.beat_split(pf_midi, self.params.bpm)
             console.log(
-                f"{self.tag}\tsplit '{basename(pf_midi)}' into {len(split_beats)} beats"
+                f"{self.tag}\t\tsplit '{basename(pf_midi)}' into {len(split_beats)} beats"
             )
             ids = list(range(len(split_beats)))
             rearrangements: list[list[int]] = [
                 ids,  # original
-                ids[: len(ids) // 2] * 2,  # first half twice
-                ids[len(ids) // 2 :] * 2,  # second half twice need +1?
+                # ids[: len(ids) // 2] * 2,  # first half twice
+                # ids[len(ids) // 2 + 1 :] * 2,  # second half twice
+                ids[0:4] * 2,  # first four twice
+                ids[-4:] * 2,  # last four twice
                 [ids[-2], ids[-1]] * 4,  # last two beats
                 [ids[-1]] * 8,  # last beat
             ]
             for i, arrangement in enumerate(rearrangements):
-                console.log(f"{self.tag}\trearranging seed:\t{arrangement}")
+                console.log(f"{self.tag}\t\trearranging seed:\t{arrangement}")
                 joined_midi: pretty_midi.PrettyMIDI = midi.beat_join(
                     split_beats, arrangement, self.params.bpm
                 )
 
-                console.log(f"{self.tag}\tjoined midi:\t{joined_midi.get_end_time()}")
+                console.log(f"{self.tag}\t\tjoined midi:\t{joined_midi.get_end_time()}")
 
                 pf_joined_midi = os.path.join(
                     pf_augmentations, f"{basename(pf_midi)}_a{i:02d}.mid"
@@ -356,12 +358,12 @@ class RunWorker(QtCore.QThread):
             for mid in joined_paths:
                 stripped_paths = midi.remove_notes(mid, pf_augmentations, seed_remove)
                 console.log(
-                    f"{self.tag}\tstripped notes from '{basename(mid)}' (+{len(stripped_paths)})"
+                    f"{self.tag}\t\tstripped {seed_remove * 100 if isinstance(seed_remove, float) else seed_remove}{'%' if isinstance(seed_remove, float) else ''} notes from '{basename(mid)}' (+{len(stripped_paths)} versions)"
                 )
                 midi_paths.append(stripped_paths)
                 num_options += len(stripped_paths)
             console.log(
-                f"{self.tag}\taugmented '{basename(pf_midi)}' into {num_options} files"
+                f"{self.tag}\t\taugmented '{basename(pf_midi)}' into {num_options} files"
             )
 
             best_aug = ""
@@ -373,14 +375,14 @@ class RunWorker(QtCore.QThread):
                 for m in ps:
                     embedding = self.staff.seeker.get_embedding(m)
                     match, similarity = self.staff.seeker.get_match(embedding)
-                    console.log(
-                        f"{self.tag}\t\tbest match for '{basename(m)}' is '{basename(best_match)}' with similarity {best_similarity}"
-                    )
                     if similarity > best_similarity:
                         best_aug = m
-                        best_path = ps
                         best_match = match
                         best_similarity = similarity
+                        best_path = ps  # [(p, similarity) if p == m else p for p in ps]
+                    console.log(
+                        f"{self.tag}\t\tbest match for '{basename(m)}' is '{basename(match)}' with similarity {similarity}"
+                    )
         else:
             best_aug = ""
             best_match = ""
@@ -393,13 +395,13 @@ class RunWorker(QtCore.QThread):
             for mid in midi_paths:
                 embedding = self.staff.seeker.get_embedding(mid, model="clap")
                 match, similarity = self.staff.seeker.get_match(embedding)
-                console.log(
-                    f"{self.tag}\t\tbest match for '{basename(mid)}' is '{basename(best_match)}' with similarity {best_similarity}"
-                )
                 if similarity > best_similarity:
                     best_aug = mid
                     best_match = match
                     best_similarity = similarity
+                console.log(
+                    f"{self.tag}\t\tbest match for '{basename(mid)}' is '{basename(match)}' with similarity {similarity}"
+                )
 
         console.log(
             f"{self.tag}\tbest augmentation is '{basename(best_aug)}' with similarity {best_similarity} matches to {best_match}"
@@ -411,7 +413,5 @@ class RunWorker(QtCore.QThread):
                 *best_path[: best_path.index(best_aug) + 1],
                 os.path.join(self.args.dataset_path, best_match + ".mid"),
             ]
-            console.log(f"{self.tag}\t\tbp: {best_path}")
-            console.log(f"{self.tag}\t\tmp: {midi_paths}")
 
         return midi_paths

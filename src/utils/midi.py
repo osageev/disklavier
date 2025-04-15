@@ -687,7 +687,7 @@ def beat_split(midi_path: str, bpm: int | None = None) -> dict:
     for i, beat in beats.items():
         if len(beat["notes"]) == 0:
             beats_to_remove.append(i)
-            console.log(f"[yellow]beat {i} has no notes, removing[/yellow]")
+            console.log(f"\t\t[yellow italic]beat {i} has no notes, removing[/yellow italic]")
 
     # Remove the empty beats after iteration is complete
     for i in beats_to_remove:
@@ -720,15 +720,22 @@ def beat_join(
     pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
     inst = pretty_midi.Instrument(program=0, name="".join(map(str, arrangement)))
 
+    # account for beats with no note-on events
+    offset = 0
     for i, a in enumerate(arrangement):
+        if a not in beats:
+            console.log(f"[yellow]beat {a} not found in beats, skipping[/yellow]")
+            offset = ts_beat
+            continue
         for note in beats[a]["notes"]:
             new_note = pretty_midi.Note(
                 velocity=note.velocity,
                 pitch=note.pitch,
-                start=note.start + i * ts_beat,
-                end=note.end + i * ts_beat,
+                start=note.start + i * ts_beat + offset,
+                end=note.end + i * ts_beat + offset,
             )
             inst.notes.append(new_note)
+        offset = 0
     pm.instruments.append(inst)
 
     return pm
@@ -792,6 +799,8 @@ def remove_notes(
                 amount // 2 + (amount % 4 > 0),
                 amount,
             ]  # first, middle-ish, last
+
+    # console.log(f"[bold white]MIDI[/bold white]\t\t{amount} -> {steps}")
 
     # Create a single random selection of indices to remove
     all_indices = np.random.permutation(range(num_notes))
