@@ -7,11 +7,18 @@ from utils import console
 from utils.midi import TICKS_PER_BEAT
 from .worker import Worker
 
+# Forward declaration for type hint
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from widgets.runner import RunWorker
+
 
 class Player(Worker):
     """
     Plays MIDI from queue. scales velocities based on velocity stats from player.
     """
+
     td_last_note: datetime
     first_note = False
     n_notes = 0
@@ -24,6 +31,9 @@ class Player(Worker):
     _max_velocity: int = 0
     _velocity_adjustment_factor: float = 1.0
     _last_factor: float = 0
+
+    # Reference to the RunWorker for cutoff time
+    runner_ref: Optional["RunWorker"] = None
 
     def __init__(self, params, bpm: int, t_start: datetime):
         super().__init__(params, bpm=bpm)
@@ -49,6 +59,18 @@ class Player(Worker):
         self._recorder = recorder
         console.log(f"{self.tag} connected to recorder for velocity updates")
 
+    def set_runner_ref(self, runner_ref: "RunWorker"):
+        """
+        Set the reference to the RunWorker.
+
+        Parameters
+        ----------
+        runner_ref : RunWorker
+            Reference to the RunWorker instance.
+        """
+        self.runner_ref = runner_ref
+        console.log(f"{self.tag} connected to runner for cutoff checks")
+
     def check_velocity_updates(self) -> bool:
         """
         Check for velocity updates from the recorder.
@@ -73,7 +95,7 @@ class Player(Worker):
             return True
 
     def adjust_playback_based_on_velocity(self):
-        if self._avg_velocity > 0: # and self.verbose:
+        if self._avg_velocity > 0:  # and self.verbose:
             if self._last_factor != self._velocity_adjustment_factor:
                 console.log(
                     f"{self.tag} adjusting playback based on velocity: avg={self._avg_velocity:.2f}, min={self._min_velocity}, max={self._max_velocity}"
@@ -86,8 +108,9 @@ class Player(Worker):
             )
 
             if self._last_factor != self._velocity_adjustment_factor:
-                console.log(f"{self.tag} adjustment factor: {self._velocity_adjustment_factor:.2f}")
-
+                console.log(
+                    f"{self.tag} adjustment factor: {self._velocity_adjustment_factor:.2f}"
+                )
 
     def _calculate_velocity_adjustment_factor(self):
         """
@@ -132,6 +155,19 @@ class Player(Worker):
                 self.adjust_playback_based_on_velocity()
 
             tt_abs, msg = queue.get()
+
+            # Check if message time is beyond the cutoff set by RunWorker
+            if (
+                self.runner_ref is not None
+                and tt_abs >= self.runner_ref.playback_cutoff_tick
+            ):
+                if self.verbose:
+                    console.log(
+                        f"{self.tag} skipping message due to cutoff: {tt_abs} >= {self.runner_ref.playback_cutoff_tick}"
+                    )
+                queue.task_done()  # Mark task as done even if skipped
+                continue  # Skip processing this message
+
             ts_abs = mido.tick2second(tt_abs, TICKS_PER_BEAT, self.tempo)
             if self.verbose:
                 console.log(
