@@ -6,9 +6,6 @@ import mido
 # Add project root to sys.path instead of src
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
-# sys.path.append(
-#     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-# )
 
 import faiss
 import pretty_midi
@@ -16,7 +13,7 @@ import numpy as np
 from glob import glob
 
 from src import utils
-from src.ml.specdiff.model import SpectrogramDiffusion, config as specdiff_config
+from src.ml.specdiff.model import SpectrogramDiffusion
 from src.utils import basename, console, midi
 
 np.random.seed(0)
@@ -27,7 +24,7 @@ pf_augmentations = os.path.join("outputs", "augmentations")
 os.makedirs(pf_augmentations, exist_ok=True)
 
 faiss_index = faiss.read_index(FAISS_INDEX_PATH)
-specdiff = SpectrogramDiffusion(specdiff_config, verbose=True)
+specdiff = SpectrogramDiffusion(verbose=True)
 
 all_files = glob(os.path.join(DATA_DIR, "*.mid"))
 all_files.sort()

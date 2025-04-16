@@ -8,11 +8,13 @@ from diffusers.pipelines.deprecated.spectrogram_diffusion.notes_encoder import (
     SpectrogramNotesEncoder,
 )
 
-from src.utils import console, basename
-from src.utils.midi import change_tempo_and_trim, get_bpm
+from utils import console, basename
+from utils.midi import change_tempo_and_trim, get_bpm
+
+from typing import Optional
 
 
-config = {
+default_config = {
     "device": "cuda:0",
     "encoder_config": {
         "d_ff": 2048,
@@ -35,16 +37,27 @@ class SpectrogramDiffusion:
     name = "SpectrogramDiffusion"
 
     def __init__(
-        self, config: dict, fix_time: bool = True, verbose: bool = False
+        self,
+        new_config: Optional[dict] = None,
+        fix_time: bool = True,
+        verbose: bool = False,
     ) -> None:
         console.log(f"{self.tag} initializing spectrogram diffusion model")
+
+        if new_config is None:
+            config = default_config
+        else:
+            config = default_config
+            for k, v in new_config.items():
+                config[k] = v
+
         self.device = config["device"]
         self.fix_time = fix_time
         self.verbose = verbose
         torch.set_grad_enabled(False)
         self.processor = MidiProcessor()
-        self.encoder = SpectrogramNotesEncoder(**config["encoder_config"]).cuda(
-            device=self.device
+        self.encoder = SpectrogramNotesEncoder(**config["encoder_config"]).to(
+            self.device
         )
         self.encoder.eval()
         sd = torch.load(config["encoder_weights_path"], weights_only=True)
@@ -60,7 +73,7 @@ class SpectrogramDiffusion:
 
             midi_len = pretty_midi.PrettyMIDI(path, initial_tempo=bpm).get_end_time()
             if midi_len < 4.9 or midi_len > 5.11:
-                new_bpm = bpm * (midi_len / 5.12)
+                new_bpm = bpm * (midi_len / 5.119)
                 if self.verbose:
                     console.log(
                         f"{self.tag} midi duration {midi_len:.03f} is out of bounds, changing tempo from {bpm} to {new_bpm:.03f}"
@@ -71,7 +84,9 @@ class SpectrogramDiffusion:
                 change_tempo_and_trim(path, tmp_file, new_bpm)
                 path = tmp_file
 
-                console.log(f"{self.tag} new duration is {pretty_midi.PrettyMIDI(path).get_end_time():.03f}")
+                console.log(
+                    f"{self.tag} new duration is {pretty_midi.PrettyMIDI(path).get_end_time():.03f}"
+                )
 
         if self.verbose:
             console.log(f"{self.tag} generating embedding for '{path}'")
@@ -79,7 +94,9 @@ class SpectrogramDiffusion:
         if self.verbose:
             console.log(f"{self.tag} {len(tokens)} {torch.tensor(tokens[0]).shape}")
         if len(tokens) > 1:
-            console.log(f"{self.tag}[yellow italic] too many pooled tokens, using first one[/yellow italic]")
+            console.log(
+                f"{self.tag}[yellow italic] too many pooled tokens, using first one[/yellow italic]"
+            )
             tokens = [tokens[0]]
 
         all_tokens = [torch.IntTensor(token) for token in tokens]

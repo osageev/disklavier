@@ -10,7 +10,7 @@ from rich.pretty import pprint
 
 from utils import basename
 
-from ml.specdiff.model import SpectrogramDiffusion, config as specdiff_config
+from ml.specdiff.model import SpectrogramDiffusion
 
 # --- configuration ---
 FAISS_INDEX_PATH = "/media/scratch/sageev-midi/20250410/specdiff.faiss"
@@ -75,7 +75,7 @@ def main():
     pprint([os.path.basename(f) for f in selected_files])
 
     print("\nInitializing Spectrogram Diffusion model...")
-    specdiff = SpectrogramDiffusion(specdiff_config, verbose=True)
+    specdiff = SpectrogramDiffusion(verbose=True)
 
     temp_dir = None
     try:

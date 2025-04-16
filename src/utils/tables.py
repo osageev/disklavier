@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from typing import List
 from . import basename, console
 
-from ml.specdiff.model import SpectrogramDiffusion, config as specdiff_config
+from ml.specdiff.model import SpectrogramDiffusion, default_config
 from ml.classifier.model import Classifier
 from ml.clamp.model import Clamp
 from ml.clamp.clamp_utils import M3_HIDDEN_SIZE
@@ -175,21 +175,21 @@ def specdiff(
     num_files = len(all_files)
     all_files.sort()
     # initialize encoder
-    specdiff_config["device"] = device_name
-    model = SpectrogramDiffusion(specdiff_config, fix_time)
+    default_config["device"] = device_name
+    model = SpectrogramDiffusion(default_config, fix_time)
 
     # initialize faiss index
     faiss_path = os.path.join(os.path.dirname(output_path), "specdiff.faiss")
-    index = faiss.IndexFlatIP(specdiff_config["encoder_config"]["d_model"])
+    index = faiss.IndexFlatIP(default_config["encoder_config"]["d_model"])
     vecs = np.zeros(
-        (num_files, specdiff_config["encoder_config"]["d_model"]), dtype=np.float32
+        (num_files, default_config["encoder_config"]["d_model"]), dtype=np.float32
     )
 
     with h5py.File(output_path, "w") as out_file:
         # create output datasets
         d_embeddings = out_file.create_dataset(
             "embeddings",
-            (num_files, specdiff_config["encoder_config"]["d_model"]),
+            (num_files, default_config["encoder_config"]["d_model"]),
             fillvalue=0,
         )
         d_filenames = out_file.create_dataset(
@@ -217,7 +217,7 @@ def specdiff(
 
                 d_embeddings[i : i + batch_size] = embeddings
                 vecs[i : i + batch_size] = [
-                    e / np.linalg.norm(e, keepdims=True) for e in embeddings
+                    e / float(np.linalg.norm(e, keepdims=True)) for e in embeddings
                 ]
                 d_filenames[i : i + batch_size] = [
                     basename(f) for f in all_files[i : i + batch_size]
@@ -346,7 +346,7 @@ def clamp(all_files: List[str], output_path: str, device_name: str = "cuda:0") -
                 # console.log(f"embedding {i} of {num_files} has shape {embedding.shape}")
                 # console.log(embedding)
                 d_embeddings[i] = embedding
-                vecs[i] = embedding / np.linalg.norm(embedding, keepdims=True)
+                vecs[i] = embedding / float(np.linalg.norm(embedding, keepdims=True))
                 d_filenames[i] = basename(all_files[i])
                 progress.advance(emb_task)
 

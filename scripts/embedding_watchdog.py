@@ -12,7 +12,7 @@ from ml import model_list
 # from ml.clap.model import Clap
 from ml.clamp.model import Clamp
 from ml.classifier.model import Classifier
-from ml.specdiff.model import SpectrogramDiffusion, config
+from ml.specdiff.model import SpectrogramDiffusion
 
 from utils import basename, console
 
@@ -36,10 +36,12 @@ class UploadHandler(FileSystemEventHandler):
         self.models["clamp"] = self.clamp
         self.update_memory_usage()
         console.log(f"{self.tag} loading specdiff model")
-        self.models["specdiff"] = SpectrogramDiffusion(config, verbose=True)
+        self.models["specdiff"] = SpectrogramDiffusion(verbose=True)
         self.update_memory_usage()
         console.log(f"{self.tag} loading 4 note classifier model")
-        self.models["clf-4note"] = Classifier(input_dim=768, hidden_dims=[128], output_dim=120)
+        self.models["clf-4note"] = Classifier(
+            input_dim=768, hidden_dims=[128], output_dim=120
+        )
         self.models["clf-4note"].load_state_dict(
             torch.load(
                 os.path.join(os.getcwd(), "data", "models", "clf-4note.pth"),
@@ -50,7 +52,9 @@ class UploadHandler(FileSystemEventHandler):
         self.models["clf-4note"].eval()
         self.update_memory_usage()
         console.log(f"{self.tag} loading speed classifier model")
-        self.models["clf-speed"] = Classifier(input_dim=768, hidden_dims=[128], output_dim=120)
+        self.models["clf-speed"] = Classifier(
+            input_dim=768, hidden_dims=[128], output_dim=120
+        )
         self.models["clf-speed"].load_state_dict(
             torch.load(
                 os.path.join(os.getcwd(), "data", "models", "clf-speed.pth"),
@@ -91,7 +95,9 @@ class UploadHandler(FileSystemEventHandler):
         """
         return os.path.exists(file_path) and os.path.getsize(file_path) > 0
 
-    def wait_for_file(self, file_path: str, max_wait: float = 5.0, check_interval: float = 0.01) -> bool:
+    def wait_for_file(
+        self, file_path: str, max_wait: float = 5.0, check_interval: float = 0.01
+    ) -> bool:
         """
         wait for a file to be completely written.
 
@@ -172,16 +178,17 @@ class UploadHandler(FileSystemEventHandler):
             except Exception as e:
                 console.log(f"{self.tag}[red] error generating embedding: {str(e)}")
                 import mido
+
                 mido.MidiFile(uploaded_file).print_tracks()
         except Exception as e:
             console.log(f"{self.tag}[red] unexpected error processing file: {str(e)}")
-
 
     def update_memory_usage(self):
         memory_allocated = torch.cuda.memory_allocated(self.device) / 1024**2
         memory_reserved = torch.cuda.memory_reserved(self.device) / 1024**2
         console.log(f"{self.tag} model memory allocated: {memory_allocated:.2f} MB")
         console.log(f"{self.tag} model memory reserved: {memory_reserved:.2f} MB")
+
 
 def monitor_folder(args):
     event_handler = UploadHandler(args.device)
