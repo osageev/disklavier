@@ -23,7 +23,7 @@ metronome:
 recorder:
   verbose: True
   midi_port: "UM-2G Port 1"
-  record: -1 # TODO: figure this out
+  record: 64
 audio:
   verbose: True
   midi_port: "UM-2G Port 1"

@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 from utils import console
 import utils.tables as table_utils
 
-SUPPORTED_REPS = ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-tpose"]
+SUPPORTED_REPS = ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-tpose", "clamp"]
 
 
 def main(config) -> None:
@@ -106,7 +106,7 @@ def main(config) -> None:
                 continue
 
             resp = table_utils.graph(
-                os.path.join(config.out_dir, "specdiff.h5"),
+                os.path.join(config.out_dir, f"{rep}.h5"),
                 os.path.join(config.out_dir, "augmented"),
                 graph_dir,
                 config.n_graph_connections,
