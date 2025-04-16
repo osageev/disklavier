@@ -58,7 +58,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Window dimensions
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(800, 600)
-        self.resize(int(geometry.width() * 0.5), int(geometry.height() * 0.5))
+        self.resize(int(geometry.width() * 0.7), int(geometry.height() * 0.7))
         # self.setFixedSize(int(geometry.width() * 0.8), int(geometry.height() * 0.8))
 
     def _build_timer(self):
@@ -166,9 +166,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pf_playlist = os.path.join(
             self.p_log, f"playlist_{self.td_system_start.strftime('%y%m%d-%H%M%S')}.csv"
         )
-        write_log(
-            self.pf_playlist, "position", "start time", "file path", "similarity"
-        )
+        write_log(self.pf_playlist, "position", "start time", "file path", "similarity")
         console.log(f"{self.tag} filesystem set up complete")
 
     def init_workers(self):

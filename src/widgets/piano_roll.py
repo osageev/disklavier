@@ -5,6 +5,7 @@ from queue import Queue
 from dataclasses import dataclass
 
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QWidget
+from PySide6 import QtWidgets
 from PySide6.QtCore import QThread, Signal, QTimer, QObject
 from PySide6.QtGui import QPainter, QColor, QPen, QFont
 
@@ -97,7 +98,7 @@ class PianoRollView(QGraphicsView):
     timestep_ms = 10  # ms
     roll_len_ms = 10000  # visible roll duration in ms # TODO: make this 10 seconds a global parameter
     max_note_dur_ms = 5000  # auto trim notes longer than this
-    MIN_NOTE_HEIGHT = 6
+    MIN_NOTE_HEIGHT = 4
     MAX_NOTE_HEIGHT = 20
     MIN_KEY_WIDTH = 30
     MAX_KEY_WIDTH = 80
@@ -164,22 +165,22 @@ class PianoRollView(QGraphicsView):
             resize event.
         """
         super().resizeEvent(event)
-        self.window_height = self.height()
         self.window_width = self.width()
+        self.window_height = self.height()
         self.calculate_dimensions()
-        self._scene.setSceneRect(0, 0, self.window_height, self.window_width)
+        self._scene.setSceneRect(0, 0, self.window_width, self.window_height)
 
     def calculate_dimensions(self):
         """
         calculate ui dimensions based on window size.
         """
         self.note_height = min(
-            max(self.window_width / self.NOTE_RANGE, self.MIN_NOTE_HEIGHT),
+            max(self.window_height / self.NOTE_RANGE, self.MIN_NOTE_HEIGHT),
             self.MAX_NOTE_HEIGHT,
         )
 
         self.key_width = min(
-            max(self.window_height * 0.15, self.MIN_KEY_WIDTH), self.MAX_KEY_WIDTH
+            max(self.window_width * 0.15, self.MIN_KEY_WIDTH), self.MAX_KEY_WIDTH
         )
 
         self.white_key_width = self.key_width
@@ -193,7 +194,7 @@ class PianoRollView(QGraphicsView):
         note = max(min(note, self.MAX_NOTE), self.MIN_NOTE)
         # position calculated from bottom of screen
         return (
-            self.window_width
+            self.window_height
             - (note - self.MIN_NOTE) * self.note_height
             - self.note_height
         )
@@ -214,9 +215,10 @@ class PianoRollView(QGraphicsView):
         """
         # adjust time based on tempo scale and recording offset
         adjusted_time_ms = (time_ms - self.current_time) * self.tempo_scale
+        # use window_width for horizontal scaling
         return self.key_width + (
             (adjusted_time_ms + self.roll_len_ms) / self.roll_len_ms
-        ) * (self.window_height - self.key_width)
+        ) * (self.window_width - self.key_width)
 
     def is_note_at_keyboard(self, note: Note) -> bool:
         start_x = self.time_to_x(note.start_time)
@@ -317,14 +319,14 @@ class PianoRollView(QGraphicsView):
         painter.setPen(QPen(self.KEY_COLORS["transition"], 2))
         for transition_time in self.transition_times:
             x = self.time_to_x(transition_time)
-            if (
-                self.key_width <= x <= self.window_height
-            ):  # only draw if in visible area
-                painter.drawLine(x, 0, x, self.window_width)
+            # check against window_width for horizontal visibility
+            if self.key_width <= x <= self.window_width:  # only draw if in visible area
+                # draw line across the full window_height (vertical)
+                painter.drawLine(x, 0, x, self.window_height)
 
     def draw_keyboard(self, painter):
-        # keyboard background
-        painter.fillRect(0, 0, self.key_width, self.window_width, QColor(25, 25, 25))
+        # keyboard background using full window_height
+        painter.fillRect(0, 0, self.key_width, self.window_height, QColor(25, 25, 25))
 
         # white keys
         for i in range(self.MIN_NOTE, self.MAX_NOTE + 1):
@@ -357,12 +359,12 @@ class PianoRollView(QGraphicsView):
                 painter.fillRect(0, y, self.black_key_width, self.note_height, color)
 
     def draw_grid(self, painter):
-        # draw main background
+        # draw main background for the rolling part using window dimensions
         painter.fillRect(
             self.key_width,
             0,
-            self.window_height - self.key_width,
-            self.window_width,
+            self.window_width - self.key_width,  # use window_width
+            self.window_height,  # use window_height
             self.KEY_COLORS["background"],
         )
 
@@ -372,7 +374,8 @@ class PianoRollView(QGraphicsView):
             note_number = 12 * octave + 12  # C notes
             if self.MIN_NOTE <= note_number <= self.MAX_NOTE:
                 y = self.get_note_y(note_number)
-                painter.drawLine(self.key_width, y, self.window_height, y)
+                # draw line across full horizontal width (window_width)
+                painter.drawLine(self.key_width, y, self.window_width, y)
 
         # draw additional grid lines for F notes
         painter.setPen(QPen(QColor(102, 102, 102, 76), 0.5))
@@ -380,7 +383,8 @@ class PianoRollView(QGraphicsView):
             note_number = 12 * octave + 5  # F notes
             if self.MIN_NOTE <= note_number <= self.MAX_NOTE:
                 y = self.get_note_y(note_number)
-                painter.drawLine(self.key_width, y, self.window_height, y)
+                # draw line across full horizontal width (window_width)
+                painter.drawLine(self.key_width, y, self.window_width, y)
 
         # draw vertical time markers every second
         for t in range(0, self.roll_len_ms + 1, 1000):
@@ -388,11 +392,11 @@ class PianoRollView(QGraphicsView):
             adjusted_t = t / self.tempo_scale
             x = self.time_to_x(self.current_time + adjusted_t)
 
-            # only draw if in visible area
-            if self.key_width <= x <= self.window_height:
-                # draw time marker line
+            # only draw if in visible horizontal area (window_width)
+            if self.key_width <= x <= self.window_width:
+                # draw time marker line across full vertical height (window_height)
                 painter.setPen(QPen(QColor(102, 102, 102, 128), 1))
-                painter.drawLine(x, 0, x, self.window_width)
+                painter.drawLine(x, 0, x, self.window_height)
 
                 # draw time labels
                 if t % 2000 == 0:
@@ -400,7 +404,8 @@ class PianoRollView(QGraphicsView):
                     font = QFont("Arial", 10)
                     painter.setFont(font)
 
-                    if x < self.window_height - 15:
+                    # adjust text position check based on window_width
+                    if x < self.window_width - 15:
                         text_x = x - 5
                     else:
                         text_x = x - 15
@@ -416,7 +421,8 @@ class PianoRollView(QGraphicsView):
         # current time marker
         current_x = self.time_to_x(self.current_time)
         painter.setPen(QPen(QColor(255, 77, 77, 204), 2))
-        painter.drawLine(current_x, 0, current_x, self.window_width)
+        # draw line across full vertical height (window_height)
+        painter.drawLine(current_x, 0, current_x, self.window_height)
 
     def draw_notes(self, painter):
         visible_start_time = self.current_time - self.roll_len_ms
@@ -432,12 +438,12 @@ class PianoRollView(QGraphicsView):
                 note.end_time if note.end_time else self.current_time
             )
 
-            # skip notes that are completely after the visible time window
-            if start_x > self.window_height:
+            # skip notes that are completely after the visible time window (horizontal)
+            if start_x > self.window_width:
                 continue
 
-            # adjust end_x if it's off-screen
-            end_x = min(end_x, self.window_height)
+            # adjust end_x if it's off-screen (horizontal)
+            end_x = min(end_x, self.window_width)
 
             # calculate note box dimensions
             y = self.get_note_y(note.pitch)
@@ -491,9 +497,12 @@ class PianoRollWidget(QWidget):
 
         # setup layout
         self.setMinimumSize(800, 600)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)  # remove margins
 
         # create piano roll view
         self.pr_view = PianoRollView(self)
+        layout.addWidget(self.pr_view)  # add view to layout
 
         # connect transition signal if parent has it
         if parent is not None and hasattr(parent, "s_transition_times"):
@@ -517,10 +526,12 @@ class PianoRollWidget(QWidget):
         console.log(f"{self.tag} updated start time to {start_time}")
 
     def resizeEvent(self, event):
-        # Adjust geometry to account for potentially hidden areas like status bar
-        parent_height = self.height()
-        parent_width = self.width()
-        self.pr_view.setGeometry(0, 0, parent_width, parent_height)
+        # adjust geometry to account for potentially hidden areas like status bar
+        # parent_height = self.height()
+        # parent_width = self.width()
+        # self.pr_view.setGeometry(0, 0, parent_width, parent_height)
+        # layout manager handles resizing
+        super().resizeEvent(event)
 
     def closeEvent(self, event):
         self.pr_builder.stop()

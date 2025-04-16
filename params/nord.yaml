@@ -1,8 +1,8 @@
 n_transitions: 32
-initialization: "random" # kickstart random recording
+initialization: "recording" # kickstart random recording
 kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid"
 seed_rearrange: True
-seed_remove: 0.25
+seed_remove: 1
 scheduler:
   verbose: True
 seeker:

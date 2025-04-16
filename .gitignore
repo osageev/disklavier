@@ -20,6 +20,7 @@ notebooks/data
 *.h5
 *.pt
 
+.plans
 .cursorignore
 .DS_STORE
 
