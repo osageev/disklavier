@@ -28,12 +28,14 @@ class RunWorker(QtCore.QThread):
     ts_queue = 0
     n_files_queued = 0
     pf_augmentations = None
+    playing_file = None
 
     # signals
     s_status = QtCore.Signal(str)
     s_start_time = QtCore.Signal(datetime)
     s_switch_to_pr = QtCore.Signal(object)
     s_transition_times = QtCore.Signal(list)
+    s_segments_remaining = QtCore.Signal(int)
 
     # queues
     q_playback = PriorityQueue()
@@ -204,7 +206,6 @@ class RunWorker(QtCore.QThread):
 
             # --- Main Run Loop ---
             console.log(f"{self.tag} Starting main run loop...")
-            current_file = ""
             last_time = time.time()
             self.stop_requested = False  # Reset stop flag
 
@@ -213,6 +214,11 @@ class RunWorker(QtCore.QThread):
                 elapsed = current_time - last_time
                 last_time = current_time
 
+                self._emit_current_file()
+
+                if self.ts_queue < self.params.startup_delay * 2:
+                    pf_next_file, similarity = self.staff.seeker.get_next()
+                    self._queue_file(pf_next_file, similarity)
                 # Check if player thread is still alive
                 if not self.thread_player.is_alive():
                     console.log(
@@ -768,9 +774,13 @@ class RunWorker(QtCore.QThread):
             ids = list(range(len(split_beats)))
             rearrangements: list[list[int]] = [
                 ids,  # original
+                # ids[: len(ids) // 2],  # first half
                 # ids[: len(ids) // 2] * 2,  # first half twice
+                # ids[len(ids) // 2 + 1 :],  # second half
                 # ids[len(ids) // 2 + 1 :] * 2,  # second half twice
+                ids[0:4],  # first four
                 ids[0:4] * 2,  # first four twice
+                ids[-4:],  # last four
                 ids[-4:] * 2,  # last four twice
                 [ids[-2], ids[-1]] * 4,  # last two beats
                 [ids[-1]] * 8,  # last beat
@@ -781,7 +791,9 @@ class RunWorker(QtCore.QThread):
                     split_beats, arrangement, self.params.bpm
                 )
 
-                console.log(f"{self.tag}\t\tjoined midi:\t{joined_midi.get_end_time()}")
+                console.log(
+                    f"{self.tag}\t\tjoined midi:\t{joined_midi.get_end_time()} s"
+                )
 
                 pf_joined_midi = os.path.join(
                     pf_augmentations, f"{basename(pf_midi)}_a{i:02d}.mid"
@@ -814,6 +826,11 @@ class RunWorker(QtCore.QThread):
                 console.log(f"{self.tag}\tps: {ps}")
                 for m in ps:
                     embedding = self.staff.seeker.get_embedding(m)
+                    if embedding.sum() == 0:
+                        console.log(
+                            f"{self.tag}\t\t{basename(m)} has no notes, skipping"
+                        )
+                        continue
                     match, similarity = self.staff.seeker.get_match(embedding)
                     if similarity > best_similarity:
                         best_aug = m
@@ -855,3 +872,12 @@ class RunWorker(QtCore.QThread):
             ]
 
         return midi_paths
+
+    def _emit_current_file(self):
+        current_status = self.staff.scheduler.get_current_file()
+        if current_status is not None and self.playing_file != current_status[0]:
+            self.playing_file = current_status[0]
+            console.log(f"{self.tag} now playing '{self.playing_file}'")
+            self.s_status.emit(f"now playing '{self.playing_file}'")
+            num_files_remaining = self.params.n_transitions - current_status[1]
+            self.s_segments_remaining.emit(num_files_remaining)
