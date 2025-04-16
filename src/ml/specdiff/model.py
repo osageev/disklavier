@@ -72,6 +72,10 @@ class SpectrogramDiffusion:
                 console.log(f"{self.tag} guessing that {basename(path)} has bpm {bpm}")
 
             midi_len = pretty_midi.PrettyMIDI(path, initial_tempo=bpm).get_end_time()
+            if midi_len == 0:
+                console.log(f"{self.tag} [yellow] midi duration is 0, skipping[/yellow]")
+                return torch.zeros(1, 768)
+            
             if midi_len < 4.9 or midi_len > 5.11:
                 new_bpm = bpm * (midi_len / 5.119)
                 if self.verbose:
