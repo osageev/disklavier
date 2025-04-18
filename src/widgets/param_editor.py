@@ -23,7 +23,7 @@ class ParameterEditorWidget(QtWidgets.QWidget):
         super().__init__(parent)
 
         self.param_options = {
-            "initialization": ["kickstart", "random", "recording"],
+            "initialization": ["kickstart", "random", "recording", "audio"],
             "seeker.mode": [
                 "best",
                 "random",
@@ -33,10 +33,10 @@ class ParameterEditorWidget(QtWidgets.QWidget):
             "seeker.metric": [
                 "pitch-histogram",
                 "specdiff",
-                "clf-4note",
-                "clf-speed",
-                "clf-tpose",
                 "clamp",
+                # "clf-4note",
+                # "clf-speed",
+                # "clf-tpose",
             ],
             "seeker.match": [
                 "current",

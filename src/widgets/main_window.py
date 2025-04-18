@@ -58,7 +58,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Window dimensions
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(800, 600)
-        self.resize(int(geometry.width() * 0.5), int(geometry.height() * 0.5))
+        self.resize(int(geometry.width() * 0.7), int(geometry.height() * 0.7))
         # self.setFixedSize(int(geometry.width() * 0.8), int(geometry.height() * 0.8))
 
     def _build_timer(self):
@@ -70,6 +70,13 @@ class MainWindow(QtWidgets.QMainWindow):
         font.setPointSize(font.pointSize() + 1)
         self.velocity_label.setFont(font)
         self.toolbar.addWidget(self.velocity_label)
+
+        # Create segments label (after velocity)
+        self.segments_label = QtWidgets.QLabel("Segments Left: N/A")
+        self.segments_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.segments_label.setMinimumWidth(150)
+        self.segments_label.setFont(font)  # use same font as velocity
+        self.toolbar.addWidget(self.segments_label)
 
         # Create status label (middle)
         self.status_label = QtWidgets.QLabel("Initializing...")
@@ -166,9 +173,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pf_playlist = os.path.join(
             self.p_log, f"playlist_{self.td_system_start.strftime('%y%m%d-%H%M%S')}.csv"
         )
-        write_log(
-            self.pf_playlist, "position", "start time", "file path", "similarity"
-        )
+        write_log(self.pf_playlist, "position", "start time", "file path", "similarity")
         console.log(f"{self.tag} filesystem set up complete")
 
     def init_workers(self):
@@ -260,6 +265,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.run_thread = RunWorker(self)
         self.run_thread.s_start_time.connect(self.update_start_time)
         self.run_thread.s_status.connect(self.update_status)
+        self.run_thread.s_segments_remaining.connect(self.update_segments_display)
         self.run_thread.start()
 
         # Enable stop button now that system is running
@@ -277,6 +283,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "piano_roll"):
             self.piano_roll.td_start = start_time
 
+    def update_segments_display(self, remaining_count: int):
+        """
+        update the segments remaining display in the toolbar.
+
+        parameters
+        ----------
+        remaining_count : int
+            number of segments left to play.
+        """
+        self.segments_label.setText(f"Segments Left: {remaining_count}")
+
     def update_status(self, message: str):
         """
         update both status bar and toolbar status label with the message.
@@ -288,6 +305,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         self.status.showMessage(message)
         self._update_status_style(message)
+        # self.segments_label.setText("Segments Left: N/A")
 
     def _update_status_style(self, message: str):
         # default style
@@ -331,6 +349,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Update button states
         self.stop_btn.setEnabled(False)
         self.start_btn.setEnabled(True)
+        self.segments_label.setText("Segments Left: N/A")
 
     def stop_clicked(self):
         self.cleanup_workers()

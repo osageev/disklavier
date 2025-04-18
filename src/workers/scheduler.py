@@ -292,7 +292,7 @@ class Scheduler(Worker):
             verbose=self.verbose,
         )
 
-    def get_current_file(self) -> Optional[str]:
+    def get_current_file(self) -> Optional[tuple[str, int]]:
         if not self.queued_files:
             return None
 
@@ -314,6 +314,6 @@ class Scheduler(Worker):
 
         # make sure we have enough files
         if current_segment < len(self.queued_files):
-            return self.queued_files[current_segment]
+            return self.queued_files[current_segment], current_segment
 
         return None
