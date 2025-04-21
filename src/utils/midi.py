@@ -1,4 +1,5 @@
 import os
+import sys
 import mido
 import numpy as np
 import pretty_midi
@@ -11,11 +12,11 @@ from typing import Dict, Tuple
 
 from . import basename, console
 
-# Fix import path to use proper module reference
-import sys
+project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from params.constants import TICKS_PER_BEAT
+from src.utils.constants import TICKS_PER_BEAT
 
 
 def get_bpm(file_path: str) -> int:
@@ -626,7 +627,9 @@ def rearrange_midi(
     return generated_paths
 
 
-def beat_split(midi_path: str, bpm: int | None = None) -> dict:
+def beat_split(
+    midi_path: str, bpm: int | None = None, remove_empty: bool = False
+) -> dict:
     """
     Split a MIDI file into beats.
 
@@ -682,16 +685,19 @@ def beat_split(midi_path: str, bpm: int | None = None) -> dict:
                     beats[i]["notes"].append(note)
                     break
 
-    # Create a list of beat indices to remove
-    beats_to_remove = []
-    for i, beat in beats.items():
-        if len(beat["notes"]) == 0:
-            beats_to_remove.append(i)
-            console.log(f"\t\t[yellow italic]beat {i} has no notes, removing[/yellow italic]")
+    if remove_empty:
+        # Create a list of beat indices to remove
+        beats_to_remove = []
+        for i, beat in beats.items():
+            if len(beat["notes"]) == 0:
+                beats_to_remove.append(i)
+                console.log(
+                    f"\t\t[yellow italic]beat {i} has no notes, removing[/yellow italic]"
+                )
 
-    # Remove the empty beats after iteration is complete
-    for i in beats_to_remove:
-        del beats[i]
+        # Remove the empty beats after iteration is complete
+        for i in beats_to_remove:
+            del beats[i]
 
     return beats
 

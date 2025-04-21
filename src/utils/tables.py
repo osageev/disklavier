@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from typing import List
 from . import basename, console
 
-from ml.specdiff.model import SpectrogramDiffusion, default_config
+from ml.specdiff.model import SpectrogramDiffusion, DEFAULT_CONFIG
 from ml.classifier.model import Classifier
 from ml.clamp.model import Clamp
 from ml.clamp.clamp_utils import M3_HIDDEN_SIZE
@@ -175,21 +175,21 @@ def specdiff(
     num_files = len(all_files)
     all_files.sort()
     # initialize encoder
-    default_config["device"] = device_name
-    model = SpectrogramDiffusion(default_config, fix_time)
+    DEFAULT_CONFIG["device"] = device_name
+    model = SpectrogramDiffusion(DEFAULT_CONFIG, fix_time)
 
     # initialize faiss index
     faiss_path = os.path.join(os.path.dirname(output_path), "specdiff.faiss")
-    index = faiss.IndexFlatIP(default_config["encoder_config"]["d_model"])
+    index = faiss.IndexFlatIP(DEFAULT_CONFIG["encoder_config"]["d_model"])
     vecs = np.zeros(
-        (num_files, default_config["encoder_config"]["d_model"]), dtype=np.float32
+        (num_files, DEFAULT_CONFIG["encoder_config"]["d_model"]), dtype=np.float32
     )
 
     with h5py.File(output_path, "w") as out_file:
         # create output datasets
         d_embeddings = out_file.create_dataset(
             "embeddings",
-            (num_files, default_config["encoder_config"]["d_model"]),
+            (num_files, DEFAULT_CONFIG["encoder_config"]["d_model"]),
             fillvalue=0,
         )
         d_filenames = out_file.create_dataset(

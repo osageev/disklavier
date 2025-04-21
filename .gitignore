@@ -9,6 +9,7 @@ notebooks/tmp
 inputs/*
 src/ml/outputs/checkpoints
 src/ml/outputs/runs
+tests/outputs
 notebooks/data
 *.tar.gz
 *.feather

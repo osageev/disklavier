@@ -13,7 +13,7 @@ from .worker import Worker
 from utils import basename, console, panther
 from utils.modes import find_path
 
-from params.constants import SUPPORTED_EXTENSIONS, EMBEDDING_SIZES
+from utils.constants import SUPPORTED_EXTENSIONS, EMBEDDING_SIZES
 
 
 class Seeker(Worker):

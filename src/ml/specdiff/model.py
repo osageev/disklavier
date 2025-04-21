@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 import pretty_midi
 from diffusers.pipelines.deprecated.spectrogram_diffusion.midi_utils import (
@@ -8,8 +9,12 @@ from diffusers.pipelines.deprecated.spectrogram_diffusion.notes_encoder import (
     SpectrogramNotesEncoder,
 )
 
-from utils import console, basename
-from utils.midi import change_tempo_and_trim, get_bpm
+project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from src.utils import console, basename
+from src.utils.midi import change_tempo_and_trim, get_bpm
 
 from typing import Optional
 
@@ -28,7 +33,7 @@ DEFAULT_CONFIG = {
         "num_layers": 12,
         "vocab_size": 1536,
     },
-    "encoder_weights_path": "src/ml/specdiff/note_encoder.bin",
+    "encoder_weights_path": "/home/finlay/disklavier/src/ml/specdiff/note_encoder.bin",
 }
 
 TS_MIN = 4.900
@@ -86,8 +91,8 @@ class SpectrogramDiffusion:
                 console.log(f"{self.tag} [yellow] midi duration is 0, skipping[/yellow]")
                 return torch.zeros(1, 768)
             
-            if midi_len < 4.9 or midi_len > 5.11:
-                new_bpm = bpm * (midi_len / 5.119)
+            if midi_len < TS_MIN or midi_len > TS_MAX:
+                new_bpm = bpm * (midi_len / TS_MAX)
                 if self.verbose:
                     console.log(
                         f"{self.tag} midi duration {midi_len:.03f} is out of bounds ({TS_MIN} to {TS_MAX}), changing tempo from {bpm} to {new_bpm:.03f}"
@@ -104,9 +109,10 @@ class SpectrogramDiffusion:
                 f"{self.tag} generated ({len(tokens)}, {len(tokens[0])}) tokens"
             )
         if len(tokens) > 1:
-            console.log(
-                f"{self.tag}[yellow italic] too many pooled tokens, using first one[/yellow italic]"
-            )
+            if self.verbose:
+                console.log(
+                    f"{self.tag}[yellow italic] too many pooled tokens, using first one[/yellow italic]"
+                )
             tokens = [tokens[0]]
 
         all_tokens = [torch.IntTensor(token) for token in tokens]
