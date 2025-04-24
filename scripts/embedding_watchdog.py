@@ -9,7 +9,7 @@ from watchdog.events import FileSystemEventHandler
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "src")))
 from ml import model_list
 
-# from ml.clap.model import Clap
+from ml.clap.model import Clap
 from ml.clamp.model import Clamp
 from ml.classifier.model import Classifier
 from ml.specdiff.model import SpectrogramDiffusion
@@ -28,9 +28,8 @@ class UploadHandler(FileSystemEventHandler):
     def __init__(self, device: str):
         self.device = device
         self.update_memory_usage()
-        # TODO: there has to be a better way to do this
-        # console.log(f"{self.tag} loading clap model")
-        # self.models["clap"] = Clap()
+        console.log(f"{self.tag} loading clap model")
+        self.models["clap"] = Clap()
         console.log(f"{self.tag} loading clamp model")
         self.clamp = Clamp(device)
         self.models["clamp"] = self.clamp
@@ -136,6 +135,7 @@ class UploadHandler(FileSystemEventHandler):
     def on_created(self, event):
         try:
             uploaded_file = str(event.src_path)
+            console.log(f"{self.tag} new file detected: '{uploaded_file}'")
             if not uploaded_file.endswith(SUPPORTED_EXTENSIONS):
                 return
 
@@ -162,6 +162,7 @@ class UploadHandler(FileSystemEventHandler):
                     console.log(
                         f"{self.tag}[red] error generating pre-embedding: {str(e)}"
                     )
+                    console.print_exception(show_locals=True, word_wrap=True)
                     return
 
             try:
@@ -177,11 +178,14 @@ class UploadHandler(FileSystemEventHandler):
                 )
             except Exception as e:
                 console.log(f"{self.tag}[red] error generating embedding: {str(e)}")
+
                 import mido
 
                 mido.MidiFile(uploaded_file).print_tracks()
+                console.print_exception(show_locals=True, word_wrap=True)
         except Exception as e:
             console.log(f"{self.tag}[red] unexpected error processing file: {str(e)}")
+            console.print_exception(show_locals=True, word_wrap=True)
 
     def update_memory_usage(self):
         memory_allocated = torch.cuda.memory_allocated(self.device) / 1024**2

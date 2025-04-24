@@ -1,7 +1,7 @@
 # paths
-data_dir: '/media/scratch/sageev-midi/20250320/unsegmented'  # path to read MIDI files from
-out_dir: '/media/scratch/sageev-midi/20250320'   # path to write MIDI files to
-dataset_name: 20250320
+data_dir: '/media/scratch/sageev-midi/20250420/unsegmented'  # path to read MIDI files from
+out_dir: '/media/scratch/sageev-midi/20250420'   # path to write MIDI files to
+dataset_name: 20250420
 
 limit: null # early stopping
 
@@ -10,22 +10,21 @@ segment: true
 num_beats: 8
 lead_window_beat_frac: 8
 metronome: 0 # metronome velocity (0 for none)
+tempo_fold_min: 50
+tempo_fold_max: 100
 beats: true
 novelty: false
 
 # augmentation
 augment: true
 tempo_fold: true
-tempo_fold_min: 50
-tempo_fold_max: 100
 num_transposes: 12 # 12 semitones
 
-
 # supporting tables, etc.
-representations: ["pitch-histogram", "specdiff", "clf-4note", "clf-speed", "clf-tpose", "clamp"]
+representations: ["pitch-histogram", "specdiff",  "clamp"]
 model_dir: "data/models"
 device_name: "cuda:1"
 graphs: ["specdiff"]
-n_graph_connections: 100
+n_graph_connections: 250
 find_neighbors: true
 fix_tempo: true
