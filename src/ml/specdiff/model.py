@@ -13,8 +13,8 @@ project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from src.utils import console, basename
-from src.utils.midi import change_tempo_and_trim, get_bpm
+from utils import console, basename
+from utils.midi import change_tempo_and_trim, get_bpm
 
 from typing import Optional
 
@@ -36,7 +36,7 @@ DEFAULT_CONFIG = {
     "encoder_weights_path": "/home/finlay/disklavier/src/ml/specdiff/note_encoder.bin",
 }
 
-TS_MIN = 4.900
+TS_MIN = 4.500
 TS_MAX = 5.119
 
 
@@ -52,6 +52,7 @@ class SpectrogramDiffusion:
     ) -> None:
         console.log(f"{self.tag} initializing spectrogram diffusion model")
 
+        # override config
         if new_config is None:
             config = DEFAULT_CONFIG
         else:

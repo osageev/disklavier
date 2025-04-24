@@ -669,7 +669,7 @@ class Seeker(Worker):
         if model == "pitch-histogram":
             if self.verbose:
                 console.log(f"{self.tag} using pitch histogram metric")
-            embedding = PrettyMIDI(self.params.pf_recording).get_pitch_class_histogram(
+            embedding = PrettyMIDI(pf_midi).get_pitch_class_histogram(
                 True, True
             )
             embedding = embedding.reshape(1, -1)
@@ -678,7 +678,7 @@ class Seeker(Worker):
             console.log(
                 f"{self.tag} getting [italic bold]{model}[/italic bold] embedding for '{pf_midi}'"
             )
-            embedding = panther.send_embedding(pf_midi, model, self.params.system)
+            embedding = panther.send_embedding(pf_midi, model, self.params.system, verbose=True)
             console.log(
                 f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
             )
