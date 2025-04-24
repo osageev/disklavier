@@ -7,13 +7,10 @@ import numpy as np
 from glob import glob
 import matplotlib.pyplot as plt
 
-
 project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-
-from src import utils
 from src.ml.specdiff.model import SpectrogramDiffusion
 from src.utils import basename, console, midi
 from src.utils.midi import upsample_piano_roll
