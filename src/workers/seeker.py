@@ -96,6 +96,15 @@ class Seeker(Worker):
             os.path.join(self.p_table, f"{self.params.metric}.faiss")
         )
         console.log(f"{self.tag} FAISS index loaded ({self.faiss_index.ntotal})")
+        # if self.faiss_index.ntotal > 0:
+        #     console.log(f"{self.tag} Checking norms of first few vectors in loaded index:")
+        #     for i in range(min(100, self.faiss_index.ntotal)):
+        #         try:
+        #             vector = self.faiss_index.reconstruct(i)
+        #             norm = np.linalg.norm(vector)
+        #             console.log(f"{self.tag}   Vector {i} norm: {norm:.4f}")
+        #         except Exception as e:
+        #             console.log(f"{self.tag} Error reconstructing/checking vector {i}: {e}")
 
         # load neighbor table
         # old version -- backwards compat
@@ -267,6 +276,7 @@ class Seeker(Worker):
 
             # Add the new embedding to the index and update filenames list and dictionary
             embedding = self.get_embedding(pf_new)
+            embedding /= np.linalg.norm(embedding, axis=1, keepdims=True)
             self.faiss_index.add(embedding)  # type: ignore
             self.filenames.append(query_file)
             self.filename_to_index[query_file] = len(self.filenames) - 1
@@ -453,7 +463,7 @@ class Seeker(Worker):
                 continue
 
             top_segments.append((segment_name, float(similarity)))
-            seen_tracks.add(segment_track)
+            # seen_tracks.add(segment_track)
 
             # only keep top whatever
             if len(top_segments) >= self.num_segs_diff_tracks:
@@ -529,10 +539,9 @@ class Seeker(Worker):
                     graph,
                     seed_key,
                     target_segment,
-                    list(seen_tracks),
+                    self.played_files,
                     max_nodes=self.params.graph_steps,
                     max_visits=1,
-                    max_updates=50,
                     allow_transpose=True,
                     allow_shift=not self.params.block_shift,
                     verbose=True,
@@ -705,6 +714,11 @@ class Seeker(Worker):
             similarities, indices = self.faiss_index.search(query_embedding, num_matches)  # type: ignore
         else:
             similarities, indices = index.search(query_embedding, num_matches)  # type: ignore
+
+        if np.array(similarities).any() > 1.0:
+            console.log(f"{self.tag} [red]WARNING: similarity > 1.0[/red]")
+            console.print_exception(show_locals=True)
+            raise ValueError("similarity > 1.0")
 
         if self.params.block_shift:
             indices, similarities = zip(

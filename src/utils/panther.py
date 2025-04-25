@@ -122,7 +122,7 @@ def send_embedding(
     if verbose:
         console.log(f"{tag} loaded embedding {embedding.shape}")
 
-    return embedding / np.linalg.norm(embedding, axis=1, keepdims=True)
+    return embedding
 
 
 def wait_for_file(

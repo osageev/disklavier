@@ -85,13 +85,11 @@ class Scheduler(Worker):
         )
 
         # add messages to queue first so that the player has access ASAP
-        console.log(f"iterating over {len(midi_in.tracks)} tracks")
         for track in midi_in.tracks:
             if track[0].type == "track_name":
                 if track[0].name == "metronome":
                     console.log(f"{self.tag} skipping metronome track")
                     continue
-            console.log(f"iterating over {len(track)} messages")
             for msg in track:
                 if msg.type == "note_on" or msg.type == "note_off":
                     tt_abs += msg.time
