@@ -61,7 +61,7 @@ class Scheduler(Worker):
         q_piano: PriorityQueue,
         q_gui: Optional[PriorityQueue] = None,
         similarity: Optional[float] = None,
-    ) -> Tuple[float, float]:
+    ) -> Tuple[float, float, int]:
         midi_in = mido.MidiFile(pf_midi)
         # number of seconds/ticks from the start of playback to start playing the file
         if (
@@ -74,6 +74,9 @@ class Scheduler(Worker):
             ts_offset, tt_offset = self._get_next_transition()
         tt_abs: int = tt_offset  # track the absolute time since system start
         tt_sum: int = 0  # track the sum of all notes in the segment
+        tt_max_abs_in_segment: int = (
+            tt_offset  # track the maximum absolute tick time in this segment
+        )
 
         if midi_in.ticks_per_beat != TICKS_PER_BEAT:
             console.log(
@@ -95,10 +98,11 @@ class Scheduler(Worker):
                     tt_abs += msg.time
                     tt_sum += msg.time
                     # occasionally need to shift the message to avoid priority conflicts
-                    if tt_abs in self.tt_all_messages:
+                    current_tt_abs = tt_abs  # store original intended time
+                    if current_tt_abs in self.tt_all_messages:
                         # find the nearest integer that doesn't exist in tt_all_messages
-                        tt_lower_bound = tt_abs - 1
-                        tt_upper_bound = tt_abs + 1
+                        tt_lower_bound = current_tt_abs - 1
+                        tt_upper_bound = current_tt_abs + 1
                         while (
                             tt_lower_bound in self.tt_all_messages
                             or tt_upper_bound in self.tt_all_messages
@@ -108,29 +112,32 @@ class Scheduler(Worker):
 
                         # select the nearest available integer
                         if tt_lower_bound not in self.tt_all_messages:
-                            tt_abs = tt_lower_bound
+                            current_tt_abs = tt_lower_bound
                         else:
-                            tt_abs = tt_upper_bound
-                    self.tt_all_messages.append(tt_abs)
+                            current_tt_abs = tt_upper_bound
+                    self.tt_all_messages.append(current_tt_abs)
+                    tt_max_abs_in_segment = max(
+                        tt_max_abs_in_segment, current_tt_abs
+                    )  # update max tick time
                     # if self.verbose:
                     #     console.log(
-                    #         f"{self.tag} adding message to queue: ({tt_abs}, ({msg}))"
+                    #         f"{self.tag} adding message to queue: ({current_tt_abs}, ({msg}))"
                     #     )
-                    q_piano.put((tt_abs, msg))
+                    q_piano.put((current_tt_abs, msg))
                     if q_gui is not None:
                         # TODO: make this 10 seconds a global parameter
                         tt_delay = mido.second2tick(10, TICKS_PER_BEAT, self.tempo)
                         q_gui.put(
                             (
-                                tt_abs - tt_delay,
+                                current_tt_abs - tt_delay,
                                 (similarity if similarity is not None else 1.0, msg),
                             )
                         )
                     # edge case, but it does happen sometimes that multiple recorded notes start at 0, resulting in one note getting bumped to time -1
-                    if tt_abs < 0:
-                        tt_abs = 0
+                    if current_tt_abs < 0:
+                        current_tt_abs = 0
                     self.raw_notes_file.write(
-                        f"{os.path.basename(pf_midi)},{msg.type},{msg.note},{msg.velocity},{tt_abs}\n"
+                        f"{os.path.basename(pf_midi)},{msg.type},{msg.note},{msg.velocity},{current_tt_abs}\n"
                     )
 
         if (
@@ -150,7 +157,7 @@ class Scheduler(Worker):
 
         _ = self._copy_midi(pf_midi)
 
-        return ts_seg_len, ts_offset
+        return ts_seg_len, ts_offset, tt_max_abs_in_segment
 
     def init_schedule(self, pf_midi: str, offset_s: float = 0):
         """Initialize a MIDI file to hold a playback recording."""

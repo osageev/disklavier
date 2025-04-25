@@ -1,5 +1,6 @@
 import os
 import time
+import mido
 from PySide6 import QtCore
 from threading import Thread
 from rich.table import Table
@@ -9,6 +10,7 @@ from datetime import datetime, timedelta
 import workers
 from workers import Staff
 from utils import basename, console, midi, write_log
+from utils.midi import TICKS_PER_BEAT
 
 from typing import Optional
 
@@ -21,7 +23,7 @@ class RunWorker(QtCore.QThread):
     tag = "[#008700]runner[/#008700]:"
 
     # session tracking
-    ts_queue = 0
+    tt_queue_end_tick = 0
     n_files_queued = 0
     pf_augmentations = None
     playing_file = None
@@ -177,23 +179,26 @@ class RunWorker(QtCore.QThread):
 
             # play for set number of transitions
             # TODO: move this to be managed by scheduler and track scheduler state instead
-            last_time = time.time()
+            tempo = mido.bpm2tempo(self.params.bpm)
             while self.n_files_queued < self.params.n_transitions:
-                current_time = time.time()
-                elapsed = current_time - last_time
-                last_time = current_time
-
                 self._emit_current_file()
 
-                if self.ts_queue < self.params.startup_delay * 2:
+                # check amount of time remaining in queue
+                remaining_seconds = 0
+                if not self.q_playback.empty():
+                    tt_next_note = self.q_playback.queue[0][0]
+                    remaining_ticks = max(0, self.tt_queue_end_tick - tt_next_note)
+                    remaining_seconds = mido.tick2second(
+                        remaining_ticks, TICKS_PER_BEAT, tempo
+                    )
+                else:
+                    pass
+
+                if remaining_seconds < self.params.startup_delay * 2:
                     pf_next_file, similarity = self.staff.seeker.get_next()
                     self._queue_file(pf_next_file, similarity)
-                    console.log(
-                        f"{self.tag} queue time is now {self.ts_queue:.01f} seconds"
-                    )
 
                 time.sleep(0.1)
-                self.ts_queue -= elapsed
                 if not self.thread_player.is_alive():
                     console.log(f"{self.tag} player ran out of notes, exiting")
                     self.thread_player.join(0.1)
@@ -277,11 +282,11 @@ class RunWorker(QtCore.QThread):
         console.log(f"{self.tag}[green bold] shutdown complete, exiting")
 
     def _queue_file(self, file_path: str, similarity: float | None) -> None:
-        ts_seg_len, ts_seg_start = self.staff.scheduler.enqueue_midi(
+        _, ts_seg_start, tt_end_tick = self.staff.scheduler.enqueue_midi(
             file_path, self.q_playback, self.q_gui, similarity
         )
 
-        self.ts_queue += ts_seg_len
+        self.tt_queue_end_tick = max(self.tt_queue_end_tick, tt_end_tick)
         self.staff.seeker.played_files.append(file_path)
         self.n_files_queued += 1
         self.s_transition_times.emit(self.staff.scheduler.ts_transitions)
@@ -294,6 +299,20 @@ class RunWorker(QtCore.QThread):
             file_path,
             similarity if similarity is not None else "----",
         )
+
+        remaining_seconds_log = 0
+        if not self.q_playback.empty():
+            tt_next_note_log = self.q_playback.queue[0][0]
+            tempo_log = mido.bpm2tempo(self.params.bpm)
+            remaining_ticks_log = max(0, self.tt_queue_end_tick - tt_next_note_log)
+            remaining_seconds_log = mido.tick2second(
+                remaining_ticks_log, TICKS_PER_BEAT, tempo_log
+            )
+
+        console.log(
+            f"{self.tag} queue time is now {remaining_seconds_log:.01f} seconds (end tick: {self.tt_queue_end_tick})"
+        )
+        console.log(f"{self.tag} queue size is now {self.q_playback.qsize()}")
 
     def augment_midi(
         self,
