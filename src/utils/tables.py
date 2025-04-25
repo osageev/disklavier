@@ -77,7 +77,11 @@ def build_neighbor_table(
             n_table.loc[basename(file)] = neighbors
             progress.advance(update_task)
 
-    n_table.to_hdf(output_path, key=hdf_key, mode="w")
+    try:
+        n_table.to_hdf(output_path, key=hdf_key, mode="w")
+    except Exception as e:
+        console.print_exception(show_locals=True)
+        return False
 
     return os.path.exists(output_path)
 
