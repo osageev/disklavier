@@ -13,6 +13,7 @@ def find_path(
     destination: str,
     played_files: List[str],
     max_nodes: int = 5,
+    min_nodes: int = 0,
     max_updates: int = 20,
     max_visits: int = 1,
     allow_transpose: bool = True,
@@ -39,6 +40,8 @@ def find_path(
         List of files/nodes that should be avoided in the path.
     max_nodes : int
         The maximum number of nodes allowed in the path. Defaults to 5.
+    min_nodes : int
+        The minimum number of nodes required in the path. Defaults to 1.
     max_updates : int
         The maximum number of times to update the best path. Defaults to 20.
     max_visits : int
@@ -56,6 +59,8 @@ def find_path(
         path with the smallest average edge cost, and total_cost is the sum of
         weights along that path; or None if no such path exists.
     """
+    if min_nodes == 0:
+        min_nodes = max_nodes - 1
     # handle case where max_visits is 0
     if max_visits < 1:
         # Use weight='weight' for Dijkstra's algorithm
@@ -69,6 +74,12 @@ def find_path(
             path_cost = nx.shortest_path_length(
                 g, source=source, target=destination, weight="weight"
             )
+            if len(path_nodes) < min_nodes:
+                if verbose:
+                    console.log(
+                        f"dijkstra path length {len(path_nodes)} less than min_nodes {min_nodes}"
+                    )
+                return None
             return [str(node) for node in path_nodes], path_cost
         except nx.NetworkXNoPath:
             if verbose:
@@ -78,7 +89,11 @@ def find_path(
             return None
 
     # convert played_files to set for faster lookups and strip file extensions
-    played_nodes = {basename(f) for f in played_files if f != source}
+    played_nodes = {
+        basename(f)
+        for f in played_files
+        if f != source and basename(f) != basename(destination)
+    }
     played_segs = {
         node.split("_")[0] + "_" + node.split("_")[1] for node in played_nodes
     }
@@ -123,9 +138,12 @@ def find_path(
         # if we've reached the destination, check if this path has a better average cost
         if current_node == destination:
             # calculate average cost (total weight / number of edges)
-            num_edges = len(current_path) - 1
-            if num_edges > 0:
-                avg_cost = total_weight / num_edges
+            # check if path meets minimum node requirement
+            if len(current_path) >= min_nodes:
+                num_edges = len(current_path) - 1
+                # If num_edges is 0, it means path is just [source] and source == destination
+                # In this case, avg_cost should be 0 if min_nodes <= 1, otherwise it's not a valid path yet
+                avg_cost = 0 if num_edges == 0 else total_weight / num_edges
                 if avg_cost < best_path_info["avg_cost"]:
                     if verbose:
                         console.log(
@@ -218,7 +236,7 @@ def find_path(
     if best_path_info["path"] is None:
         if verbose:
             console.log(
-                f"no path found from '{source}' to '{destination}' with at most {max_nodes} nodes "
+                f"no path found from '{source}' to '{destination}' with {min_nodes} <= nodes <= {max_nodes} "
                 f"and max {max_visits} visits per node"
             )
         return None
