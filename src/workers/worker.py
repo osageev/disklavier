@@ -4,6 +4,7 @@ from mido import bpm2tempo
 
 class Worker:
     def __init__(self, params, *, bpm: int):
+        self.reset()
         self.params = params
         self.tag = params.tag
         self.verbose = params.verbose
@@ -27,7 +28,6 @@ class Worker:
         this method in the subclass and calling super().reset().
         """
         # reset worker-specific state
-        self.tempo = bpm2tempo(self.bpm)  # recompute based on current bpm
 
         cls = type(self)
         # iterate over instance attributes that might need resetting
@@ -61,14 +61,3 @@ class Worker:
                     setattr(self, attr_name, default_value)
                 # add other simple types here if needed
                 # note: complex types are intentionally skipped
-
-        # use console logging if available and verbose
-        if self.verbose:
-            try:
-                from utils import console  # dynamically import if possible
-
-                console.log(f"{self.tag} generic worker state reset performed")
-            except ImportError:
-                print(
-                    f"{self.tag if hasattr(self, 'tag') else 'Worker'}: generic worker state reset performed"
-                )

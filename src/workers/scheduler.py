@@ -42,6 +42,9 @@ class Scheduler(Worker):
         self.td_start = start_time
         self.n_transitions = n_transitions
         self.recording_mode = recording_mode
+        self.tt_all_messages = []
+        self.ts_transitions = []
+        self.queued_files = []
 
         # initialize queue file
         self.raw_notes_filepath = os.path.join(self.pf_log, "queue_dump.csv")
@@ -82,11 +85,13 @@ class Scheduler(Worker):
         )
 
         # add messages to queue first so that the player has access ASAP
+        console.log(f"iterating over {len(midi_in.tracks)} tracks")
         for track in midi_in.tracks:
             if track[0].type == "track_name":
                 if track[0].name == "metronome":
                     console.log(f"{self.tag} skipping metronome track")
                     continue
+            console.log(f"iterating over {len(track)} messages")
             for msg in track:
                 if msg.type == "note_on" or msg.type == "note_off":
                     tt_abs += msg.time

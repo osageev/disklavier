@@ -62,6 +62,11 @@ class Seeker(Worker):
         self.p_dataset = dataset_path
         self.p_playlist = playlist_path
         self.rng = np.random.default_rng(self.params.seed)
+        self.playlist = {}
+        self.filenames = []
+        self.played_files = []
+        self.current_path = []
+        self.filename_to_index = {}
 
         if self.verbose:
             console.log(f"{self.tag} settings:\n{self.__dict__}")
@@ -281,7 +286,7 @@ class Seeker(Worker):
         if self.verbose:
             for i in range(3):
                 console.log(
-                    f"{self.tag} {i}: {self.filenames[indices[i]]} {similarities[i]:.05f}"
+                    f"{self.tag}\t{i}: {self.filenames[indices[i]]} {similarities[i]:.05f}"
                 )
 
         # find most similar valid match
@@ -435,10 +440,10 @@ class Seeker(Worker):
         for played_file in self.played_files:
             track = played_file.split("_")[0]
             seen_tracks.add(basename(track))
+        console.log(f"{self.tag} seen tracks: {seen_tracks}")
         seen_tracks = set(
             list(seen_tracks)[-self.params.graph_track_revisit_interval :]
         )
-        console.log(f"{self.tag} seen tracks: {seen_tracks}")
 
         for idx, similarity in zip(indices, similarities):
             segment_name = str(self.filenames[idx])
@@ -524,12 +529,13 @@ class Seeker(Worker):
                     graph,
                     seed_key,
                     target_segment,
-                    self.played_files,
+                    list(seen_tracks),
                     max_nodes=self.params.graph_steps,
                     max_visits=1,
                     max_updates=50,
                     allow_transpose=True,
                     allow_shift=not self.params.block_shift,
+                    verbose=True,
                 )
                 if res:
                     path, cost = res
@@ -669,16 +675,16 @@ class Seeker(Worker):
         if model == "pitch-histogram":
             if self.verbose:
                 console.log(f"{self.tag} using pitch histogram metric")
-            embedding = PrettyMIDI(pf_midi).get_pitch_class_histogram(
-                True, True
-            )
+            embedding = PrettyMIDI(pf_midi).get_pitch_class_histogram(True, True)
             embedding = embedding.reshape(1, -1)
             console.log(f"{self.tag} {embedding}")
         else:
             console.log(
                 f"{self.tag} getting [italic bold]{model}[/italic bold] embedding for '{pf_midi}'"
             )
-            embedding = panther.send_embedding(pf_midi, model, self.params.system, verbose=True)
+            embedding = panther.send_embedding(
+                pf_midi, model, self.params.system, verbose=True
+            )
             console.log(
                 f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
             )

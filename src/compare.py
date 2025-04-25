@@ -25,11 +25,10 @@ CONSTANTS = {
     "n_beats_per_segment": 8,
     "n_transitions": 16,
     "n_min_queue_length": 100,
-    "match": "current",
     "startup_delay": 10,
     "initialization": "kickstart",
     "kickstart_path": "data/datasets/test/test/intervals-060-09_1_t00s00.mid",
-    "graph_track_revisit_interval": 3,
+    "graph_track_revisit_interval": 5,
 }
 
 OPTIONS = {
@@ -83,7 +82,7 @@ def main(args):
                 )
             np.random.seed(params.seed)
             console.log(f"build config:")
-            console.print_json(json.dumps(OmegaConf.to_yaml(params), indent=4))
+            console.print_json(json.dumps(OmegaConf.to_object(params), indent=4))
 
             start_str = start_time.strftime("%Y%m%d_%H%M%S")
             run_name_parts = [f"{k.replace('_', '-')}={v}" for k, v in setting.items()]
@@ -99,16 +98,13 @@ def main(args):
             p_playlist = os.path.join(p_log, "playlist")
             os.makedirs(p_log)
             os.makedirs(p_playlist)
-            pf_playlist = os.path.join(
-                p_log, f"playlist_{start_str}.csv"
-            )
+            pf_playlist = os.path.join(p_log, f"playlist_{start_str}.csv")
             write_log(pf_playlist, "position", "start time", "file path", "similarity")
 
             p_aug = os.path.join(p_log, "augmentations")
             os.makedirs(p_aug, exist_ok=True)
 
             # init workers
-            del seeker, scheduler
             seeker = Seeker(
                 params.seeker,
                 p_aug,
@@ -135,7 +131,9 @@ def main(args):
             )
 
             q_playback = PriorityQueue()
-            _queue_file(params.kickstart_path, None, q_playback, pf_playlist, start_time)
+            _queue_file(
+                params.kickstart_path, None, q_playback, pf_playlist, start_time
+            )
 
             td_start = datetime.now() + timedelta(seconds=5)
             scheduler.td_start = td_start
@@ -210,7 +208,7 @@ def main(args):
                         "text",
                         text=f"{basename(scheduler.queued_files[i])}",
                         time=mido.second2tick(
-                            scheduler.ts_transitions[i],
+                            scheduler.ts_transitions[0] if i > 0 else 0,
                             midi_md.ticks_per_beat,
                             mido.bpm2tempo(params.bpm),
                         ),
@@ -245,43 +243,41 @@ def main(args):
                 x_pos = int(time_in_seconds * sr * (1200 / piano_roll.shape[1]))
                 plt.axvline(x=x_pos, color="blue", alpha=0.5, linewidth=0.5)
 
-            # generate novelty curve
-            ssm, novelty = gen_ssm_and_novelty(midi_file)
-            # account for downsampling factor of 10 in novelty curve
-            scaling_factor = upsampled_roll.shape[1] / piano_roll.shape[1]
-            x = (
-                np.arange(len(novelty)) * scaling_factor * 10
-            )  # stretch x-axis to match piano roll width
-            plt.plot(
-                x,
-                (1 - novelty / novelty.max()) * 100,
-                "g",
-                linewidth=1.0,
-                alpha=0.7,
-            )
+            # # generate novelty curve
+            # ssm, novelty = gen_ssm_and_novelty(midi_file)
+            # # account for downsampling factor of 10 in novelty curve
+            # scaling_factor = upsampled_roll.shape[1] / piano_roll.shape[1]
+            # x = (
+            #     np.arange(len(novelty)) * scaling_factor * 10
+            # )  # stretch x-axis to match piano roll width
+            # plt.plot(
+            #     x,
+            #     (1 - novelty / novelty.max()) * 100,
+            #     "g",
+            #     linewidth=1.0,
+            #     alpha=0.7,
+            # )
 
-            plt.xticks([])
-            plt.yticks([])
-            plt.axis("off")
+            # plt.xticks([])
+            # plt.yticks([])
+            # plt.axis("off")
 
             # remove all padding and make the plot fill the figure
             plt.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
             plt.savefig(piano_roll_path, bbox_inches="tight", pad_inches=0)
             plt.close()
 
-            # save SSM
-            plt.figure(figsize=(16, 16))
-            plt.imshow(ssm / ssm.max(), cmap="magma")
-            plt.xticks([])
-            plt.yticks([])
-            plt.axis("off")
-            plt.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
-            plt.savefig(os.path.join(output_dir, f"{start_str}-{i}-ssm.png"))
-            plt.close()
+            # # save SSM
+            # plt.figure(figsize=(16, 16))
+            # plt.imshow(ssm / ssm.max(), cmap="magma")
+            # plt.xticks([])
+            # plt.yticks([])
+            # plt.axis("off")
+            # plt.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
+            # plt.savefig(os.path.join(output_dir, f"{start_str}-{i}-ssm.png"))
+            # plt.close()
         except Exception as e:
-            console.log(
-                f"[bold red]Error processing setting {i}: {setting}[/bold red]"
-            )
+            console.log(f"[bold red]Error processing setting {i}: {setting}[/bold red]")
             console.print_exception(show_locals=True)
             continue  # continue to the next setting
 
@@ -485,9 +481,7 @@ def _queue_file(
             similarity if similarity is not None else "----",
         )
     except Exception as e:
-        console.log(
-            f"[bold red]Error queuing file '{basename(file_path)}':[/bold red]"
-        )
+        console.log(f"[bold red]Error queuing file '{basename(file_path)}':[/bold red]")
         console.print_exception(show_locals=True)
         # Decide if we should re-raise or just log and continue
         # For now, just log and continue to avoid halting the whole process
