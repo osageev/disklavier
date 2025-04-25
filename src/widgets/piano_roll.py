@@ -312,7 +312,6 @@ class PianoRollView(QGraphicsView):
                 t * 1000 for t in transitions
             ]  # convert to milliseconds
 
-
     def draw_transition_lines(self, painter):
         """
         draw vertical green lines at transition points.
@@ -458,13 +457,13 @@ class PianoRollView(QGraphicsView):
             elif note.is_playing:
                 color = QColor(255, 128, 128, int(alpha * 255))
             else:
-                if note.similarity < 0.8:
+                if note.similarity < 0.5:
                     color = QColor(255, 255, 0, int(alpha * 255))
                 else:
                     # interpolate between yellow and dark gray based on similarity
                     # when similarity is 1.0, we get the original dark gray (77,77,77)
-                    # when similarity is 0.8, we get yellow (255,255,0)
-                    t = (note.similarity - 0.8) / 0.2  # normalize to 0-1 range
+                    # when similarity is 0.5, we get yellow (255,255,0)
+                    t = (note.similarity - 0.5) / 0.5  # normalize to 0-1 range
                     r = int(128 + (255 - 128) * (1 - t))
                     g = int(204 + (255 - 204) * (1 - t))
                     b = int(255 + (0 - 255) * (1 - t))
