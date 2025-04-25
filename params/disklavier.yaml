@@ -1,10 +1,10 @@
-n_transitions: 400
-initialization: "random" # kickstart random recording audio
+n_transitions: 16
+initialization: "recording" # kickstart random recording audio
 kickstart_path: "data/datasets/20250320/augmented/20240429-068-06_0084-0091_t10s03.mid"
 # kickstart_path: "data/datasets/20250320/augmented/20241229-094-10_0091-0096_t00s00.mid"
 # kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid" # path to midi or matches.json
-seed_rearrange: False
-seed_remove: 0
+seed_rearrange: True
+seed_remove: 0.5
 scheduler:
   verbose: True
 seeker:
