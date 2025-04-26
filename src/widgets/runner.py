@@ -312,7 +312,6 @@ class RunWorker(QtCore.QThread):
         console.log(
             f"{self.tag} queue time is now {remaining_seconds_log:.01f} seconds (end tick: {self.tt_queue_end_tick})"
         )
-        console.log(f"{self.tag} queue size is now {self.q_playback.qsize()}")
 
     def augment_midi(
         self,

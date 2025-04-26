@@ -306,8 +306,6 @@ def augment_midi(
         raise Exception("seeker not initialized")
 
     try:
-        console.log(f"augmenting '{basename(pf_midi)}'")
-
         midi_paths = []
         if seed_rearrange:
             split_beats = midi.beat_split(pf_midi, bpm)
@@ -348,13 +346,12 @@ def augment_midi(
                 joined_midi.write(pf_joined_midi)
                 midi_paths.append(pf_joined_midi)
         else:
-            # midi_paths.append([pf_midi])  # wrap in list for consistency
-            midi_paths.append(pf_midi)  # No rearrangement, add the original path
+            midi_paths.append(pf_midi)  # no rearrangement, use the original path
 
         if seed_remove:
-            # Start with the paths generated (or the original if no rearrangement)
+            # start with the paths generated (or the original if no rearrangement)
             current_paths = midi_paths
-            midi_paths = []  # This will hold the final list of paths after removal
+            midi_paths = []  # this will hold the final list of paths after removal
             num_options = 0
             paths_after_removal = (
                 []
@@ -462,7 +459,7 @@ def _queue_file(
         # log queuing action
         console.log(f"queuing '{file_path}'")
 
-        ts_seg_len, ts_seg_start = scheduler.enqueue_midi(
+        ts_seg_len, ts_seg_start, tt_end_tick = scheduler.enqueue_midi(
             file_path, playback_queue, similarity=similarity
         )
 
@@ -470,7 +467,7 @@ def _queue_file(
             console.log(
                 f"[yellow]Warning: Failed to enqueue '{basename(file_path)}'. Skipping.[/yellow]"
             )
-            return  # Don't proceed if enqueue failed
+            return  # don't proceed if enqueue failed
 
         ts_queue += ts_seg_len
         seeker.played_files.append(file_path)
