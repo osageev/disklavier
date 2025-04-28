@@ -17,7 +17,10 @@ tag = "[#5f00af]panthr[/#5f00af]:"
 
 
 def send_embedding(
-    file_path: str, model: str = "specdiff", mode: Optional[str] = None, verbose: bool = False
+    file_path: str,
+    model: str = "specdiff",
+    mode: Optional[str] = None,
+    verbose: bool = False,
 ) -> np.ndarray:
     """
     Calculates the embedding of a MIDI file using the Panther model.
@@ -66,7 +69,13 @@ def send_embedding(
             os.remove(remote_file_path)
         copy2(file_path, remote_file_path)
         pf_tensor_local = os.path.abspath(remote_file_path).replace(".mid", ".pt")
-        time.sleep(0.5)
+        if verbose:
+            console.log(
+                f"{tag} {os.path.exists(remote_file_path)} moved file from to '{remote_file_path}'"
+            )
+
+        if not wait_for_file(pf_tensor_local):
+            raise ValueError(f"file '{pf_tensor_local}' is not valid, exiting")
     else:
         # panther login
         if verbose:
@@ -92,9 +101,7 @@ def send_embedding(
         # upload
         sftp.put(file_path, remote_file_path)
         if verbose:
-            console.log(
-                f"{tag} upload complete, waiting for embedding..."
-            )
+            console.log(f"{tag} upload complete, waiting for embedding...")
 
         # wait for new tensor
         while 1:
@@ -110,8 +117,115 @@ def send_embedding(
         sftp.close()
         ssh.close()
 
+    console.log(f"{tag} loading embedding from '{pf_tensor_local}'")
     embedding = torch.load(pf_tensor_local, weights_only=False).numpy().reshape(1, -1)
     if verbose:
         console.log(f"{tag} loaded embedding {embedding.shape}")
 
-    return embedding / np.linalg.norm(embedding, axis=1, keepdims=True)
+    return embedding
+
+
+def wait_for_file(
+    file_path: str, max_wait: float = 5.0, check_interval: float = 0.01
+) -> bool:
+    """
+    wait for a file to be completely written.
+
+    parameters
+    ----------
+    file_path : str
+        path to file to wait for.
+    max_wait : float (default: 5.0)
+        maximum time to wait in seconds.
+    check_interval : float (default: 0.01)
+        time between file size checks.
+
+    returns
+    -------
+    bool
+        true if file is valid and ready.
+    """
+    start_time = time.time()
+    prev_size = -1
+
+    while time.time() - start_time < max_wait:
+        if not os.path.exists(file_path):
+            time.sleep(check_interval)
+            continue
+
+        current_size = os.path.getsize(file_path)
+        if current_size > 0 and current_size == prev_size:
+            # File size hasn't changed since last check, probably done writing
+            return True
+
+        prev_size = current_size
+        time.sleep(check_interval)
+
+    return os.path.exists(file_path) and os.path.getsize(file_path) > 0
+
+
+def wait_for_remote_file(
+    sftp: paramiko.SFTPClient,
+    remote_file_path: str,
+    max_wait: float = 5.0,
+    check_interval: float = 0.01,
+) -> bool:
+    """
+    wait for a remote file to be completely written using sftp.
+
+    parameters
+    ----------
+    sftp : paramiko.SFTPClient
+        active sftp client session.
+    remote_file_path : str
+        path to the remote file to wait for.
+    max_wait : float (default: 5.0)
+        maximum time to wait in seconds.
+    check_interval : float (default: 0.01)
+        time between file checks.
+
+    returns
+    -------
+    bool
+        true if file exists and its size is stable.
+    """
+    start_time = time.time()
+    prev_size = -1
+    file_exists = False
+
+    while time.time() - start_time < max_wait:
+        try:
+            file_attr = sftp.stat(remote_file_path)
+            current_size = file_attr.st_size
+            file_exists = True
+
+            if (
+                current_size is not None
+                and current_size > 0
+                and current_size == prev_size
+            ):
+                # file size hasn't changed, assume complete
+                return True
+
+            prev_size = current_size
+            time.sleep(check_interval)
+
+        except FileNotFoundError:
+            # file doesn't exist yet
+            file_exists = False
+            time.sleep(check_interval)
+            continue
+
+    # final check after timeout
+    if file_exists:
+        try:
+            final_attr = sftp.stat(remote_file_path)
+            return (
+                final_attr.st_size is not None
+                and final_attr.st_size > 0
+                and final_attr.st_size == prev_size
+            )
+        except FileNotFoundError:
+            return False
+    else:
+        return False

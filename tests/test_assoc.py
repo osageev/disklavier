@@ -1,81 +1,106 @@
 import os
+import sys
 import random
-import torch
 import numpy as np
-import pretty_midi
+import faiss
 import tempfile
-import shutil
+from shutil import rmtree
 from glob import glob
 from rich.pretty import pprint
+from sklearn.metrics.pairwise import cosine_similarity
+
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 
 from src.utils import basename
 from src.utils.midi import transpose_midi
-
 from src.ml.specdiff.model import SpectrogramDiffusion
 
 # --- configuration ---
-DATA_DIR = "data/datasets/20250410/segmented"
+FAISS_INDEX_PATH = "/media/scratch/sageev-midi/20250410/specdiff.faiss"
+DATA_DIR = "/media/scratch/sageev-midi/20250410/augmented"
 NUM_FILES_TO_SELECT = 10
 TRANSPOSE_SEMITONES = 12  # 1 octave up
-NEIGHBORS_TO_FIND = 3
 
+random.seed(0)
+index = faiss.read_index(FAISS_INDEX_PATH)
+expected_dim = index.d  # Get expected dimension from FAISS index
+print(
+    f"FAISS index loaded. Contains {index.ntotal} vectors of dimension {expected_dim}."
+)
 
-# --- main script ---
-def main():
-    print("\nInitializing Spectrogram Diffusion model...")
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    specdiff = SpectrogramDiffusion({"device": device}, verbose=True)
+all_target_files = glob(os.path.join(DATA_DIR, "*t00s00.mid"))
+all_target_files.sort()
+all_files = glob(os.path.join(DATA_DIR, "*.mid"))
+all_files.sort()
 
-    all_files = glob(os.path.join(DATA_DIR, "*.mid"))
+# select files
+selected_files = random.sample(all_target_files, NUM_FILES_TO_SELECT)
+print("\nselected files:")
+pprint([os.path.basename(f) for f in selected_files])
 
-    selected_files = random.sample(all_files, NUM_FILES_TO_SELECT)
-    print("\nSelected Files:")
-    pprint([os.path.basename(f) for f in selected_files])
+# init model
+print("\nInitializing Spectrogram Diffusion model...")
+specdiff = SpectrogramDiffusion(verbose=True)
 
-    print(f"\nProcessing {len(selected_files)} files...")
-    temp_dir = tempfile.mkdtemp()  # create a temporary directory for transposed files
+# generate transposed files
+temp_dir = None
+temp_dir = tempfile.mkdtemp(prefix="transposed_midi_")
+print(f"\nCreated temporary directory for transposed files: {temp_dir}")
+transposed_files = []
+for i, file_path in enumerate(selected_files):
+    base_name = os.path.basename(file_path)
+    # ensure unique names in case of identical base names (unlikely)
+    transposed_name = (
+        f"{os.path.splitext(base_name)[0]}_idx{i}_transposed_{TRANSPOSE_SEMITONES}.mid"
+    )
+    transposed_path = os.path.join(temp_dir, transposed_name)
+    transpose_midi(file_path, transposed_path, TRANSPOSE_SEMITONES)
+    transposed_files.append(transposed_path)
+
+# generate embeddings
+original_embeddings_list = []
+for file in selected_files:
+    embedding = specdiff.embed(file)
+    embedding = embedding.detach().cpu().numpy().squeeze()
+    original_embeddings_list.append(embedding)
+original_embeddings = np.array(original_embeddings_list)
+print("generated embeddings:")
+pprint(original_embeddings.shape)
+
+# generate transposed embeddings
+transposed_embeddings_list = []
+for file in transposed_files:
+    embedding = specdiff.embed(file)
+    embedding = embedding.detach().cpu().numpy()
+    transposed_embeddings_list.append(embedding)
+transposed_embeddings = np.array(transposed_embeddings_list).squeeze()
+print("generated transposed embeddings:")
+pprint(transposed_embeddings.shape)
+
+# find distances between original and transposed embeddings
+normed_original_embeddings = original_embeddings / np.linalg.norm(original_embeddings, axis=1, keepdims=True)
+normed_transposed_embeddings = transposed_embeddings / np.linalg.norm(transposed_embeddings, axis=1, keepdims=True)
+cosine_distances = cosine_similarity(normed_original_embeddings, normed_transposed_embeddings)
+print("cosine distances:")
+pprint(cosine_distances.shape)
+separation_vectors = original_embeddings - transposed_embeddings
+print("separation vectors:")
+pprint(separation_vectors.shape)
+normed_separation_vectors = normed_original_embeddings - normed_transposed_embeddings
+print("normed_separation vectors:")
+pprint(normed_separation_vectors.shape)
+
+for i, (normed_separation_vector, separation_vector, cosine_distance) in enumerate(zip(normed_separation_vectors, separation_vectors, cosine_distances)):
+    print(
+        f"'{basename(selected_files[i])}' transpose mag: {np.linalg.norm(separation_vector):.04f} ({np.linalg.norm(normed_separation_vector):.04f}), cosine distance: {cosine_distance}"
+    )
+
+# find nearest neighbors
+
+if temp_dir and os.path.exists(temp_dir):
     try:
-        for i, file_path in enumerate(selected_files):
-            print(
-                f"\n--- Processing file {i+1}/{len(selected_files)}: {basename(file_path)} ---"
-            )
-
-            # 1. generate an embedding using specdiff
-            print("  Generating embedding for original...")
-            emb_original = specdiff.embed(file_path)
-
-            # 2. transpose the midi up an octave and embed that
-            print(f"  Transposing by {TRANSPOSE_SEMITONES} semitones...")
-            transposed_filename = (
-                f"{basename(file_path)}_transposed_{TRANSPOSE_SEMITONES}.mid"
-            )
-            transposed_file_path = os.path.join(temp_dir, transposed_filename)
-            transpose_midi(file_path, transposed_file_path, TRANSPOSE_SEMITONES)
-
-            print("  Generating embedding for transposed...")
-            emb_transposed = specdiff.embed(transposed_file_path)
-
-            # ensure embeddings are on the same device and float32 for calculations
-            emb_original = emb_original.to(device).float()
-            emb_transposed = emb_transposed.to(device).float()
-
-            # 3. take the delta between the two vectors and print the magnitude and cosine difference
-            delta = emb_original - emb_transposed
-            magnitude = torch.linalg.norm(delta).item()
-            # cosine similarity requires inputs of shape (batch_size, embedding_dim)
-            cos_sim = torch.nn.functional.cosine_similarity(
-                emb_original.unsqueeze(0), emb_transposed.unsqueeze(0)
-            ).item()
-            cos_diff = 1 - cos_sim
-
-            print(f"  Delta Magnitude: {magnitude:.4f}")
-            print(f"  Cosine Difference: {cos_diff:.4f}")
-
-    finally:
-        # clean up the temporary directory
-        shutil.rmtree(temp_dir)
-        print(f"\nCleaned up temporary directory: {temp_dir}")
-
-
-if __name__ == "__main__":
-    main()
+        rmtree(temp_dir)
+        print("Temporary directory removed.")
+    except Exception as e:
+        print(f"Error removing temporary directory {temp_dir}: {e}")

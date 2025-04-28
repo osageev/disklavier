@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 import pretty_midi
 from diffusers.pipelines.deprecated.spectrogram_diffusion.midi_utils import (
@@ -8,13 +9,17 @@ from diffusers.pipelines.deprecated.spectrogram_diffusion.notes_encoder import (
     SpectrogramNotesEncoder,
 )
 
+project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from utils import console, basename
 from utils.midi import change_tempo_and_trim, get_bpm
 
 from typing import Optional
 
 
-default_config = {
+DEFAULT_CONFIG = {
     "device": "cuda:0",
     "encoder_config": {
         "d_ff": 2048,
@@ -28,8 +33,11 @@ default_config = {
         "num_layers": 12,
         "vocab_size": 1536,
     },
-    "encoder_weights_path": "src/ml/specdiff/note_encoder.bin",
+    "encoder_weights_path": "/home/finlay/disklavier/src/ml/specdiff/note_encoder.bin",
 }
+
+TS_MIN = 4.500
+TS_MAX = 5.119
 
 
 class SpectrogramDiffusion:
@@ -44,10 +52,11 @@ class SpectrogramDiffusion:
     ) -> None:
         console.log(f"{self.tag} initializing spectrogram diffusion model")
 
+        # override config
         if new_config is None:
-            config = default_config
+            config = DEFAULT_CONFIG
         else:
-            config = default_config
+            config = DEFAULT_CONFIG
             for k, v in new_config.items():
                 config[k] = v
 
@@ -60,12 +69,19 @@ class SpectrogramDiffusion:
             self.device
         )
         self.encoder.eval()
-        sd = torch.load(config["encoder_weights_path"], weights_only=True)
-        self.encoder.load_state_dict(sd)
+        if os.path.exists(config["encoder_weights_path"]):
+            sd = torch.load(config["encoder_weights_path"], weights_only=True)
+            self.encoder.load_state_dict(sd)
+        else:
+            console.log(f"{self.tag} no encoder weights found at {config['encoder_weights_path']}")
+            console.log(f"{self.tag} {os.getcwd()}")
+            raise ValueError(f"Encoder weights not found at {config['encoder_weights_path']}")
 
         console.log(f"{self.tag} model initialization complete")
 
     def embed(self, path: str) -> torch.Tensor:
+        if self.verbose:
+            console.log(f"{self.tag} generating embedding for '{path}'")
         if self.fix_time:
             bpm = get_bpm(path)
             if self.verbose:
@@ -76,11 +92,11 @@ class SpectrogramDiffusion:
                 console.log(f"{self.tag} [yellow] midi duration is 0, skipping[/yellow]")
                 return torch.zeros(1, 768)
             
-            if midi_len < 4.9 or midi_len > 5.11:
-                new_bpm = bpm * (midi_len / 5.119)
+            if midi_len < TS_MIN or midi_len > TS_MAX:
+                new_bpm = bpm * (midi_len / TS_MAX)
                 if self.verbose:
                     console.log(
-                        f"{self.tag} midi duration {midi_len:.03f} is out of bounds, changing tempo from {bpm} to {new_bpm:.03f}"
+                        f"{self.tag} midi duration {midi_len:.03f} is out of bounds ({TS_MIN} to {TS_MAX}), changing tempo from {bpm} to {new_bpm:.03f}"
                     )
                 tmp_dir = os.path.join(os.path.dirname(path), "tmp")
                 os.makedirs(tmp_dir, exist_ok=True)
@@ -88,29 +104,19 @@ class SpectrogramDiffusion:
                 change_tempo_and_trim(path, tmp_file, new_bpm)
                 path = tmp_file
 
-                console.log(
-                    f"{self.tag} new duration is {pretty_midi.PrettyMIDI(path).get_end_time():.03f}"
-                )
-
-        if self.verbose:
-            console.log(f"{self.tag} generating embedding for '{path}'")
         tokens = self.processor(path)
         if self.verbose:
-            console.log(f"{self.tag} {len(tokens)} {torch.tensor(tokens[0]).shape}")
-        if len(tokens) > 1:
             console.log(
-                f"{self.tag}[yellow italic] too many pooled tokens, using first one[/yellow italic]"
+                f"{self.tag} generated ({len(tokens)}, {len(tokens[0])}) tokens"
             )
+        if len(tokens) > 1:
+            if self.verbose:
+                console.log(
+                    f"{self.tag}[yellow italic] too many pooled tokens, using first one[/yellow italic]"
+                )
             tokens = [tokens[0]]
 
         all_tokens = [torch.IntTensor(token) for token in tokens]
-        if self.verbose:
-            console.log(
-                f"{self.tag} generated ({len(all_tokens)}, {all_tokens[0].shape}) tokens"
-            )
-
-        if self.verbose:
-            console.log(f"{self.tag} embedding")
 
         embeddings = []
         for i in range(0, len(all_tokens)):
@@ -130,5 +136,5 @@ class SpectrogramDiffusion:
         avg_embedding = torch.cat(embeddings).mean(0, keepdim=True)
 
         if self.verbose:
-            console.log(f"{self.tag} embedding complete {avg_embedding.shape}")
+            console.log(f"{self.tag} embedding of '{basename(path)}' complete {avg_embedding.shape}")
         return avg_embedding

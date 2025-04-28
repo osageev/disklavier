@@ -49,7 +49,7 @@ class PianoRollBuilder(QThread):
 
         while self.running:
             if self.queue.qsize() == 0:
-                time.sleep(0.001)  # small sleep to prevent cpu hogging
+                time.sleep(0.01)  # small sleep to prevent cpu hogging
             else:
                 tt_abs, (sim, message) = self.queue.get()
                 ts_abs = mido.tick2second(tt_abs, TICKS_PER_BEAT, self.tempo)
@@ -95,7 +95,7 @@ class PianoRollView(QGraphicsView):
 
     # constants
     debug = True
-    timestep_ms = 10  # ms
+    timestep_ms = 33  # ms
     roll_len_ms = 10000  # visible roll duration in ms # TODO: make this 10 seconds a global parameter
     max_note_dur_ms = 5000  # auto trim notes longer than this
     MIN_NOTE_HEIGHT = 4
@@ -299,11 +299,6 @@ class PianoRollView(QGraphicsView):
         for note_num in active_note_nums:
             self.note_off(int(note_num))
 
-    def update_transitions(self, transitions: list[float]):
-        self.transition_times = [
-            t * 1000 for t in transitions
-        ]  # convert to milliseconds
-
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
 
@@ -311,6 +306,11 @@ class PianoRollView(QGraphicsView):
         self.draw_transition_lines(painter)  # draw transition lines before notes
         self.draw_notes(painter)
         self.draw_keyboard(painter)
+
+    def update_transitions(self, transitions: list[float]):
+            self.transition_times = [
+                t * 1000 for t in transitions
+            ]  # convert to milliseconds
 
     def draw_transition_lines(self, painter):
         """
@@ -457,13 +457,13 @@ class PianoRollView(QGraphicsView):
             elif note.is_playing:
                 color = QColor(255, 128, 128, int(alpha * 255))
             else:
-                if note.similarity < 0.8:
+                if note.similarity < 0.5:
                     color = QColor(255, 255, 0, int(alpha * 255))
                 else:
                     # interpolate between yellow and dark gray based on similarity
                     # when similarity is 1.0, we get the original dark gray (77,77,77)
-                    # when similarity is 0.8, we get yellow (255,255,0)
-                    t = (note.similarity - 0.8) / 0.2  # normalize to 0-1 range
+                    # when similarity is 0.5, we get yellow (255,255,0)
+                    t = (note.similarity - 0.5) / 0.5  # normalize to 0-1 range
                     r = int(128 + (255 - 128) * (1 - t))
                     g = int(204 + (255 - 204) * (1 - t))
                     b = int(255 + (0 - 255) * (1 - t))
