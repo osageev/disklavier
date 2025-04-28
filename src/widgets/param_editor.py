@@ -23,7 +23,7 @@ class ParameterEditorWidget(QtWidgets.QWidget):
         super().__init__(parent)
 
         self.param_options = {
-            "initialization": ["kickstart", "random", "recording", "audio"],
+            "initialization": ["kickstart", "random", "recording"],
             "seeker.mode": [
                 "best",
                 "random",

@@ -88,6 +88,8 @@ class RunWorker(QtCore.QThread):
                     console.log(
                         f"{self.tag} got {len(self.pf_augmentations)} augmentations:\n\t{self.pf_augmentations}"
                     )
+
+                # scale velocity to match first match
             case "audio":
                 self.pf_player_query = self.pf_player_query.replace(".mid", ".wav")
                 ts_recording_len = self.staff.audio_recorder.record_query(
@@ -142,6 +144,16 @@ class RunWorker(QtCore.QThread):
         if self.pf_augmentations is None:
             pf_next_file, similarity = self.staff.seeker.get_next()
             self._queue_file(pf_next_file, similarity)
+        else:
+            # get next match and scale velocity
+            pf_next_file, _ = self.staff.seeker.get_next()
+            self.pf_augmentations.append(pf_next_file)
+
+            # get average velocity of next match
+            next_avg_velocity = midi.get_average_velocity(pf_next_file)
+            console.log(f"{self.tag} next average velocity: {next_avg_velocity}")
+            # scale velocity of next match
+            midi.ramp_vel(self.pf_augmentations, next_avg_velocity, self.args.bpm)
 
         try:
             td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
@@ -421,13 +433,15 @@ class RunWorker(QtCore.QThread):
                 console.log(
                     f"\t\tbest match for '{basename(m)}' is '{basename(match)}' with similarity {similarity}"
                 )
-        else:            
+        else:
             # if not removing notes, midi_paths already contains the rearranged (or original) paths
             best_aug = ""
             best_match = ""
             best_similarity = 0.0
             for mid in midi_paths:
-                embedding = self.staff.seeker.get_embedding(mid, model=self.staff.seeker.params.metric)
+                embedding = self.staff.seeker.get_embedding(
+                    mid, model=self.staff.seeker.params.metric
+                )
                 if embedding is None or embedding.sum() == 0:
                     console.log(
                         f"\t\t[orange italic]{basename(mid)} has no notes or embedding failed, skipping[/orange italic]"
@@ -452,7 +466,9 @@ class RunWorker(QtCore.QThread):
 
                 # Add the best matching original file from the dataset
                 if best_match:
-                    final_paths.append(os.path.join(self.args.dataset_path, best_match + ".mid"))
+                    final_paths.append(
+                        os.path.join(self.args.dataset_path, best_match + ".mid")
+                    )
             else:
                 console.log(
                     "[yellow]Warning: No suitable augmentation found after removal, returning original file.[/yellow]"

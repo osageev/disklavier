@@ -188,7 +188,7 @@ class Seeker(Worker):
             case "sequential":
                 next_file = self._get_neighbor()
             case "graph":
-                # TODO: FIX THIS
+                # TODO: fix similarities if possible
                 next_file, similarity = self._get_graph()
             case "random" | "shuffle" | _:
                 next_file = self._get_random()
