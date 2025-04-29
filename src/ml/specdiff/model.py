@@ -13,8 +13,11 @@ project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from utils import console, basename
-from utils.midi import change_tempo_and_trim, get_bpm
+    from utils import console, basename
+    from utils.midi import change_tempo_and_trim, get_bpm
+else:
+    from src.utils import console, basename
+    from src.utils.midi import change_tempo_and_trim, get_bpm
 
 from typing import Optional
 
@@ -46,7 +49,7 @@ class SpectrogramDiffusion:
 
     def __init__(
         self,
-        new_config: Optional[dict] = None,
+        new_config: Optional[dict]=None,
         fix_time: bool = True,
         verbose: bool = False,
     ) -> None:
@@ -73,9 +76,13 @@ class SpectrogramDiffusion:
             sd = torch.load(config["encoder_weights_path"], weights_only=True)
             self.encoder.load_state_dict(sd)
         else:
-            console.log(f"{self.tag} no encoder weights found at {config['encoder_weights_path']}")
+            console.log(
+                f"{self.tag} no encoder weights found at {config['encoder_weights_path']}"
+            )
             console.log(f"{self.tag} {os.getcwd()}")
-            raise ValueError(f"Encoder weights not found at {config['encoder_weights_path']}")
+            raise ValueError(
+                f"Encoder weights not found at {config['encoder_weights_path']}"
+            )
 
         console.log(f"{self.tag} model initialization complete")
 
@@ -89,9 +96,11 @@ class SpectrogramDiffusion:
 
             midi_len = pretty_midi.PrettyMIDI(path, initial_tempo=bpm).get_end_time()
             if midi_len == 0:
-                console.log(f"{self.tag} [yellow] midi duration is 0, skipping[/yellow]")
+                console.log(
+                    f"{self.tag} [yellow] midi duration is 0, skipping[/yellow]"
+                )
                 return torch.zeros(1, 768)
-            
+
             if midi_len < TS_MIN or midi_len > TS_MAX:
                 new_bpm = bpm * (midi_len / TS_MAX)
                 if self.verbose:
@@ -100,7 +109,7 @@ class SpectrogramDiffusion:
                     )
                 tmp_dir = os.path.join(os.path.dirname(path), "tmp")
                 os.makedirs(tmp_dir, exist_ok=True)
-                tmp_file = os.path.join(tmp_dir, basename(path))
+                tmp_file = os.path.join(tmp_dir, basename(path) + ".mid")
                 change_tempo_and_trim(path, tmp_file, new_bpm)
                 path = tmp_file
 
@@ -120,12 +129,11 @@ class SpectrogramDiffusion:
 
         embeddings = []
         for i in range(0, len(all_tokens)):
-            batch = all_tokens[i].view(1, -1).cuda(self.device)
-            with torch.autocast("cuda"):
-                tokens_mask = batch > 0
-                tokens_embedded, tokens_mask = self.encoder(
-                    encoder_input_tokens=batch, encoder_inputs_mask=tokens_mask
-                )
+            batch = all_tokens[i].view(1, -1).to(self.device)
+            tokens_mask = batch > 0
+            tokens_embedded, tokens_mask = self.encoder(
+                encoder_input_tokens=batch, encoder_inputs_mask=tokens_mask
+            )
             if self.verbose:
                 console.log(
                     f"{self.tag} generated embedding {i} ({tokens_embedded.shape})"
@@ -136,5 +144,7 @@ class SpectrogramDiffusion:
         avg_embedding = torch.cat(embeddings).mean(0, keepdim=True)
 
         if self.verbose:
-            console.log(f"{self.tag} embedding of '{basename(path)}' complete {avg_embedding.shape}")
+            console.log(
+                f"{self.tag} embedding of '{basename(path)}' complete {avg_embedding.shape}"
+            )
         return avg_embedding
