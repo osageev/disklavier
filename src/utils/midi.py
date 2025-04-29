@@ -931,3 +931,114 @@ def generate_random_midi(
         last_tick = tick
 
     return track
+
+
+def jitter(
+    midi: pretty_midi.PrettyMIDI,
+    specifier: str,
+    limit: float,
+    percentage: float,
+    jitter_velocity: bool = False,
+) -> pretty_midi.PrettyMIDI:
+    """
+    apply random timing and/or velocity jitter to a percentage of notes in a midi object.
+
+    Parameters
+    ----------
+    midi : pretty_midi.PrettyMIDI
+        the midi object to modify.
+    specifier : str
+        which part of the note timing to jitter: "start", "end", or "both".
+    limit : float
+        the maximum timing jitter amount in seconds (applied in both positive and negative directions).
+    percentage : float
+        the percentage of notes (0.0 to 1.0) to apply timing and/or velocity jitter to.
+    jitter_velocity : bool, optional
+        if true, apply velocity jitter to a separate random selection of notes (same percentage). defaults to false.
+
+    Returns
+    -------
+    pretty_midi.PrettyMIDI
+        the modified midi object.
+    """
+    if specifier not in ["start", "end", "both"]:
+        raise ValueError("specifier must be one of 'start', 'end', or 'both'")
+
+    all_notes = []
+    instrument_map = []  # keep track of (instrument_index, note_index)
+
+    for i, instrument in enumerate(midi.instruments):
+        # skip drum tracks
+        if instrument.is_drum:
+            continue
+        for j, note in enumerate(instrument.notes):
+            all_notes.append(note)
+            instrument_map.append((i, j))
+
+    num_notes = len(all_notes)
+    if num_notes == 0:
+        return midi  # nothing to jitter
+
+    num_to_jitter = int(num_notes * percentage)
+
+    if num_to_jitter > 0:
+        # --- Timing Jitter ---
+        indices_to_jitter_time = np.random.choice(
+            range(num_notes), num_to_jitter, replace=False
+        )
+        min_duration = 0.01  # minimum note duration in seconds
+
+        for idx in indices_to_jitter_time:
+            instrument_idx, note_idx = instrument_map[idx]
+            note = midi.instruments[instrument_idx].notes[note_idx]
+
+            start_orig = note.start
+            end_orig = note.end
+
+            new_start = start_orig
+            new_end = end_orig
+
+            if specifier in ["start", "both"]:
+                jitter_amount = np.random.uniform(-limit, limit)
+                new_start = max(0, start_orig + jitter_amount)  # ensure start >= 0
+
+            if specifier in ["end", "both"]:
+                jitter_amount = np.random.uniform(-limit, limit)
+                # when jittering end, ensure it's after the (potentially modified) start
+                new_end = max(new_start + min_duration, end_orig + jitter_amount)
+            elif specifier == "start":
+                # if only start is jittered, preserve original duration
+                duration = end_orig - start_orig
+                new_end = new_start + duration
+
+            # final check to ensure end > start
+            if new_end <= new_start:
+                new_end = new_start + min_duration
+
+            note.start = new_start
+            note.end = new_end
+
+    if jitter_velocity and num_to_jitter > 0:
+        # --- Velocity Jitter ---
+        indices_to_jitter_vel = np.random.choice(
+            range(num_notes), num_to_jitter, replace=False
+        )
+
+        for idx in indices_to_jitter_vel:
+            instrument_idx, note_idx = instrument_map[idx]
+            note = midi.instruments[instrument_idx].notes[note_idx]
+
+            original_velocity = note.velocity
+            # calculate velocity change limit (30%)
+            velocity_change_limit = original_velocity * 0.30
+            # generate random velocity jitter
+            velocity_jitter = np.random.uniform(
+                -velocity_change_limit, velocity_change_limit
+            )
+            # calculate new velocity and clamp to valid range [0, 127]
+            new_velocity = int(round(original_velocity + velocity_jitter))
+            new_velocity = max(0, min(127, new_velocity))
+
+            note.velocity = new_velocity
+
+    return midi
