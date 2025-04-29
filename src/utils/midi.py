@@ -7,6 +7,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from scipy.ndimage import zoom
+from bisect import bisect_left
 
 from typing import Dict, Tuple
 
@@ -931,6 +932,278 @@ def generate_random_midi(
         last_tick = tick
 
     return track
+
+
+def get_average_velocity(file_path: str) -> int:
+    """
+    Calculate the average velocity of all non-drum notes in a MIDI file.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the MIDI file.
+
+    Returns
+    -------
+    float
+        Average velocity of all non-drum notes in the file.
+        Returns 0 if no non-drum notes are found.
+    """
+    try:
+        midi_data = pretty_midi.PrettyMIDI(file_path)
+
+        # Get all non-drum instruments
+        non_drum_instruments = [
+            inst for inst in midi_data.instruments if not inst.is_drum
+        ]
+
+        # Collect all velocities from non-drum notes
+        all_velocities = []
+        for instrument in non_drum_instruments:
+            all_velocities.extend([note.velocity for note in instrument.notes])
+
+        # Calculate average velocity
+        if all_velocities:
+            return int(sum(all_velocities) / len(all_velocities))
+        else:
+            console.log(f"no non-drum notes found in {basename(file_path)}")
+            return 0
+
+    except Exception as e:
+        console.log(
+            f"error calculating average velocity for {basename(file_path)}: {e}"
+        )
+        return 0
+
+
+def ramp_vel(file_paths: list[str], target_vel: int, bpm: int) -> None:
+    """
+    ramp the velocity of notes across multiple midi files towards a target velocity,
+    applying scaling on a beat-by-beat basis.
+
+    the scaling is applied such that the average velocity of the beats ramps linearly
+    from the average velocity of the first beat (of the first file) to the target_vel
+    for the last beat (of the last file). velocity scaling is relative, preserving
+    the dynamics within each beat. each file is divided into 8 conceptual beats.
+
+    Parameters
+    ----------
+    file_paths : list[str]
+        list of paths to the midi files to process. files are modified in-place.
+    target_vel : int
+        the target average velocity for the last beat of the last file. must be between 1 and 127.
+    bpm : int
+        beats per minute, used to determine beat durations.
+    """
+    if not file_paths:
+        return
+
+    if not 1 <= target_vel <= 127:
+        console.log("[red]error: target_vel must be between 1 and 127.[/red]")
+        return
+
+    if bpm <= 0:
+        console.log("[red]error: bpm must be positive.[/red]")
+        return
+
+    num_files = len(file_paths)
+    midi_datas = []
+    total_duration_sec = 0
+    file_start_times = [0.0] * num_files
+    try:
+        for i, fp in enumerate(file_paths):
+            midi_data = pretty_midi.PrettyMIDI(fp)
+            midi_datas.append(midi_data)
+            file_start_times[i] = total_duration_sec
+            total_duration_sec += midi_data.get_end_time()
+    except Exception as e:
+        console.log(f"[red]error loading midi file: {e}[/red]")
+        return
+
+    seconds_per_beat = 60.0 / bpm
+    num_beats_per_file = 8
+    all_beat_boundaries = []  # stores absolute start times of each beat
+    notes_by_beat = {}  # key: global_beat_index, value: list of notes
+    all_notes_references = []  # stores (note_object, global_beat_index)
+
+    current_abs_time = 0.0
+    global_beat_index = 0
+
+    for i, midi_data in enumerate(midi_datas):
+        file_duration = midi_data.get_end_time()
+        file_start_time = file_start_times[i]
+
+        # define beat boundaries for this file
+        for beat_num in range(num_beats_per_file):
+            beat_start_abs = current_abs_time + beat_num * seconds_per_beat
+            # the last beat extends to the end of the file
+            if beat_num == num_beats_per_file - 1:
+                beat_end_abs = file_start_time + file_duration
+            else:
+                beat_end_abs = current_abs_time + (beat_num + 1) * seconds_per_beat
+
+            # ensure beat end doesn't exceed file duration (relevant for files shorter than 8 beats)
+            beat_end_abs = min(beat_end_abs, file_start_time + file_duration)
+
+            all_beat_boundaries.append(beat_start_abs)
+            notes_by_beat[global_beat_index] = []
+
+            # check if this beat has any duration before proceeding
+            if beat_end_abs > beat_start_abs:
+                # assign notes to this global beat
+                for inst in midi_data.instruments:
+                    if not inst.is_drum:
+                        for note in inst.notes:
+                            note_start_abs = file_start_time + note.start
+                            # assign note if its start time falls within this beat
+                            # use >= for start and < for end boundary
+                            if beat_start_abs <= note_start_abs < beat_end_abs:
+                                notes_by_beat[global_beat_index].append(note)
+                                all_notes_references.append((note, global_beat_index))
+
+            global_beat_index += 1
+            # stop adding beats if we've covered the file's duration
+            if beat_end_abs >= file_start_time + file_duration:
+                break
+
+        current_abs_time += file_duration  # advance absolute time marker
+
+    # add final boundary for lookups
+    if all_beat_boundaries:
+        all_beat_boundaries.append(total_duration_sec)
+
+    total_global_beats = len(notes_by_beat)
+    if total_global_beats == 0:
+        console.log("[orange]no non-drum notes found in any beats.[/orange]")
+        return
+
+    # calculate average velocity per global beat
+    avg_vels_per_beat = [0.0] * total_global_beats
+    for beat_idx in range(total_global_beats):
+        notes_in_beat = notes_by_beat[beat_idx]
+        if notes_in_beat:
+            avg_vels_per_beat[beat_idx] = sum(n.velocity for n in notes_in_beat) / len(
+                notes_in_beat
+            )
+        else:
+            # use the previous beat's average or a default if it's the first beat or prev is also 0
+            if beat_idx > 0 and avg_vels_per_beat[beat_idx - 1] > 0:
+                avg_vels_per_beat[beat_idx] = avg_vels_per_beat[beat_idx - 1]
+            else:
+                # try to find the next beat with notes
+                found_next = False
+                for next_idx in range(beat_idx + 1, total_global_beats):
+                    notes_in_next_beat = notes_by_beat[next_idx]
+                    if notes_in_next_beat:
+                        avg_vels_per_beat[beat_idx] = sum(
+                            n.velocity for n in notes_in_next_beat
+                        ) / len(notes_in_next_beat)
+                        found_next = True
+                        break
+                if not found_next:
+                    avg_vels_per_beat[beat_idx] = 64  # fallback default
+
+    # handle cases where average velocity calculation resulted in 0 (e.g., empty beats propagated)
+    for i, avg_vel in enumerate(avg_vels_per_beat):
+        if avg_vel <= 0:
+            console.log(
+                f"[orange]warning: beat {i} has zero or invalid average velocity. using 64.[/orange]"
+            )
+            avg_vels_per_beat[i] = 64  # use a default neutral velocity
+
+    # calculate target velocities and scaling factors per beat
+    start_avg_vel = avg_vels_per_beat[0]
+    scaling_factors_per_beat = [1.0] * total_global_beats
+
+    if total_global_beats == 1:
+        scaling_factors_per_beat[0] = (
+            target_vel / start_avg_vel if start_avg_vel > 0 else 1.0
+        )
+    else:
+        for i in range(total_global_beats):
+            # linear ramp for target average velocity
+            target_avg_vel_i = start_avg_vel + (target_vel - start_avg_vel) * i / (
+                total_global_beats - 1
+            )
+
+            # calculate scaling factor needed for this beat
+            current_avg_vel = avg_vels_per_beat[i]
+            if current_avg_vel > 0:
+                factor = target_avg_vel_i / current_avg_vel
+            else:  # avoid division by zero
+                factor = 1.0  # no scaling if original average is 0
+            scaling_factors_per_beat[i] = factor
+
+    # apply scaling factors to notes
+    for note, beat_idx in all_notes_references:
+        scaling_factor = scaling_factors_per_beat[beat_idx]
+        new_velocity = int(round(note.velocity * scaling_factor))
+        # clamp velocity to midi range [1, 127]
+        note.velocity = max(1, min(127, new_velocity))
+
+    # save modified midi files
+    for i, file_path in enumerate(file_paths):
+        try:
+            midi_datas[i].write(file_path)
+            # find first and last beat index for this file for logging
+            first_beat_idx = -1
+            last_beat_idx = -1
+            file_start_time = file_start_times[i]
+            file_end_time = file_start_time + midi_datas[i].get_end_time()
+
+            if all_beat_boundaries:
+                first_beat_idx = bisect_left(all_beat_boundaries, file_start_time)
+                # Need to be careful with the end time; bisect_left finds insertion point
+                # A note starting exactly at the beginning of the next file belongs to the next file
+                last_beat_idx_candidate = bisect_left(
+                    all_beat_boundaries, file_end_time
+                )
+
+                # Adjust if the end time is exactly a boundary
+                if (
+                    last_beat_idx_candidate > 0
+                    and all_beat_boundaries[last_beat_idx_candidate] == file_end_time
+                ):
+                    last_beat_idx = last_beat_idx_candidate - 1
+                # Adjust if the end time falls within the last beat's range
+                elif (
+                    last_beat_idx_candidate > 0
+                    and all_beat_boundaries[last_beat_idx_candidate] > file_end_time
+                ):
+                    last_beat_idx = last_beat_idx_candidate - 1
+                # Handle case where file ends exactly at the last boundary calculated
+                elif last_beat_idx_candidate == len(all_beat_boundaries) - 1:
+                    last_beat_idx = last_beat_idx_candidate - 1
+                else:  # should generally not happen with current logic but as fallback
+                    last_beat_idx = (
+                        last_beat_idx_candidate
+                        if last_beat_idx_candidate < total_global_beats
+                        else total_global_beats - 1
+                    )
+
+                # Ensure last_beat_idx is valid
+                last_beat_idx = max(0, min(last_beat_idx, total_global_beats - 1))
+
+            if (
+                first_beat_idx != -1
+                and last_beat_idx != -1
+                and first_beat_idx <= last_beat_idx
+            ):
+                avg_factor = np.mean(
+                    scaling_factors_per_beat[first_beat_idx : last_beat_idx + 1]
+                )
+                console.log(
+                    f"processed {basename(file_path)} (beats {first_beat_idx}-{last_beat_idx}) with avg scaling factor {avg_factor:.2f}"
+                )
+            else:
+                console.log(
+                    f"processed {basename(file_path)} (no beats identified for scaling factor reporting)"
+                )
+
+        except Exception as e:
+            console.log(
+                f"[red]error writing midi file {basename(file_path)}: {e}[/red]"
+            )
 
 
 def jitter(

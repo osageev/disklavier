@@ -52,6 +52,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stop_btn.setEnabled(False)  # Disabled by default
         self.status.addPermanentWidget(self.stop_btn)
         self.start_btn = QtWidgets.QPushButton("Start")
+        self.start_btn.setDefault(True)  # Make it the default button
         self.start_btn.clicked.connect(self.start_clicked)
         self.status.addPermanentWidget(self.start_btn)
 
