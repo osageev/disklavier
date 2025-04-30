@@ -188,7 +188,7 @@ def main(args, params):
         # start midi recording
         midi_stop_event = midi_recorder.start_recording(td_start)
         # connect recorder to player for velocity updates
-        player.set_recorder(midi_recorder)
+        player.set_recorder_ref(midi_recorder)
 
         # play for set number of transitions
         # TODO: move this to be managed by scheduler and track scheduler state instead
@@ -292,6 +292,7 @@ def main(args, params):
     console.save_text(os.path.join(p_log, f"{ts_start}.log"))
     console.log(f"{tag}[green bold] session complete, exiting")
     return 0
+
 
 if __name__ == "__main__":
     # load/build arguments and parameters

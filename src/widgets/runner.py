@@ -30,6 +30,7 @@ class RunWorker(QtCore.QThread):
     n_files_queued = 0
     pf_augmentations = None
     playing_file = None
+    stop_requested: bool = False
 
     # signals
     s_status = QtCore.Signal(str)
@@ -42,15 +43,13 @@ class RunWorker(QtCore.QThread):
     q_playback = PriorityQueue()
     q_gui = PriorityQueue()
 
-    # Player Tracking State
+    # player tracking
     last_checked_beat: float = 0.0
     previous_player_embedding: Optional[np.ndarray] = None
     playback_cutoff_tick: float = float("inf")
-    player_embedding_diff_threshold: float = 0.1  # TODO: Tune this value (Phase 4)
+    player_embedding_diff_threshold: float = 1.0  # TODO: tune this
     player_segment_beat_interval: int = 8
     adjustment_lookahead_s: float = 3.0
-
-    stop_requested: bool = False  # Flag to control the main loop
 
     def __init__(self, main_window):
         super().__init__()
@@ -75,9 +74,7 @@ class RunWorker(QtCore.QThread):
         self.pf_player_query = main_window.pf_player_query
         self.pf_player_accompaniment = main_window.pf_player_accompaniment
         self.pf_schedule = main_window.pf_schedule
-        self.pf_playlist = (
-            main_window.pf_playlist
-        )  # This seems redundant, check main_window.py
+        self.pf_playlist = main_window.pf_playlist
 
         # metronome
         self.metronome = workers.Metronome(
@@ -85,6 +82,7 @@ class RunWorker(QtCore.QThread):
         )
 
     def run(self):
+        # --- find match ---
         # get seed
         match self.params.initialization:
             case "recording":  # collect user recording
@@ -108,7 +106,7 @@ class RunWorker(QtCore.QThread):
                         f"{self.tag} got {len(self.pf_augmentations)} augmentations:\n\t{self.pf_augmentations}"
                     )
 
-                # scale velocity to match first match
+                # TODO: scale velocity to match first match
             case "audio":
                 self.pf_player_query = self.pf_player_query.replace(".mid", ".wav")
                 ts_recording_len = self.staff.audio_recorder.record_query(
@@ -156,9 +154,6 @@ class RunWorker(QtCore.QThread):
         )
         console.log(f"{self.tag} successfully initialized recording")
 
-        # --- Start Timing and Workers ---
-        # Calculate precise start time
-        # self.td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
         td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
         self.td_start = td_start  # Ensure RunWorker uses the emitted start time
         console.log(
@@ -181,52 +176,59 @@ class RunWorker(QtCore.QThread):
             console.log(f"{self.tag} next average velocity: {next_avg_velocity}")
             # scale velocity of next match
             midi.ramp_vel(self.pf_augmentations, next_avg_velocity, self.args.bpm)
+
+        # --- organize timings, start workers ---
         try:
+            # get start time
             td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
             console.log(
                 f"{self.tag} start time set to {td_start.strftime('%y-%m-%d %H:%M:%S')}"
             )
             self.s_start_time.emit(td_start)
             self.staff.scheduler.td_start = td_start
+
+            # start metronome
             self.metronome.td_start = td_start
             self.metronome.start()
 
-            # Start audio recording
+            # start audio recording
             self.e_audio_stop = self.staff.audio_recorder.start_recording(td_start)
 
-            # Switch to piano roll view
+            # switch to piano roll view
             self.s_switch_to_pr.emit(self.q_gui)
 
-            # Start player thread
+            # start player thread
             self.staff.player.td_start = td_start
-            self.staff.player.td_last_note = td_start  # Reset last note time
-            self.staff.player.set_runner_ref(self)  # <<< CONNECT PLAYER TO RUNNER
+            self.staff.player.td_last_note = td_start
+            self.staff.player.set_runner_ref(self)  # needed for playback tracking
             self.thread_player = Thread(
                 target=self.staff.player.play, name="player", args=(self.q_playback,)
             )
             self.thread_player.start()
 
-            # Start midi recording thread
+            # start midi recording thread
             self.midi_stop_event = self.staff.midi_recorder.start_recording(td_start)
-            self.main_window.midi_stop_event = (
-                self.midi_stop_event
-            )  # Pass stop event to main window
-            self.staff.player.set_recorder(
-                self.staff.midi_recorder
-            )  # Connect recorder for velocity
+            self.main_window.midi_stop_event = self.midi_stop_event
+            self.staff.player.set_recorder_ref(self.staff.midi_recorder)  # vel updates
 
-            # --- Queue Initial Augmentations ---
+            # queue recording augmentations
             if self.pf_augmentations is not None:
                 for aug in self.pf_augmentations:
                     self._queue_file(aug, None)
 
-            # --- Main Run Loop ---
-            console.log(f"{self.tag} Starting main run loop...")
-            tempo = mido.bpm2tempo(self.params.bpm)
-            self.stop_requested = False  # Reset stop flag
-
+            # --- main run loop ---
+            console.log(f"{self.tag}[italic] starting main run loop[/italic]")
+            self.stop_requested = False
             while not self.stop_requested:
                 self._emit_current_file()
+
+                # check if player thread is still alive
+                # will exit loop once all notes are played
+                if not self.thread_player.is_alive():
+                    console.log(
+                        f"{self.tag}[yellow] player thread finished or terminated[/yellow]"
+                    )
+                    break
 
                 # check amount of time remaining in queue
                 remaining_seconds = 0
@@ -234,46 +236,27 @@ class RunWorker(QtCore.QThread):
                     tt_next_note = self.q_playback.queue[0][0]
                     remaining_ticks = max(0, self.tt_queue_end_tick - tt_next_note)
                     remaining_seconds = mido.tick2second(
-                        remaining_ticks, TICKS_PER_BEAT, tempo
+                        remaining_ticks, TICKS_PER_BEAT, self.tempo
                     )
                 else:
                     pass
 
-                if remaining_seconds < self.params.startup_delay * 2:
-                    pf_next_file, similarity = self.staff.seeker.get_next()
-                    self._queue_file(pf_next_file, similarity)
-                # Check if player thread is still alive
-                if not self.thread_player.is_alive():
-                    console.log(
-                        f"{self.tag} Player thread finished or terminated. Exiting run loop."
-                    )
-                    break
-
-                # Update status with current file
-                playing_file = self.staff.scheduler.get_current_file()
-                if playing_file is not None and current_file != playing_file:
-                    current_file = playing_file
-                    console.log(f"{self.tag} Now playing '{current_file}'")
-                    self.s_status.emit(f"Now playing '{current_file}'")
-
-                # Maintain playback queue buffer
-                if (
-                    self.ts_queue < self.params.startup_delay * 2
-                ):  # TODO: Use a better threshold?
+                # add midi to buffer if needed
+                if remaining_seconds < self.params.startup_delay + 1:
                     if self.n_files_queued < self.params.n_transitions:
                         pf_next_file, similarity = self.staff.seeker.get_next()
                         self._queue_file(pf_next_file, similarity)
                         if self.args.verbose:
                             console.log(
-                                f"{self.tag} Queue buffer low ({self.ts_queue:.1f}s). Queued '{basename(pf_next_file)}'."
+                                f"{self.tag}[italic] queue buffer low ({remaining_seconds:.1f}s), queued '{basename(pf_next_file)}'.[/italic]"
                             )
                     else:
                         if self.args.verbose:
                             console.log(
-                                f"{self.tag} Reached transition limit ({self.params.n_transitions}), not queueing more files based on buffer time."
+                                f"{self.tag}[italic] reached transition limit ({self.params.n_transitions}), not queueing more files based on buffer time.[/italic]"
                             )
 
-                # --- Player Tracking Logic ---
+                # --- player tracking ---
                 current_elapsed_s = (datetime.now() - self.td_start).total_seconds()
                 current_beat = current_elapsed_s * self.params.bpm / 60.0
 
@@ -293,46 +276,36 @@ class RunWorker(QtCore.QThread):
                         console.log(
                             f"{self.tag} [red]Error checking player embedding: {e}"
                         )
-                # --- End Player Tracking ---
-
-                # Check if playback queue is empty (player might finish early)
-                if self.q_playback.empty() and not self.thread_player.is_alive():
-                    console.log(
-                        f"{self.tag} Playback queue empty and player thread stopped. Exiting loop."
-                    )
-                    break
-
-                # Small sleep to prevent busy-waiting
+                # small sleep to prevent busy-waiting
                 time.sleep(0.01)
 
-            # --- Loop End ---
-            console.log(f"{self.tag} Exited main run loop.")
+            # --- playback complete ---
+            console.log(f"{self.tag} exited main run loop.")
             if self.stop_requested:
-                console.log(f"{self.tag} Stop was requested.")
+                console.log(f"{self.tag}\tstop was requested.")
 
             # Wait for player thread to finish naturally if it hasn't already
             if self.thread_player.is_alive():
-                console.log(f"{self.tag} Waiting for player thread to finish...")
+                console.log(f"{self.tag}\twaiting for player thread to finish...")
                 self.thread_player.join(timeout=5.0)  # Wait up to 5 seconds
                 if self.thread_player.is_alive():
                     console.log(
                         f"{self.tag} [yellow]Player thread did not finish cleanly."
                     )
 
-            console.log(f"{self.tag} Playback complete or stopped.")
+            console.log(f"{self.tag}\tplayback complete or stopped.")
             self.s_status.emit("Playback complete")
 
         except KeyboardInterrupt:
             console.log(f"{self.tag}[yellow] CTRL + C detected, initiating shutdown...")
-            self.stop_requested = True  # Signal shutdown
+            self.stop_requested = True
         except Exception as e:
             console.print_exception(show_locals=True)
             console.log(
                 f"{self.tag} [red bold]Unexpected error in run loop: {e}. Initiating shutdown..."
             )
-            self.stop_requested = True  # Signal shutdown
+            self.stop_requested = True
 
-        # Ensure shutdown happens even if loop exits unexpectedly
         self.shutdown()
 
     def shutdown(self):
@@ -508,53 +481,58 @@ class RunWorker(QtCore.QThread):
 
         segment_notes = []
         accumulated_ticks = 0
-        # Iterate backwards through recorded notes
+        # iterate backwards through recorded notes
         for msg in reversed(self.staff.midi_recorder.recorded_notes):
-            if msg.time > 0:
-                accumulated_ticks += msg.time
+            # ignoring the warning about 'time' field
+            if msg.time > 0:  # type: ignore
+                accumulated_ticks += msg.time  # type: ignore
             segment_notes.append(msg)
             if accumulated_ticks >= self.player_segment_tick_interval:
-                break  # Collected enough ticks
+                break
 
-        # Check if enough ticks were actually collected
+        # check if enough ticks were actually collected
+        console.log(
+            f"{self.tag} accumulated_ticks: {accumulated_ticks} ({mido.tick2second(accumulated_ticks, TICKS_PER_BEAT, self.tempo):.2f}s)"
+        )
         if accumulated_ticks < self.player_segment_tick_interval:
             if self.args.verbose:
                 console.log(
-                    f"{self.tag} Insufficient recorded notes for {self.player_segment_beat_interval}-beat segment ({accumulated_ticks}/{self.player_segment_tick_interval} ticks)."
+                    f"{self.tag} insufficient recorded notes for {self.player_segment_beat_interval}-beat segment ({accumulated_ticks}/{self.player_segment_tick_interval} ticks)."
                 )
             return None
 
-        # Reverse to chronological order
+        # re-reverse to chronological order
         segment_notes.reverse()
 
-        # Create MIDI file
+        # create MIDI file
         midi_segment = mido.MidiFile(ticks_per_beat=TICKS_PER_BEAT)
         track = mido.MidiTrack()
         midi_segment.tracks.append(track)
         track.append(mido.MetaMessage("set_tempo", tempo=self.tempo, time=0))
+        midi_segment.print_tracks()
 
-        # Add notes, adjusting time of the first note
+        # add notes, adjusting time of the first note
         if segment_notes:
-            first_note_time = segment_notes[0].time  # Store original delta time
-            track.append(segment_notes[0].copy(time=0))  # First note starts at time 0
-            # Add subsequent notes with their original delta times
+            first_note_time = segment_notes[0].time  # store original delta time
+            track.append(segment_notes[0].copy(time=0))  # first note starts at time 0
+            # add subsequent notes with their original delta times
             for i in range(1, len(segment_notes)):
                 track.append(segment_notes[i])
+        midi_segment.print_tracks()
 
-        # Save to temporary file
-        temp_filename = f"player_segment_{uuid.uuid4()}.mid"
-        pf_temp_player_segment = os.path.join(
-            self.p_log, temp_filename
-        )  # Save in log dir
+        # save to temporary file
+        uuid_str = str(uuid.uuid1()).split("-")[0]
+        temp_filename = f"player_segment_{uuid_str}.mid"
+        pf_temp_player_segment = os.path.join(self.p_log, temp_filename)
         try:
             midi_segment.save(pf_temp_player_segment)
             if self.args.verbose:
                 console.log(
-                    f"{self.tag} Saved temporary player segment: {pf_temp_player_segment}"
+                    f"{self.tag} saved temporary player segment: {pf_temp_player_segment}"
                 )
             return pf_temp_player_segment
         except Exception as e:
-            console.log(f"{self.tag} [red]Failed to save temporary MIDI segment: {e}")
+            console.log(f"{self.tag} [red]failed to save temporary MIDI segment: {e}")
             return None
 
     def _check_player_embedding(self):
@@ -563,8 +541,9 @@ class RunWorker(QtCore.QThread):
         """
         pf_temp_player_segment = self._extract_player_segment()
         if pf_temp_player_segment is None:
-            return  # Not enough notes or error saving
+            return
 
+        # --- get current embedding ---
         try:
             current_player_embedding = panther.send_embedding(
                 pf_temp_player_segment,
@@ -572,53 +551,50 @@ class RunWorker(QtCore.QThread):
                 mode=self.params.seeker.mode,
             )
         except Exception as e:
-            console.log(f"{self.tag} [red]Error getting player embedding: {e}")
-            os.remove(pf_temp_player_segment)  # Clean up temp file
+            console.log(f"{self.tag} [red]error getting player embedding: {e}")
+            os.remove(pf_temp_player_segment)  # clean up temp file
             return
         finally:
-            # Ensure temp file is deleted even if panther fails
+            # ensure temp file is deleted even if panther fails
             if os.path.exists(pf_temp_player_segment):
                 os.remove(pf_temp_player_segment)
 
+        # --- check embedding diff ---
         if self.previous_player_embedding is not None:
             embedding_diff = current_player_embedding - self.previous_player_embedding
             diff_magnitude = np.linalg.norm(embedding_diff)
             if self.args.verbose:
                 console.log(
-                    f"{self.tag} Player embedding diff magnitude: {diff_magnitude:.4f}"
+                    f"{self.tag} player embedding diff magnitude: {diff_magnitude:.4f}"
                 )
 
             if diff_magnitude > self.player_embedding_diff_threshold:
                 console.log(
-                    f"{self.tag} [yellow]Embedding diff threshold exceeded ({diff_magnitude:.4f} > {self.player_embedding_diff_threshold}). Adjusting trajectory..."
+                    f"{self.tag} [yellow]embedding diff threshold exceeded ({diff_magnitude:.4f} > {self.player_embedding_diff_threshold}). adjusting trajectory..."
                 )
                 try:
-                    self._adjust_playback_trajectory(
-                        embedding_diff, current_player_embedding
-                    )
+                    self._adjust_playback_trajectory(embedding_diff)
                 except Exception as e:
                     console.print_exception(show_locals=True)
                     console.log(
                         f"{self.tag} [red]Error adjusting playback trajectory: {e}"
                     )
-                    # Reset cutoff just in case it was set before error
+                    # reset cutoff just in case it was set before error
                     self.playback_cutoff_tick = float("inf")
             else:
                 if self.args.verbose:
                     console.log(
-                        f"{self.tag} Player embedding difference below threshold."
+                        f"{self.tag} player embedding difference below threshold."
                     )
         else:
             if self.args.verbose:
                 console.log(
-                    f"{self.tag} First player embedding calculated, storing for next check."
+                    f"{self.tag} first player embedding calculated, storing for next check."
                 )
 
         self.previous_player_embedding = current_player_embedding
 
-    def _adjust_playback_trajectory(
-        self, embedding_diff: np.ndarray, current_player_embedding: np.ndarray
-    ):
+    def _adjust_playback_trajectory(self, embedding_diff: np.ndarray):
         """
         Adjusts the upcoming playback based on the embedding difference.
         """

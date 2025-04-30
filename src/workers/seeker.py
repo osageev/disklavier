@@ -296,7 +296,7 @@ class Seeker(Worker):
         if self.verbose:
             for i in range(3):
                 console.log(
-                    f"{self.tag}\t{i}: {self.filenames[indices[i]]} {similarities[i]:.05f}"
+                    f"{self.tag}\t\t{i}: {self.filenames[indices[i]]} {similarities[i]:.05f}"
                 )
 
         # find most similar valid match
