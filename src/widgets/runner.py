@@ -1,6 +1,7 @@
 import os
 import time
 import mido
+import pretty_midi
 from PySide6 import QtCore
 from threading import Thread
 from rich.table import Table
@@ -484,8 +485,10 @@ class RunWorker(QtCore.QThread):
         # iterate backwards through recorded notes
         for msg in reversed(self.staff.midi_recorder.recorded_notes):
             # ignoring the warning about 'time' field
-            if msg.time > 0:  # type: ignore
-                accumulated_ticks += msg.time  # type: ignore
+            accumulated_ticks += msg.time  # type: ignore
+            if self.staff.midi_recorder.recorded_notes.index(msg) == 0:
+                # this should be treated as zero in this context
+                accumulated_ticks -= msg.time  # type: ignore
             segment_notes.append(msg)
             if accumulated_ticks >= self.player_segment_tick_interval:
                 break
@@ -509,7 +512,7 @@ class RunWorker(QtCore.QThread):
         track = mido.MidiTrack()
         midi_segment.tracks.append(track)
         track.append(mido.MetaMessage("set_tempo", tempo=self.tempo, time=0))
-        midi_segment.print_tracks()
+        # midi_segment.print_tracks()
 
         # add notes, adjusting time of the first note
         if segment_notes:
@@ -518,18 +521,20 @@ class RunWorker(QtCore.QThread):
             # add subsequent notes with their original delta times
             for i in range(1, len(segment_notes)):
                 track.append(segment_notes[i])
-        midi_segment.print_tracks()
+        # midi_segment.print_tracks()
 
         # save to temporary file
         uuid_str = str(uuid.uuid1()).split("-")[0]
-        temp_filename = f"player_segment_{uuid_str}.mid"
+        temp_filename = f"player_segment-{self.params.bpm}-{uuid_str}.mid"
         pf_temp_player_segment = os.path.join(self.p_log, temp_filename)
         try:
             midi_segment.save(pf_temp_player_segment)
+
             if self.args.verbose:
                 console.log(
                     f"{self.tag} saved temporary player segment: {pf_temp_player_segment}"
                 )
+                console.log(f"{self.tag} segment has length {pretty_midi.PrettyMIDI(pf_temp_player_segment).get_end_time():.2f} seconds")
             return pf_temp_player_segment
         except Exception as e:
             console.log(f"{self.tag} [red]failed to save temporary MIDI segment: {e}")
@@ -573,7 +578,11 @@ class RunWorker(QtCore.QThread):
                     f"{self.tag} [yellow]embedding diff threshold exceeded ({diff_magnitude:.4f} > {self.player_embedding_diff_threshold}). adjusting trajectory..."
                 )
                 try:
-                    self._adjust_playback_trajectory(embedding_diff)
+                    # self._adjust_playback_trajectory(embedding_diff)
+                    console.log(
+                        f"{self.tag} sending embedding to seeker ({embedding_diff.shape})"
+                    )
+                    self.staff.seeker.offset_embedding = embedding_diff
                 except Exception as e:
                     console.print_exception(show_locals=True)
                     console.log(

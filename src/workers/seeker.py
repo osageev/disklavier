@@ -20,32 +20,29 @@ class Seeker(Worker):
     # required tables
     filenames: list[str] = []
     faiss_index: faiss.IndexFlatIP
+    filename_to_index: dict[str, int] = {}
     neighbor_table: pd.DataFrame | pd.Series
     neighbor_col_priorities = ["next", "next_2", "prev", "prev_2"]
-    # forced track change interval
-    n_transition_interval: int = 8  # 16 bars since segments are 2 bars
-    # number of repeats for easy mode
-    n_segment_repeats: int = 0
+
     # playback trackers
     played_files: list[str] = []
     allow_multiple_plays = True
-    # playlist mode position tracker
-    matches_pos: int = 0
-    # TODO: i forget what this does tbh, rewrite entire playlist mode
-    matches_mode: str = "cplx"
-    playlist: dict[str, dict[str, list[tuple[str, float]]]] = {}
-    # force pitch match after finding next segment
-    pitch_match = False
-    # path tracking variables
-    current_path: list[tuple[str, float]] = []
-    path_position: int = 0
-    num_segs_diff_tracks: int = 5
-    # filename to index mapping
-    filename_to_index: dict[str, int] = {}
+    pitch_match = False  # force pitch match
+    offset_embedding: np.ndarray | None = None
 
     # velocity tracking
+    # TODO: unused, will be used to guide selection
     _recorder = None
     _avg_velocity: float = 0.0
+
+    # easy mode
+    n_transition_interval: int = 8  # forced track change interval
+    n_segment_repeats: int = 2  # number of repeats
+
+    # graph mode
+    path_position: int = 0
+    num_segs_diff_tracks: int = 5
+    current_path: list[tuple[str, float]] = []
 
     def __init__(
         self,
@@ -107,9 +104,9 @@ class Seeker(Worker):
         #             console.log(f"{self.tag} Error reconstructing/checking vector {i}: {e}")
 
         # load neighbor table
-        # old version -- backwards compat
+        # old version for backwards compat
         pf_neighbor_table = os.path.join(self.p_table, "neighbor.parquet")
-        if not os.path.isfile(pf_neighbor_table):
+        if not os.path.isfile(pf_neighbor_table):  # current version
             pf_neighbor_table = os.path.join(self.p_table, "neighbors.h5")
         console.log(f"{self.tag} looking for neighbor table '{pf_neighbor_table}'")
         if os.path.isfile(pf_neighbor_table):
@@ -182,7 +179,7 @@ class Seeker(Worker):
             case "easy":
                 next_file = self._get_easy()
             case "playlist":
-                next_file, similarity = self._read_playlist()
+                raise NotImplementedError("playlist mode not implemented")
             case "repeat":
                 next_file = self.played_files[-1]
             case "sequential":
@@ -242,8 +239,9 @@ class Seeker(Worker):
                 f"{self.tag} {len(self.played_files)} played files:\n{self.played_files[-5:]}"
             )
 
+        # --- determine query file ---
         query_file = basename(self.played_files[-1])
-
+        # match based on neighboring file instead of current
         if self.params.match != "current" and query_file in self.filenames:
             track, segment, augmentation = query_file.split("_")
             new_query_file = self.neighbor_table.loc[
@@ -256,25 +254,23 @@ class Seeker(Worker):
                 )
                 query_file = new_query_file
 
-        # load query embedding
-        # first, look in existing index
-        # then, if no embedding is found, calculate manually
+        # --- get query embedding ---
+        # first, look in existing index then, if no embedding is found, calculate manually
         try:
-            # Use dictionary lookup instead of list.index() with fallback
+            # ue dictionary lookup instead of list.index() with fallback
             try:
                 embedding = self.faiss_index.reconstruct(self.filename_to_index[query_file])  # type: ignore
             except KeyError:
                 embedding = self.faiss_index.reconstruct(self.filenames.index(query_file))  # type: ignore
         except (ValueError, KeyError):
+            # couldn't find embedding in index, calculate manually
             pf_new = self.played_files[-1]
-            # if "player" in pf_new:
-            #     pf_new = self.augment_recording(pf_new)
 
             console.log(
                 f"{self.tag}[yellow] unable to find embedding for '{query_file}', calculating manually from '{pf_new}'"
             )
 
-            # Add the new embedding to the index and update filenames list and dictionary
+            # add the new embedding to the index and update filenames list and dictionary
             embedding = self.get_embedding(pf_new)
             embedding /= np.linalg.norm(embedding, axis=1, keepdims=True)
             self.faiss_index.add(embedding)  # type: ignore
@@ -283,16 +279,27 @@ class Seeker(Worker):
             console.log(
                 f"{self.tag} added [dark_red bold]{query_file}[/dark_red bold] to index"
             )
+        # got embedding, reshape for faiss
         query_embedding = np.array(
             embedding,
             dtype=np.float32,
         ).reshape(1, -1)
 
-        # query index
+        # move embedding if player offset is present
+        if self.offset_embedding is not None:
+            query_embedding += self.offset_embedding
+
+            if self.verbose:
+                console.log(
+                    f"{self.tag} added player offset to query embedding: {self.offset_embedding.shape}"
+                )
+            self.offset_embedding = None
+
+        # --- query index ---
         if self.verbose and query_file in self.filenames:
             console.log(f"{self.tag} querying with key '{query_file}'")
 
-        indices, similarities = self._faiss_search(query_embedding)  # type: ignore
+        indices, similarities = self._faiss_search(query_embedding)
         if self.verbose:
             for i in range(3):
                 console.log(
@@ -301,6 +308,7 @@ class Seeker(Worker):
 
         # find most similar valid match
         if "player" in query_file:
+            # no neighbor for recordings
             next_file = self._get_random()
         else:
             next_file = self._get_neighbor()
@@ -336,7 +344,7 @@ class Seeker(Worker):
                 else:
                     next_file = f"{segment_name}.mid"
                     break
-            
+
             # all conditions met
             next_file = f"{segment_name}.mid"
             break
@@ -640,40 +648,6 @@ class Seeker(Worker):
 
         return str(random_file)
 
-    def _read_playlist(self) -> tuple[str, float]:
-        """Read next segment from playlist"""
-        # TODO: modify this to work from current playlist paradigm
-        if self.verbose:
-            console.log(
-                f"{self.tag} playing matches for '{[self.playlist.keys()][self.matches_pos]}'"
-            )
-            console.log(f"{self.tag} already played files:\n{self.played_files}")
-
-        for i, (q, ms) in enumerate(self.playlist.items()):
-            if i == self.matches_pos:
-                console.log(f"{self.tag} [grey30]{i}\t'{q}'")
-                for mode, matches in ms.items():
-                    console.log(f"{self.tag} [grey30]\t'{mode}'")
-                    if mode == self.matches_mode:
-                        for f, s in matches[:5]:
-                            base_files = [
-                                os.path.basename(self.base_file(f))
-                                for f in self.played_files
-                            ]
-                            if self.base_file(f) in base_files:
-                                console.log(f"{self.tag} [grey30]\t\t'{f}'\t{s}")
-                            else:
-                                console.log(f"{self.tag} [grey70]\t\t'{f}'\t{s}")
-                                file_path = f"{f}.mid"
-                                return file_path, float(s)
-                        if self.matches_mode == "cplx":
-                            raise EOFError("playlist complete")
-                        console.log(f"{self.tag} switching modes")
-                        self.matches_mode = "cplx"
-                        file_path = f"{q}.mid"
-                        return file_path, 0.0
-        return "", 0.0
-
     def get_embedding(self, pf_midi: str, model: str | None = None) -> np.ndarray:
         if not model:
             model = str(self.params.metric)
@@ -703,6 +677,8 @@ class Seeker(Worker):
     ) -> tuple[list[int], list[float]]:
         """
         search the FAISS index for the most similar embeddings.
+
+        index param is for compare script short circuiting
         """
         # ensure that embedding is normalized
         query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
@@ -788,7 +764,7 @@ class Seeker(Worker):
         )
         for i in range(3):
             console.log(
-                f"{self.tag}\t'{filenames[indices[i]]}' ({indices[i]:04d}): {similarities[i]:.4f}"
+                f"{self.tag}\t\t'{filenames[indices[i]]}' ({indices[i]:04d}): {similarities[i]:.4f}"
             )
 
         # get best match

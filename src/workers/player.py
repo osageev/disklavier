@@ -99,7 +99,7 @@ class Player(Worker):
 
             if self._last_factor != self._velocity_adjustment_factor:
                 console.log(
-                    f"{self.tag} adjustment factor: {self._velocity_adjustment_factor:.2f}"
+                    f"{self.tag}[grey30]\tnew adjustment factor: {self._velocity_adjustment_factor:.2f}[/grey30]"
                 )
 
     def _calculate_velocity_adjustment_factor(self):

@@ -24,7 +24,7 @@ metronome:
   verbose: False
   do_tick: True
 recorder:
-  verbose: True
+  verbose: False
   midi_port: "Disklavier"
 audio:
   verbose: True

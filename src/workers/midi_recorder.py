@@ -272,12 +272,13 @@ class MidiRecorder(Worker):
             self._max_velocity = 0
 
         # print velocity stats if we have data
-        if self._velocity_window:
-            console.log(
-                f"{self.tag} velocity stat updated: avg={self._avg_velocity:.2f}, min={self._min_velocity}, max={self._max_velocity}"
-            )
-        else:
-            console.log(f"{self.tag} no notes played in the last beat")
+        if self.verbose:
+            if self._velocity_window:
+                console.log(
+                    f"{self.tag} velocity stat updated: avg={self._avg_velocity:.2f}, min={self._min_velocity}, max={self._max_velocity}"
+                )
+            else:
+                console.log(f"{self.tag} no notes played in the last beat")
 
         # send velocity stats to max
         send_udp(
