@@ -1,6 +1,6 @@
-SUPPORTED_EXTENSIONS = (".mid", ".midi")
-TICKS_PER_BEAT = 220
-EMBEDDING_SIZES = {
+SUPPORTED_EXTENSIONS: tuple[str, ...] = (".mid", ".midi")
+TICKS_PER_BEAT: int = 220
+EMBEDDING_SIZES: dict[str, int] = {
     "pitch-histogram": 12,
     "specdiff": 768,
     "clf-4note": 128,
@@ -9,7 +9,7 @@ EMBEDDING_SIZES = {
     "clap": 512,
     "clamp": 768,
 }
-NOTE_NAMES = {
+NOTE_NAMES: dict[str, int] = {
     "C0": 12,
     "C#0": 13,
     "D0": 14,
@@ -119,3 +119,4 @@ NOTE_NAMES = {
     "A#8": 118,
     "B8": 119,
 }
+N_BEATS_TRANSITION_OFFSET: int = 8

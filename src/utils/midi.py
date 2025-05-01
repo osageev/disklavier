@@ -1074,7 +1074,7 @@ def ramp_vel(file_paths: list[str], target_vel: int, bpm: int) -> None:
 
     total_global_beats = len(notes_by_beat)
     if total_global_beats == 0:
-        console.log("[orange]no non-drum notes found in any beats.[/orange]")
+        console.log("\t[orange]no non-drum notes found in any beats.[/orange]")
         return
 
     # calculate average velocity per global beat
@@ -1107,7 +1107,7 @@ def ramp_vel(file_paths: list[str], target_vel: int, bpm: int) -> None:
     for i, avg_vel in enumerate(avg_vels_per_beat):
         if avg_vel <= 0:
             console.log(
-                f"[orange]warning: beat {i} has zero or invalid average velocity. using 64.[/orange]"
+                f"\t[orange]warning: beat {i} has zero or invalid average velocity. using 64.[/orange]"
             )
             avg_vels_per_beat[i] = 64  # use a default neutral velocity
 
@@ -1193,7 +1193,7 @@ def ramp_vel(file_paths: list[str], target_vel: int, bpm: int) -> None:
                     scaling_factors_per_beat[first_beat_idx : last_beat_idx + 1]
                 )
                 console.log(
-                    f"processed {basename(file_path)} (beats {first_beat_idx}-{last_beat_idx}) with avg scaling factor {avg_factor:.2f}"
+                    f"\tprocessed {basename(file_path)} (beats {first_beat_idx}-{last_beat_idx}) with avg scaling factor {avg_factor:.2f}"
                 )
             else:
                 console.log(
@@ -1202,7 +1202,7 @@ def ramp_vel(file_paths: list[str], target_vel: int, bpm: int) -> None:
 
         except Exception as e:
             console.log(
-                f"[red]error writing midi file {basename(file_path)}: {e}[/red]"
+                f"\t[red]error writing midi file {basename(file_path)}: {e}[/red]"
             )
 
 
