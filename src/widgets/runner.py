@@ -106,8 +106,6 @@ class RunWorker(QtCore.QThread):
                     console.log(
                         f"{self.tag} got {len(self.pf_augmentations)} augmentations:\n\t{self.pf_augmentations}"
                     )
-
-                # TODO: scale velocity to match first match
             case "audio":
                 self.pf_player_query = self.pf_player_query.replace(".mid", ".wav")
                 ts_recording_len = self.staff.audio_recorder.record_query(
@@ -250,11 +248,6 @@ class RunWorker(QtCore.QThread):
                         if self.args.verbose:
                             console.log(
                                 f"{self.tag}[italic] queue buffer low ({remaining_seconds:.1f}s), queued '{basename(pf_next_file)}'.[/italic]"
-                            )
-                    else:
-                        if self.args.verbose:
-                            console.log(
-                                f"{self.tag}[italic] reached transition limit ({self.params.n_transitions}), not queueing more files based on buffer time.[/italic]"
                             )
 
                 # --- player tracking ---
@@ -428,7 +421,7 @@ class RunWorker(QtCore.QThread):
         # Optional: Signal main window about completion?
         # self.finished.emit() # If using QThread's finished signal
 
-    def _queue_file(self, file_path: str, similarity: float | None) -> None:
+    def _queue_file(self, file_path: str, similarity: Optional[float] = None) -> None:
         # Check if file exists before queueing
         if not os.path.exists(file_path):
             console.log(
