@@ -142,7 +142,7 @@ class RunWorker(QtCore.QThread):
             self.staff.scheduler.set_start_time(self.td_playback_start)
             self.staff.scheduler.init_schedule(
                 self.pf_schedule,
-                0#ts_recording_len if self.params.initialization == "recording" else 0,
+                0,  # ts_recording_len if self.params.initialization == "recording" else 0,
             )
             console.log(f"{self.tag} successfully initialized recording")
 
@@ -194,9 +194,13 @@ class RunWorker(QtCore.QThread):
             if self.pf_augmentations is not None:
                 # get average velocity of next match
                 next_avg_velocity = midi.get_average_velocity(self.pf_augmentations[-1])
-                console.log(f"{self.tag} first match average velocity: {next_avg_velocity}")
+                console.log(
+                    f"{self.tag} first match average velocity: {next_avg_velocity}"
+                )
                 # scale velocity of next match
-                midi.ramp_vel(self.pf_augmentations[:-1], next_avg_velocity, self.args.bpm)
+                midi.ramp_vel(
+                    self.pf_augmentations[:-1], next_avg_velocity, self.args.bpm
+                )
                 for aug in self.pf_augmentations:
                     self._queue_file(aug, None)
 
@@ -412,6 +416,14 @@ class RunWorker(QtCore.QThread):
                     console.log(
                         f"{self.tag}\t\tjoined midi:\t{joined_midi.get_end_time()} s"
                     )
+
+                # add lead-in bar for rearranged files
+                beat_len_sec = 60 / self.params.bpm
+                if i > 0:
+                    for instrument in joined_midi.instruments:
+                        for note in instrument.notes:
+                            note.start += beat_len_sec
+                            note.end += beat_len_sec
 
                 pf_joined_midi = os.path.join(
                     pf_augmentations, f"{basename(pf_midi)}_a{i:02d}.mid"

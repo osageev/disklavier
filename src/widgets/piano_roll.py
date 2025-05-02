@@ -355,11 +355,14 @@ class PianoRollView(QGraphicsView):
 
     def update_transitions(self, transitions: list[float]):
         # Convert transition times (seconds relative to start) to ms relative to start
-        # console.log(f"updating transitions (raw seconds): {transitions}")
-        self.transition_times = [
-            t * 1000 for t in transitions
-        ]  # convert seconds to milliseconds
-        # console.log(f"updating transitions (ms relative to start): {self.transition_times}")
+        # console.log(f"updating transitions (raw seconds): {transitions[:-3]}")
+        # console.log(
+        #     [
+        #         (self.start_time + timedelta(seconds=t)).strftime("%H:%M:%S.%f")[:-3]
+        #         for t in transitions[:-3]
+        #     ]
+        # )
+        self.transition_times = [t * 1000 for t in transitions] 
 
     def draw_transition_lines(self, painter):
         """
@@ -435,39 +438,75 @@ class PianoRollView(QGraphicsView):
                 # draw line across full horizontal width (window_width)
                 painter.drawLine(self.key_width, y, self.window_width, y)
 
-        # draw vertical time markers every second
-        for t_offset_ms in range(0, self.roll_len_ms + 1, 1000):
-            # t_offset_ms is the offset *into the future* from the current time line
-            # We need the absolute time (ms relative to start) for this marker
-            absolute_marker_time_ms = self.current_time + t_offset_ms
-            x = self.time_to_x(absolute_marker_time_ms)
+        # draw vertical beat lines
+        if self.bpm > 0:
+            beat_interval_ms = (60.0 / self.bpm) * 1000.0
+            # determine the range of beats to draw based on visible time
+            min_visible_time_ms = (
+                self.current_time - self.roll_len_ms * 1.1
+            )  # add buffer
+            max_visible_time_ms = (
+                self.current_time + self.roll_len_ms * 0.1
+            )  # add buffer
 
-            # only draw if in visible horizontal area (window_width)
-            if self.key_width <= x <= self.window_width:
-                # draw time marker line across full vertical height (window_height)
-                painter.setPen(QPen(QColor(102, 102, 102, 128), 1))
-                painter.drawLine(x, 0, x, self.window_height)
+            start_beat_index = int(min_visible_time_ms / beat_interval_ms) - 1
+            end_beat_index = int(max_visible_time_ms / beat_interval_ms) + 1
 
-                # draw time labels (every 2 seconds)
-                if t_offset_ms % 2000 == 0:
-                    painter.setPen(QColor(178, 178, 178))
-                    font = QFont("Arial", 10)
-                    painter.setFont(font)
+            painter.setPen(
+                QPen(QColor(80, 80, 80, 100), 0.8)
+            )  # thin grey lines for beats
+            for beat_index in range(start_beat_index, end_beat_index):
+                beat_time_ms = beat_index * beat_interval_ms
+                x = self.time_to_x(beat_time_ms)
+                if self.key_width <= x <= self.window_width:
+                    painter.drawLine(x, 0, x, self.window_height)
 
-                    # adjust text position check based on window_width
-                    if x < self.window_width - 15:
-                        text_x = x + 2  # Position label slightly right of line
-                    else:
-                        text_x = x - 15  # Position label left if too close to edge
+        # --- second markers ---
+        # too visually noisy
+        # for t_offset_ms in range(0, self.roll_len_ms + 1, 1000):
+        #     # t_offset_ms is the offset *into the future* from the current time line
+        #     # we need the absolute time (ms relative to start) for this marker
+        #     absolute_marker_time_ms = (
+        #         self.current_time + t_offset_ms
+        #     )  # This calculation seems wrong relative to time_to_x
+        #     # Recalculate: time_to_x expects absolute ms relative to start_time.
+        #     # The markers should be at absolute times T such that (T - current_time) % 1000 == 0 (approximately)
+        #     # Let's find the first absolute marker time >= current_time - roll_len_ms
+        #     min_abs_time_ms = self.current_time - self.roll_len_ms
+        #     first_marker_abs_time_ms = (int(min_abs_time_ms / 1000) + 1) * 1000
 
-                    # Label shows seconds into the future (or past, if offset is negative which shouldn't happen here)
-                    relative_time_seconds = round(t_offset_ms / 1000)
-                    time_label = (
-                        "0"  # Label at current time marker
-                        if relative_time_seconds == 0
-                        else str(relative_time_seconds)
-                    )
-                    painter.drawText(text_x, 10, time_label)
+        #     # iterate through absolute marker times within the visible window
+        #     current_marker_abs_time_ms = first_marker_abs_time_ms
+        #     while (
+        #         current_marker_abs_time_ms <= self.current_time + 100
+        #     ):  # draw slightly past current time
+        #         x = self.time_to_x(current_marker_abs_time_ms)
+
+        #         # only draw if in visible horizontal area (window_width)
+        #         if self.key_width <= x <= self.window_width:
+        #             # draw time marker line across full vertical height (window_height)
+        #             painter.setPen(QPen(QColor(102, 102, 102, 128), 1))
+        #             painter.drawLine(x, 0, x, self.window_height)
+
+        #             # draw time labels (every 2 seconds) - check absolute time
+        #             if current_marker_abs_time_ms % 2000 == 0:
+        #                 painter.setPen(QColor(178, 178, 178))
+        #                 font = QFont("Arial", 10)
+        #                 painter.setFont(font)
+
+        #                 # adjust text position check based on window_width
+        #                 if x < self.window_width - 15:
+        #                     text_x = x + 2  # position label slightly right of line
+        #                 else:
+        #                     text_x = x - 15  # position label left if too close to edge
+
+        #                 # label shows seconds relative to current time
+        #                 relative_time_seconds = round(
+        #                     (current_marker_abs_time_ms - self.current_time) / 1000
+        #                 )
+        #                 time_label = str(relative_time_seconds)
+        #                 painter.drawText(text_x, 10, time_label)
+        #         current_marker_abs_time_ms += 1000  # move to next second marker
 
         # current time marker (calculated using current_time relative ms)
         current_x = self.time_to_x(self.current_time)
