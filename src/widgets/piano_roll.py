@@ -308,9 +308,10 @@ class PianoRollView(QGraphicsView):
         self.draw_keyboard(painter)
 
     def update_transitions(self, transitions: list[float]):
-            self.transition_times = [
-                t * 1000 for t in transitions
-            ]  # convert to milliseconds
+        console.log(f"updating transitions: {[self.start_time + timedelta(seconds=t) for t in transitions]}")
+        self.transition_times = [
+            t * 1000 for t in transitions
+        ]  # convert to milliseconds
 
     def draw_transition_lines(self, painter):
         """

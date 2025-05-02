@@ -112,15 +112,17 @@ def send_embedding(
                 time.sleep(0.01)
 
         sftp.get(pf_tensor_remote, pf_tensor_local)
-        console.log(f"{tag} downloaded embedding file '{pf_tensor_local}'")
+        if verbose:
+            console.log(f"{tag} downloaded embedding file '{pf_tensor_local}'")
 
         sftp.close()
         ssh.close()
 
-    console.log(f"{tag} loading embedding from '{pf_tensor_local}'")
-    embedding = torch.load(pf_tensor_local, weights_only=False).numpy().reshape(1, -1)
     if verbose:
-        console.log(f"{tag} loaded embedding {embedding.shape}")
+        console.log(f"{tag} loading embedding from '{pf_tensor_local}'")
+    embedding = torch.load(pf_tensor_local, weights_only=False).numpy().reshape(1, -1)
+
+    console.log(f"{tag} loaded embedding {embedding.shape}")
 
     return embedding
 

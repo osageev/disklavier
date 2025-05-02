@@ -27,6 +27,8 @@ class RunWorker(QtCore.QThread):
     n_files_queued = 0
     pf_augmentations = None
     playing_file = None
+    ts_system_start = datetime.now()
+    td_playback_start = datetime.now()
 
     # signals
     s_status = QtCore.Signal(str)
@@ -86,10 +88,8 @@ class RunWorker(QtCore.QThread):
                 if self.params.seed_rearrange or self.params.seed_remove:
                     self.pf_augmentations = self.augment_midi(self.pf_seed)
                     console.log(
-                        f"{self.tag} got {len(self.pf_augmentations)} augmentations:\n\t{self.pf_augmentations}"
+                        f"{self.tag} playing {len(self.pf_augmentations)} augmentations:\n\t{self.pf_augmentations}"
                     )
-
-                # scale velocity to match first match
             case "audio":
                 self.pf_player_query = self.pf_player_query.replace(".mid", ".wav")
                 ts_recording_len = self.staff.audio_recorder.record_query(
@@ -131,61 +131,72 @@ class RunWorker(QtCore.QThread):
             # TODO: implement playlist mode using generated csv's
             raise NotImplementedError("playlist mode not implemented")
 
-        self.staff.scheduler.init_schedule(
-            self.pf_schedule,
-            ts_recording_len if self.params.initialization == "recording" else 0,
-        )
-        console.log(f"{self.tag} successfully initialized recording")
-
-        # add seed to queue
-        self._queue_file(self.pf_seed, None)
-
-        # add first match to queue
-        if self.pf_augmentations is None:
-            pf_next_file, similarity = self.staff.seeker.get_next()
-            self._queue_file(pf_next_file, similarity)
-        else:
-            # get next match and scale velocity
-            pf_next_file, _ = self.staff.seeker.get_next()
-            self.pf_augmentations.append(pf_next_file)
-
-            # get average velocity of next match
-            next_avg_velocity = midi.get_average_velocity(pf_next_file)
-            console.log(f"{self.tag} next average velocity: {next_avg_velocity}")
-            # scale velocity of next match
-            midi.ramp_vel(self.pf_augmentations, next_avg_velocity, self.args.bpm)
-
         try:
-            td_start = datetime.now() + timedelta(seconds=self.params.startup_delay)
-            console.log(
-                f"{self.tag} start time set to {td_start.strftime('%y-%m-%d %H:%M:%S')}"
+            self.td_playback_start = datetime.now() + timedelta(
+                seconds=self.params.startup_delay
             )
-            self.s_start_time.emit(td_start)
-            self.staff.scheduler.td_start = td_start
-            self.metronome.td_start = td_start
-            self.metronome.start()  # Start the QThread directly
+            console.log(
+                f"{self.tag} start time set to {self.td_playback_start.strftime('%y-%m-%d %H:%M:%S')}"
+            )
+            self.s_start_time.emit(self.td_playback_start)
+            self.staff.scheduler.set_start_time(self.td_playback_start)
+            self.staff.scheduler.init_schedule(
+                self.pf_schedule,
+                0#ts_recording_len if self.params.initialization == "recording" else 0,
+            )
+            console.log(f"{self.tag} successfully initialized recording")
+
+            # add seed to queue
+            self._queue_file(self.pf_seed, None)
+
+            # add first match to queue
+            # if self.pf_augmentations is None:
+            #     pf_next_file, similarity = self.staff.seeker.get_next()
+            #     self._queue_file(pf_next_file, similarity)
+            # else:
+            #     # if we're using augmentations we need to get the first match now so that we know how to scale the velocity
+            #     pf_next_file, similarity = self.staff.seeker.get_next()
+            #     self.pf_augmentations.append(pf_next_file)
+
+            #     # get average velocity of next match
+            #     next_avg_velocity = midi.get_average_velocity(pf_next_file)
+            #     console.log(f"{self.tag} next average velocity: {next_avg_velocity}")
+            #     # scale velocity of next match
+            #     midi.ramp_vel(self.pf_augmentations, next_avg_velocity, self.args.bpm)
+
+            self.metronome.td_start = self.td_playback_start
+            self.metronome.start()
 
             # start audio recording in a separate thread
             # TODO: fix ~1-beat delay in audio recording startup
-            self.e_audio_stop = self.staff.audio_recorder.start_recording(td_start)
+            self.e_audio_stop = self.staff.audio_recorder.start_recording(
+                self.td_playback_start
+            )
 
-            # Switch to piano roll view using signal
+            # switch to piano roll view
             self.s_switch_to_pr.emit(self.q_gui)
             # start player
-            self.staff.player.td_start = td_start
-            self.staff.player.td_last_note = td_start
+            self.staff.player.set_start_time(self.td_playback_start)
+            self.staff.player.td_last_note = self.td_playback_start
             self.thread_player = Thread(
                 target=self.staff.player.play, name="player", args=(self.q_playback,)
             )
             self.thread_player.start()
 
             # start midi recording
-            self.midi_stop_event = self.staff.midi_recorder.start_recording(td_start)
+            self.midi_stop_event = self.staff.midi_recorder.start_recording(
+                self.td_playback_start
+            )
             self.main_window.midi_stop_event = self.midi_stop_event
             # connect recorder to player for velocity updates
             self.staff.player.set_recorder(self.staff.midi_recorder)
 
             if self.pf_augmentations is not None:
+                # get average velocity of next match
+                next_avg_velocity = midi.get_average_velocity(self.pf_augmentations[-1])
+                console.log(f"{self.tag} first match average velocity: {next_avg_velocity}")
+                # scale velocity of next match
+                midi.ramp_vel(self.pf_augmentations[:-1], next_avg_velocity, self.args.bpm)
                 for aug in self.pf_augmentations:
                     self._queue_file(aug, None)
 
@@ -302,7 +313,7 @@ class RunWorker(QtCore.QThread):
         self.staff.seeker.played_files.append(file_path)
         self.n_files_queued += 1
         self.s_transition_times.emit(self.staff.scheduler.ts_transitions)
-        start_time = self.td_system_start + timedelta(seconds=ts_seg_start)
+        start_time = self.td_playback_start + timedelta(seconds=ts_seg_start)
 
         write_log(
             self.pf_playlist,
@@ -331,6 +342,25 @@ class RunWorker(QtCore.QThread):
         seed_rearrange: Optional[bool] = None,
         seed_remove: Optional[float] = None,
     ) -> list[str]:
+        """
+        augment a midi file with predefined beat-based rearrangements and/or note removals.
+
+        NOTE: the best match is also returned as the last element of the list.
+
+        Parameters
+        ----------
+        pf_midi : str
+            path to the midi file to augment
+        seed_rearrange : Optional[bool]
+            whether to rearrange the file based on beats
+        seed_remove : Optional[float]
+            percentage of notes to remove
+
+        Returns
+        -------
+        list[str]
+            list of paths to the augmented files
+        """
         # generate augmentations
         console.log(f"{self.tag} augmenting '{basename(pf_midi)}'")
         import pretty_midi

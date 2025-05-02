@@ -1,18 +1,14 @@
 import os
 import mido
-import pretty_midi
 from queue import PriorityQueue
 from datetime import datetime, timedelta
-from PySide6.QtCore import Signal
 
 from .worker import Worker
 from utils import basename, console
-from utils.midi import csv_to_midi, TICKS_PER_BEAT
+from utils.midi import csv_to_midi
+from utils.constants import N_BEATS_TRANSITION_OFFSET, TICKS_PER_BEAT
 
 from typing import Optional, Tuple
-
-N_BEATS_TRANSITION_OFFSET: int = 8
-MAX_VIS_OFFSET_S: float = 10
 
 
 class Scheduler(Worker):
@@ -63,19 +59,36 @@ class Scheduler(Worker):
         similarity: Optional[float] = None,
     ) -> Tuple[float, float, int]:
         midi_in = mido.MidiFile(pf_midi)
+        # --- determine times ---
         # number of seconds/ticks from the start of playback to start playing the file
         if (
             self.recording_mode
             and "player" in basename(pf_midi)
             and self.n_files_queued == 0
         ):
-            ts_offset, tt_offset = 0, 0
+            n_recorded_beats = None
+            for msg in midi_in.tracks[1]:
+                if msg.type == "text" and msg.text.startswith("beat"):
+                    n_recorded_beats = int(msg.text.split(" ")[1]) - 1
+
+            if n_recorded_beats is None:
+                console.log(
+                    f"{self.tag}[yellow] no beats found in {basename(pf_midi)}, defaulting to zero offset[/yellow]"
+                )
+                ts_offset, tt_offset = 0, 0
+            else:
+                ts_offset = 8 - (n_recorded_beats * 60 / self.bpm)
+                tt_offset = mido.second2tick(ts_offset, TICKS_PER_BEAT, self.tempo)
+                if self.verbose:
+                    console.log(
+                        f"{self.tag} found {n_recorded_beats} beats in {basename(pf_midi)}, setting offset to {ts_offset:.02f} s so that end time is {self.td_start + timedelta(seconds=ts_offset) + timedelta(seconds=mido.tick2second(n_recorded_beats * TICKS_PER_BEAT, TICKS_PER_BEAT, self.tempo)):%H:%M:%S.%f}"
+                    )
         else:
             ts_offset, tt_offset = self._get_next_transition()
-        tt_abs: int = tt_offset  # track the absolute time since system start
-        tt_sum: int = 0  # track the sum of all notes in the segment
+        tt_abs: int = tt_offset  # absolute time since system start
+        tt_sum: int = 0  # sum of all notes in the segment
         tt_max_abs_in_segment: int = (
-            tt_offset  # track the maximum absolute tick time in this segment
+            tt_offset  # maximum absolute tick time in the segment
         )
 
         if midi_in.ticks_per_beat != TICKS_PER_BEAT:
@@ -87,6 +100,7 @@ class Scheduler(Worker):
             f"{self.tag} adding file {self.n_files_queued} to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s -> {self.td_start + timedelta(seconds=ts_offset):%H:%M:%S.%f})"
         )
 
+        # --- add messages to queue(s) ---
         # add messages to queue first so that the player has access ASAP
         for track in midi_in.tracks:
             if track[0].type == "track_name":
@@ -201,13 +215,18 @@ class Scheduler(Worker):
         n_stamps: int = 1,
         do_ticks: bool = True,
     ) -> list[mido.MetaMessage]:
+        ts_offset = 0
         self.tt_offset = mido.second2tick(ts_offset, TICKS_PER_BEAT, self.tempo)
         ts_interval = self.n_beats_per_segment * 60 / self.bpm
         ts_beat_length = 60 / self.bpm  # time interval for each beat
 
         # Adjust ts_offset to the next interval
-        if ts_offset % ts_interval < ts_beat_length * N_BEATS_TRANSITION_OFFSET:
-            ts_offset = ((ts_offset // ts_interval) + 1) * ts_interval
+        # if ts_offset % ts_interval < ts_beat_length * N_BEATS_TRANSITION_OFFSET:
+        #     if self.verbose:
+        #         console.log(
+        #             f"{self.tag} adjusting ts_offset from {ts_offset:.02f} s to {((ts_offset // ts_interval) + 1) * ts_interval:.02f} s"
+        #         )
+        #     ts_offset = ((ts_offset // ts_interval) + 1) * ts_interval
         self.ts_transitions.extend(
             [ts_offset + i * ts_interval for i in range(n_stamps + 1)]
         )
@@ -215,7 +234,10 @@ class Scheduler(Worker):
         if self.verbose:
             console.log(
                 f"{self.tag} segment interval is {ts_interval:.03f} seconds",
-                # [f"{t:07.03f} s" for t in self.ts_transitions],
+                [
+                    f"{t:07.03f}  -> {self.td_start + timedelta(seconds=t):%H:%M:%S.%f}"
+                    for t in self.ts_transitions
+                ],
             )
 
         transitions = []
@@ -248,7 +270,7 @@ class Scheduler(Worker):
 
     def _get_next_transition(self) -> Tuple[float, int]:
         ts_offset = self.ts_transitions[
-            self.n_files_queued - 1 if self.recording_mode else self.n_files_queued
+            self.n_files_queued #- 1 if self.recording_mode else self.n_files_queued
         ]
         if self.lead_bar:
             ts_offset -= 60 / self.bpm
@@ -327,3 +349,7 @@ class Scheduler(Worker):
             return self.queued_files[current_segment], current_segment
 
         return None
+
+    def set_start_time(self, td_start: datetime):
+        self.td_start = td_start
+        console.log(f"{self.tag} start time set to {self.td_start}")

@@ -692,7 +692,7 @@ class Seeker(Worker):
                 f"{self.tag} getting [italic bold]{model}[/italic bold] embedding for '{pf_midi}'"
             )
             embedding = panther.send_embedding(
-                pf_midi, model, self.params.system, verbose=True
+                pf_midi, model, self.params.system, verbose=False
             )
             console.log(
                 f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
