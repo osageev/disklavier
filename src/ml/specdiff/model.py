@@ -13,8 +13,11 @@ project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from utils import console, basename
-from utils.midi import change_tempo_and_trim, get_bpm
+    from utils import console, basename
+    from utils.midi import change_tempo_and_trim, get_bpm
+else:
+    from src.utils import console, basename
+    from src.utils.midi import change_tempo_and_trim, get_bpm
 
 from typing import Optional
 
@@ -73,9 +76,13 @@ class SpectrogramDiffusion:
             sd = torch.load(config["encoder_weights_path"], weights_only=True)
             self.encoder.load_state_dict(sd)
         else:
-            console.log(f"{self.tag} no encoder weights found at {config['encoder_weights_path']}")
+            console.log(
+                f"{self.tag} no encoder weights found at {config['encoder_weights_path']}"
+            )
             console.log(f"{self.tag} {os.getcwd()}")
-            raise ValueError(f"Encoder weights not found at {config['encoder_weights_path']}")
+            raise ValueError(
+                f"Encoder weights not found at {config['encoder_weights_path']}"
+            )
 
         console.log(f"{self.tag} model initialization complete")
 
@@ -89,9 +96,11 @@ class SpectrogramDiffusion:
 
             midi_len = pretty_midi.PrettyMIDI(path, initial_tempo=bpm).get_end_time()
             if midi_len == 0:
-                console.log(f"{self.tag} [yellow] midi duration is 0, skipping[/yellow]")
+                console.log(
+                    f"{self.tag} [yellow] midi duration is 0, skipping[/yellow]"
+                )
                 return torch.zeros(1, 768)
-            
+
             if midi_len < TS_MIN or midi_len > TS_MAX:
                 new_bpm = bpm * (midi_len / TS_MAX)
                 if self.verbose:
@@ -136,5 +145,7 @@ class SpectrogramDiffusion:
         avg_embedding = torch.cat(embeddings).mean(0, keepdim=True)
 
         if self.verbose:
-            console.log(f"{self.tag} embedding of '{basename(path)}' complete {avg_embedding.shape}")
+            console.log(
+                f"{self.tag} embedding of '{basename(path)}' complete {avg_embedding.shape}"
+            )
         return avg_embedding

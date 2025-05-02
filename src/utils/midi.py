@@ -16,8 +16,9 @@ from . import basename, console
 project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-
-from utils.constants import TICKS_PER_BEAT
+    from utils.constants import TICKS_PER_BEAT
+else:
+    from src.utils.constants import TICKS_PER_BEAT
 
 
 def get_bpm(file_path: str) -> int:
