@@ -299,11 +299,10 @@ class PianoRollView(QGraphicsView):
         self._scene.update()
 
     def note_on(self, note: Note):
-        # note.start_time is already the correct scheduled datetime
         if note.pitch in self.active_notes:
             if self.debug:
                 console.log(
-                    f"Warning: Note {note.pitch} already active, ending previous note"
+                    f"\twarning: Note {note.pitch} already active, ending previous note"
                 )
             # End the previous note with its own start time to avoid visual glitches if it was stuck
             self.note_off(
@@ -311,7 +310,6 @@ class PianoRollView(QGraphicsView):
             )
 
         # note.start_time should already be set by the builder
-        # note.start_time = datetime.now() # DO NOT OVERWRITE - Keep scheduled time
         self.notes.append(note)
         self.active_notes[note.pitch] = note
 
@@ -323,7 +321,7 @@ class PianoRollView(QGraphicsView):
             self.active_notes[pitch].is_active = False
             del self.active_notes[pitch]
         elif self.debug:
-            console.log(f"warning: received noteOff for inactive note: {pitch}")
+            console.log(f"\twarning: received noteOff for inactive note: {pitch}")
 
     def set_tempo(self, bpm):
         if bpm > 0:
@@ -349,20 +347,22 @@ class PianoRollView(QGraphicsView):
         super().drawBackground(painter, rect)
 
         self.draw_grid(painter)
-        self.draw_transition_lines(painter)  # draw transition lines before notes
+        self.draw_transition_lines(painter)
         self.draw_notes(painter)
         self.draw_keyboard(painter)
 
     def update_transitions(self, transitions: list[float]):
         # Convert transition times (seconds relative to start) to ms relative to start
-        # console.log(f"updating transitions (raw seconds): {transitions[:-3]}")
-        # console.log(
-        #     [
-        #         (self.start_time + timedelta(seconds=t)).strftime("%H:%M:%S.%f")[:-3]
-        #         for t in transitions[:-3]
-        #     ]
-        # )
-        self.transition_times = [t * 1000 for t in transitions] 
+        # console.log(f"updating transitions (raw seconds): {transitions}")
+        console.log(
+            [
+                (self.start_time + timedelta(seconds=t)).strftime("%H:%M:%S.%f")
+                for t in transitions
+            ]
+        )
+        self.transition_times = [
+            t * 1000 - self.roll_len_ms for t in transitions
+        ]  # shift to start of roll
 
     def draw_transition_lines(self, painter):
         """
@@ -438,28 +438,29 @@ class PianoRollView(QGraphicsView):
                 # draw line across full horizontal width (window_width)
                 painter.drawLine(self.key_width, y, self.window_width, y)
 
+        # TODO: fix these
         # draw vertical beat lines
-        if self.bpm > 0:
-            beat_interval_ms = (60.0 / self.bpm) * 1000.0
-            # determine the range of beats to draw based on visible time
-            min_visible_time_ms = (
-                self.current_time - self.roll_len_ms * 1.1
-            )  # add buffer
-            max_visible_time_ms = (
-                self.current_time + self.roll_len_ms * 0.1
-            )  # add buffer
+        # if self.bpm > 0:
+        #     beat_interval_ms = (60.0 / self.bpm) * 1000.0
+        #     # determine the range of beats to draw based on visible time
+        #     min_visible_time_ms = (
+        #         self.current_time - self.roll_len_ms * 1.1
+        #     )  # add buffer
+        #     max_visible_time_ms = (
+        #         self.current_time + self.roll_len_ms * 0.1
+        #     )  # add buffer
 
-            start_beat_index = int(min_visible_time_ms / beat_interval_ms) - 1
-            end_beat_index = int(max_visible_time_ms / beat_interval_ms) + 1
+        #     start_beat_index = int(min_visible_time_ms / beat_interval_ms) - 1
+        #     end_beat_index = int(max_visible_time_ms / beat_interval_ms) + 1
 
-            painter.setPen(
-                QPen(QColor(80, 80, 80, 100), 0.8)
-            )  # thin grey lines for beats
-            for beat_index in range(start_beat_index, end_beat_index):
-                beat_time_ms = beat_index * beat_interval_ms
-                x = self.time_to_x(beat_time_ms)
-                if self.key_width <= x <= self.window_width:
-                    painter.drawLine(x, 0, x, self.window_height)
+        #     painter.setPen(
+        #         QPen(QColor(80, 80, 80, 100), 0.8)
+        #     )  # thin grey lines for beats
+        #     for beat_index in range(start_beat_index, end_beat_index):
+        #         beat_time_ms = beat_index * beat_interval_ms
+        #         x = self.time_to_x(beat_time_ms)
+        #         if self.key_width <= x <= self.window_width:
+        #             painter.drawLine(x, 0, x, self.window_height)
 
         # --- second markers ---
         # too visually noisy

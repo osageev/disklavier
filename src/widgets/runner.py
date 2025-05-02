@@ -1,6 +1,7 @@
 import os
-import time
+import math
 import mido
+import time
 from PySide6 import QtCore
 from threading import Thread
 from rich.table import Table
@@ -132,8 +133,15 @@ class RunWorker(QtCore.QThread):
             raise NotImplementedError("playlist mode not implemented")
 
         try:
-            self.td_playback_start = datetime.now() + timedelta(
-                seconds=self.params.startup_delay
+            # Get current time and add startup delay
+            current_time = datetime.now()
+            # Round up to the next even second
+            current_seconds = current_time.second + current_time.microsecond / 1000000
+            seconds_to_next_even = math.ceil(current_seconds / 2) * 2 - current_seconds
+            
+            # Add the startup delay and the time to next even second
+            self.td_playback_start = current_time + timedelta(
+                seconds=self.params.startup_delay + seconds_to_next_even
             )
             console.log(
                 f"{self.tag} start time set to {self.td_playback_start.strftime('%y-%m-%d %H:%M:%S')}"
@@ -164,7 +172,7 @@ class RunWorker(QtCore.QThread):
             #     # scale velocity of next match
             #     midi.ramp_vel(self.pf_augmentations, next_avg_velocity, self.args.bpm)
 
-            self.metronome.td_start = self.td_playback_start
+            self.metronome.td_start = self.td_playback_start + timedelta(seconds=self.staff.scheduler.ts_transitions[0])
             self.metronome.start()
 
             # start audio recording in a separate thread

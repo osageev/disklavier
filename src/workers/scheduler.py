@@ -66,6 +66,7 @@ class Scheduler(Worker):
             and "player" in basename(pf_midi)
             and self.n_files_queued == 0
         ):
+            # get number of beats from beat markers in recording file
             n_recorded_beats = None
             for msg in midi_in.tracks[1]:
                 if msg.type == "text" and msg.text.startswith("beat"):
@@ -77,7 +78,11 @@ class Scheduler(Worker):
                 )
                 ts_offset, tt_offset = 0, 0
             else:
-                ts_offset = 8 - (n_recorded_beats * 60 / self.bpm)
+                # offset = system start delay - segment length rounded up to nearest beat
+                # this ensures that the recording ends at the first beat
+                ts_offset = self.n_beats_per_segment * 60 / self.bpm - (
+                    n_recorded_beats * 60 / self.bpm
+                )
                 tt_offset = mido.second2tick(ts_offset, TICKS_PER_BEAT, self.tempo)
                 if self.verbose:
                     console.log(
@@ -217,10 +222,10 @@ class Scheduler(Worker):
     ) -> list[mido.MetaMessage]:
         ts_offset = 0
         self.tt_offset = mido.second2tick(ts_offset, TICKS_PER_BEAT, self.tempo)
-        ts_interval = self.n_beats_per_segment * 60 / self.bpm
-        ts_beat_length = 60 / self.bpm  # time interval for each beat
+        ts_beat_length = 60 / self.bpm  # time duration of each beat
+        ts_interval = self.n_beats_per_segment * ts_beat_length
 
-        # Adjust ts_offset to the next interval
+        # adjust ts_offset to the next interval
         # if ts_offset % ts_interval < ts_beat_length * N_BEATS_TRANSITION_OFFSET:
         #     if self.verbose:
         #         console.log(
@@ -235,13 +240,12 @@ class Scheduler(Worker):
             console.log(
                 f"{self.tag} segment interval is {ts_interval:.03f} seconds",
                 [
-                    f"{t:07.03f}  -> {self.td_start + timedelta(seconds=t):%H:%M:%S.%f}"
+                    f"{t:02.01f}  -> {self.td_start + timedelta(seconds=t):%H:%M:%S.%f}"
                     for t in self.ts_transitions
                 ],
             )
 
         transitions = []
-
         for i, ts_transition in enumerate(self.ts_transitions):
             # transition messages
             transitions.append(
@@ -270,7 +274,7 @@ class Scheduler(Worker):
 
     def _get_next_transition(self) -> Tuple[float, int]:
         ts_offset = self.ts_transitions[
-            self.n_files_queued #- 1 if self.recording_mode else self.n_files_queued
+            self.n_files_queued  # - 1 if self.recording_mode else self.n_files_queued
         ]
         if self.lead_bar:
             ts_offset -= 60 / self.bpm
