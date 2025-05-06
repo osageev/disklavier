@@ -750,7 +750,11 @@ def beat_join(
 
 
 def remove_notes(
-    midi_path: str, output_path: str, amount: int | float, num_versions: int = 1
+    midi_path: str,
+    output_path: str,
+    amount: int | float,
+    num_versions: int = 1,
+    save_all_steps: bool = False,
 ) -> list[str]:
     """
     Remove notes from a MIDI file with intermediate versions.
@@ -765,6 +769,9 @@ def remove_notes(
         Number or percentage of notes to remove.
     num_versions : int, optional
         Number of versions to create with the same amount of notes removed.
+    save_all_steps : bool, optional
+        If True, save a version for every number of notes removed up to `amount`.
+        If False (default), save only a subset of intermediate steps.
 
     Returns
     -------
@@ -786,11 +793,13 @@ def remove_notes(
     if isinstance(amount, float) and amount < 1:
         amount = int(num_notes * amount)
 
-    amount = int(amount)  # catch things like 1.3
+    amount = int(amount)  # catch floats > 1
 
     # determine intermediate steps for note removal
     steps = []
-    if amount <= 3:
+    if save_all_steps:
+        steps = list(range(1, amount + 1))
+    elif amount <= 3:
         # if removing 3 or fewer notes, just save the final version
         steps = [amount]
     else:

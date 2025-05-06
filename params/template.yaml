@@ -46,3 +46,10 @@ audio:
   channels: 1
   midi_port: "Disklavier"
   record: 67 # left pedal
+panther:
+  tag: "[#5f00af]panthr[/#5f00af]:"
+  verbose: False
+  user: "finlay"
+  remote_host: "129.173.66.44"
+  port: 22
+  remote_dir: "/home/finlay/disklavier/data/outputs/uploads"

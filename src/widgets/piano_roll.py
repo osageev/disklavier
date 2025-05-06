@@ -354,12 +354,12 @@ class PianoRollView(QGraphicsView):
     def update_transitions(self, transitions: list[float]):
         # Convert transition times (seconds relative to start) to ms relative to start
         # console.log(f"updating transitions (raw seconds): {transitions}")
-        console.log(
-            [
-                (self.start_time + timedelta(seconds=t)).strftime("%H:%M:%S.%f")
-                for t in transitions
-            ]
-        )
+        # console.log(
+        #     [
+        #         (self.start_time + timedelta(seconds=t)).strftime("%H:%M:%S.%f")
+        #         for t in transitions
+        #     ]
+        # )
         self.transition_times = [
             t * 1000 - self.roll_len_ms for t in transitions
         ]  # shift to start of roll

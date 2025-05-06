@@ -13,7 +13,7 @@ USER = "finlay"
 REMOTE_HOST = "129.173.66.44"
 PORT = 22
 P_REMOTE = "/home/finlay/disklavier/data/outputs/uploads"
-tag = "[#5f00af]panthr[/#5f00af]:"
+tag = "[#af5fff]panthr[/#af5fff]:"
 
 
 def send_embedding(

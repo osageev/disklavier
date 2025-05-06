@@ -9,6 +9,9 @@ from shutil import copy2
 from pretty_midi import PrettyMIDI
 from scipy.spatial.distance import cosine
 
+from workers.panther import Panther
+from typing import Optional
+
 from .worker import Worker
 from utils import basename, console, panther
 from utils.modes import find_path
@@ -46,6 +49,9 @@ class Seeker(Worker):
     # velocity tracking
     _recorder = None
     _avg_velocity: float = 0.0
+
+    # reference to panther worker
+    panther_worker: Optional[Panther] = None
 
     def __init__(
         self,
@@ -115,9 +121,7 @@ class Seeker(Worker):
         if os.path.isfile(pf_neighbor_table):
             with console.status("\t\t\t      loading neighbor file..."):
                 if os.path.splitext(pf_neighbor_table)[1] == ".h5":
-                    self.neighbor_table = pd.read_hdf(
-                        pf_neighbor_table, key="neighbors"
-                    )
+                    self.neighbor_table = pd.read_hdf(pf_neighbor_table, key="20250420")
                 else:
                     self.neighbor_table = pd.read_parquet(pf_neighbor_table)
                 self.neighbor_table.head()
@@ -142,6 +146,18 @@ class Seeker(Worker):
         """
         self._recorder = recorder
         console.log(f"{self.tag} connected to recorder for velocity updates")
+
+    def set_panther(self, panther: Panther):
+        """
+        set the reference to the panther worker.
+
+        parameters
+        ----------
+        panther : panther
+            reference to the panther instance.
+        """
+        self.panther_worker = panther
+        console.log(f"{self.tag} connected to panther worker")
 
     def check_velocity_updates(self) -> bool:
         """
@@ -262,9 +278,9 @@ class Seeker(Worker):
         try:
             # Use dictionary lookup instead of list.index() with fallback
             try:
-                embedding = self.faiss_index.reconstruct(self.filename_to_index[query_file])  # type: ignore
+                embedding = self.faiss_index.reconstruct(int(self.filename_to_index[query_file]))  # type: ignore
             except KeyError:
-                embedding = self.faiss_index.reconstruct(self.filenames.index(query_file))  # type: ignore
+                embedding = self.faiss_index.reconstruct(int(self.filenames.index(query_file)))  # type: ignore
         except (ValueError, KeyError):
             pf_new = self.played_files[-1]
             # if "player" in pf_new:
@@ -688,12 +704,28 @@ class Seeker(Worker):
             embedding = embedding.reshape(1, -1)
             console.log(f"{self.tag} {embedding}")
         else:
-            console.log(
-                f"{self.tag} getting [italic bold]{model}[/italic bold] embedding for '{pf_midi}'"
-            )
-            embedding = panther.send_embedding(
-                pf_midi, model, self.params.system, verbose=False
-            )
+            if self.panther_worker is None:
+                console.log(
+                    f"{self.tag} [orange]error: panther worker not set[/orange]"
+                )
+                embedding_opt = panther.send_embedding(pf_midi, model, "live")
+                console.log(
+                    f"{self.tag} got embedding {embedding_opt.shape} from panther"
+                )
+            else:
+                console.log(
+                    f"{self.tag} getting [italic bold]{model}[/italic bold] embedding for '{pf_midi}'"
+                )
+                embedding_opt = self.panther_worker.get_embedding(
+                    file_path=pf_midi, model=model, mode="live"
+                )
+            if embedding_opt is None:
+                console.log(
+                    f"{self.tag} [red]error: failed to get embedding from panther[/red]"
+                )
+                # Handle failure: return dummy or raise error
+                return np.zeros((1, 512), dtype=np.float32)  # Placeholder
+            embedding = embedding_opt
             console.log(
                 f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
             )
@@ -728,9 +760,10 @@ class Seeker(Worker):
                     if str(self.filenames[i]).endswith("s00")
                 ]
             )
-            console.log(
-                f"{self.tag} filtered {num_matches-len(indices)}/{num_matches} shifted files"
-            )
+            if self.verbose:
+                console.log(
+                    f"{self.tag} filtered {num_matches-len(indices)}/{num_matches} shifted files"
+                )
         else:
             indices, similarities = zip(
                 *[(i, d) for i, d in zip(indices[0], similarities[0])]
@@ -790,18 +823,13 @@ class Seeker(Worker):
             num_matches=2000,
             index=faiss_index if "clap" in metric else None,
         )
-        for i in range(3):
-            console.log(
-                f"{self.tag}\t'{filenames[indices[i]]}' ({indices[i]:04d}): {similarities[i]:.4f}"
-            )
+        if self.verbose:
+            for i in range(3):
+                console.log(
+                    f"{self.tag}\t\t'{filenames[indices[i]]}' ({indices[i]:04d}): {similarities[i]:.4f}"
+                )
 
-        # get best match
-        if "clap" in metric:
-            best_match = os.path.join(
-                self.p_dataset, basename(filenames[indices[0]]) + "_t00s00.mid"
-            )
-        else:
-            best_match = filenames[indices[0]]
+        best_match = filenames[indices[0]]
         best_similarity = similarities[0]
 
         return best_match, best_similarity
