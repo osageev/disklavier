@@ -23,7 +23,7 @@ def load_args(args):
     # load/build arguments and parameters
     parser = ArgumentParser(description="Argparser description")
     parser.add_argument(
-        "-d", "--dataset", type=str, default="20250320", help="name of the dataset"
+        "-d", "--dataset", type=str, default="20250420", help="name of the dataset"
     )
     parser.add_argument(
         "--dataset_path", type=str, default=None, help="path to MIDI files"

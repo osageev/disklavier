@@ -1,6 +1,7 @@
 import os
-import time
+import math
 import mido
+import time
 from PySide6 import QtCore
 from threading import Thread
 from rich.table import Table
@@ -90,24 +91,6 @@ class RunWorker(QtCore.QThread):
                     console.log(
                         f"{self.tag} playing {len(self.pf_augmentations)} augmentations:\n\t{self.pf_augmentations}"
                     )
-            case "audio":
-                self.pf_player_query = self.pf_player_query.replace(".mid", ".wav")
-                ts_recording_len = self.staff.audio_recorder.record_query(
-                    self.pf_player_query
-                )
-                embedding = self.staff.seeker.get_embedding(
-                    self.pf_player_query, model="clap"
-                )
-                console.log(
-                    f"{self.tag} got embedding {embedding.shape} from pantherino"
-                )
-                best_match, best_similarity = self.staff.seeker.get_match(
-                    embedding, metric="clap-sgm"
-                )
-                console.log(
-                    f"{self.tag} got best match '{best_match}' with similarity {best_similarity}"
-                )
-                self.pf_seed = best_match
             case "kickstart":  # use specified file as seed
                 try:
                     if self.params.kickstart_path:
@@ -132,8 +115,15 @@ class RunWorker(QtCore.QThread):
             raise NotImplementedError("playlist mode not implemented")
 
         try:
-            self.td_playback_start = datetime.now() + timedelta(
-                seconds=self.params.startup_delay
+            # Get current time and add startup delay
+            current_time = datetime.now()
+            # Round up to the next even second
+            current_seconds = current_time.second + current_time.microsecond / 1000000
+            seconds_to_next_even = math.ceil(current_seconds / 2) * 2 - current_seconds
+
+            # Add the startup delay and the time to next even second
+            self.td_playback_start = current_time + timedelta(
+                seconds=self.params.startup_delay + seconds_to_next_even
             )
             console.log(
                 f"{self.tag} start time set to {self.td_playback_start.strftime('%y-%m-%d %H:%M:%S')}"
@@ -142,29 +132,17 @@ class RunWorker(QtCore.QThread):
             self.staff.scheduler.set_start_time(self.td_playback_start)
             self.staff.scheduler.init_schedule(
                 self.pf_schedule,
-                0#ts_recording_len if self.params.initialization == "recording" else 0,
+                0,  # ts_recording_len if self.params.initialization == "recording" else 0,
             )
             console.log(f"{self.tag} successfully initialized recording")
 
             # add seed to queue
             self._queue_file(self.pf_seed, None)
 
-            # add first match to queue
-            # if self.pf_augmentations is None:
-            #     pf_next_file, similarity = self.staff.seeker.get_next()
-            #     self._queue_file(pf_next_file, similarity)
-            # else:
-            #     # if we're using augmentations we need to get the first match now so that we know how to scale the velocity
-            #     pf_next_file, similarity = self.staff.seeker.get_next()
-            #     self.pf_augmentations.append(pf_next_file)
-
-            #     # get average velocity of next match
-            #     next_avg_velocity = midi.get_average_velocity(pf_next_file)
-            #     console.log(f"{self.tag} next average velocity: {next_avg_velocity}")
-            #     # scale velocity of next match
-            #     midi.ramp_vel(self.pf_augmentations, next_avg_velocity, self.args.bpm)
-
-            self.metronome.td_start = self.td_playback_start
+            # start metronome
+            self.metronome.td_start = self.td_playback_start + timedelta(
+                seconds=self.staff.scheduler.ts_transitions[0]
+            )
             self.metronome.start()
 
             # start audio recording in a separate thread
@@ -194,9 +172,13 @@ class RunWorker(QtCore.QThread):
             if self.pf_augmentations is not None:
                 # get average velocity of next match
                 next_avg_velocity = midi.get_average_velocity(self.pf_augmentations[-1])
-                console.log(f"{self.tag} first match average velocity: {next_avg_velocity}")
+                console.log(
+                    f"{self.tag} first match average velocity: {next_avg_velocity}"
+                )
                 # scale velocity of next match
-                midi.ramp_vel(self.pf_augmentations[:-1], next_avg_velocity, self.args.bpm)
+                midi.ramp_vel(
+                    self.pf_augmentations[:-1], next_avg_velocity, self.args.bpm
+                )
                 for aug in self.pf_augmentations:
                     self._queue_file(aug, None)
 
@@ -384,17 +366,17 @@ class RunWorker(QtCore.QThread):
             ids = list(range(len(split_beats)))
             rearrangements: list[list[int]] = [
                 ids,  # original
-                # UNSAFE - if the length doesn't end up being <= 8 beats the segment will overlap with the next one
-                # ids[: len(ids) // 2],  # first half
-                # ids[: len(ids) // 2] * 2,  # first half twice
-                # ids[len(ids) // 2 + 1 :],  # second half
-                # ids[len(ids) // 2 + 1 :] * 2,  # second half twice
                 ids[0:4],  # first four
                 ids[0:4] * 2,  # first four twice
                 ids[-4:],  # last four
                 ids[-4:] * 2,  # last four twice
                 [ids[-2], ids[-1]] * 4,  # last two beats
                 [ids[-1]] * 8,  # last beat
+                # WARNING: if the length doesn't end up being <= 8 beats the segment will overlap with the next one
+                # ids[: len(ids) // 2],  # first half
+                # ids[: len(ids) // 2] * 2,  # first half twice
+                # ids[len(ids) // 2 + 1 :],  # second half
+                # ids[len(ids) // 2 + 1 :] * 2,  # second half twice
             ]
             for i, arrangement in enumerate(rearrangements):
                 console.log(f"{self.tag}\t\trearranging seed:\t{arrangement}")
@@ -412,6 +394,14 @@ class RunWorker(QtCore.QThread):
                     console.log(
                         f"{self.tag}\t\tjoined midi:\t{joined_midi.get_end_time()} s"
                     )
+
+                # add lead-in bar for rearranged files
+                beat_len_sec = 60 / self.params.bpm
+                if i > 0:
+                    for instrument in joined_midi.instruments:
+                        for note in instrument.notes:
+                            note.start += beat_len_sec
+                            note.end += beat_len_sec
 
                 pf_joined_midi = os.path.join(
                     pf_augmentations, f"{basename(pf_midi)}_a{i:02d}.mid"
@@ -431,12 +421,12 @@ class RunWorker(QtCore.QThread):
 
             for mid_path in current_paths:
                 stripped_paths = midi.remove_notes(
-                    mid_path, pf_augmentations, seed_remove
+                    mid_path, pf_augmentations, seed_remove, 3, save_all_steps=True
                 )
                 console.log(
                     f"\t\tstripped {seed_remove * 100 if isinstance(seed_remove, float) else seed_remove}{'%' if isinstance(seed_remove, float) else ''} notes from '{basename(mid_path)}' (+{len(stripped_paths)} versions)"
                 )
-                paths_after_removal.extend(stripped_paths)  # Add the stripped versions
+                paths_after_removal.extend(stripped_paths)
                 num_options += len(stripped_paths)
 
             midi_paths.extend(paths_after_removal)
@@ -492,7 +482,11 @@ class RunWorker(QtCore.QThread):
         final_paths = []
         if seed_remove:
             if best_aug:
-                final_paths.append(best_aug)
+                aug_key_parts = basename(best_aug).split("-")
+                aug_key = aug_key_parts[0] + "-" + aug_key_parts[1]
+                for mid in midi_paths:
+                    if aug_key in basename(mid):
+                        final_paths.append(mid)
 
                 # Add the best matching original file from the dataset
                 if best_match:
