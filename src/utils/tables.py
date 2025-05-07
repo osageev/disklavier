@@ -432,8 +432,13 @@ def graph(
             for i in range(len(files)):
                 for j in neighbors[i]:
                     if i < j:
-                        if float(1 - similarity[i, j]) < 0:
-                            raise ValueError(f"similarity is negative: {similarity[i, j]}")
+                        if (
+                            float(similarity[i, j]) < 0.000
+                            or float(similarity[i, j]) > 1.01
+                        ):
+                            raise ValueError(
+                                f"similarity is out of bounds: {similarity[i, j]}"
+                            )
                         edges.append((files[i], files[j], float(1 - similarity[i, j])))
                 progress.advance(sec_task)
 
