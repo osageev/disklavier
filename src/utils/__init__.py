@@ -3,6 +3,7 @@ import re
 import csv
 import time
 from threading import Event
+from datetime import datetime
 from rich.console import Console
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
@@ -14,12 +15,36 @@ console = Console(record=True, log_time_format="%m-%d %H:%M:%S.%f")
 def tick(
     bpm: int,
     stop_event: Event,
+    start_datetime: datetime | None = None,
     p: str = "[cyan]metro[/cyan] : ",
     pf_tick: str = "data/m_tick.wav",
     do_print: bool = True,
 ):
+    """
+    Plays a tick sound at a given BPM until the stop_event is set.
+
+    parameters
+    ----------
+    bpm : int
+        beats per minute.
+    stop_event : threading.Event
+        event to stop the metronome.
+    start_datetime : datetime.datetime, optional
+        the time to start the metronome. if none, starts immediately.
+    p : str, optional
+        prefix for log messages.
+    pf_tick : str, optional
+        path to the tick sound file.
+    do_print : bool, optional
+        whether to print log messages.
+    """
     pygame.mixer.init()
     tick_sound = pygame.mixer.Sound(pf_tick)
+
+    if start_datetime:
+        while datetime.now() < start_datetime:
+            time.sleep(0.01)  # Wait until start_datetime
+
     start_time = time.time()
     last_beat = start_time
 

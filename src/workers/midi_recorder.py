@@ -1,7 +1,7 @@
 import os
 import mido
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from threading import Thread, Event
 
 from .worker import Worker
@@ -113,8 +113,10 @@ class MidiRecorder(Worker):
                             f"{self.tag} recorded {(end_time - start_time).total_seconds():.02f} s"
                         )
                         self.is_recording = False
-                        self.stop_tick_event.set()
-                        self.metro_thread.join()
+                        if self.stop_tick_event is not None:
+                            self.stop_tick_event.set()
+                        if self.tick_thread is not None:
+                            self.tick_thread.join()
 
                         # have any notes been recorded?
                         if len(self.recorded_notes) > 0:
@@ -182,20 +184,31 @@ class MidiRecorder(Worker):
                     # record pedal not released, but not already recording
                     # therefore, start recording
                     elif self.is_recording == False:
-                        console.log(f"{self.tag} recording at {self.bpm} BPM")
+                        # start recording
+                        t_recording_start = datetime.now()
+                        console.log(
+                            f"{self.tag} recording at {self.bpm} BPM from {t_recording_start.strftime('%H:%M:%S.%f')}"
+                        )
                         self.is_recording = True
 
+                        # start metronome 1 beat after t_recording_start
+                        beat_duration_seconds = 60.0 / self.bpm
+                        td_metronome_first_tick = t_recording_start + timedelta(
+                            seconds=beat_duration_seconds
+                        )
+
                         self.stop_tick_event = Event()
-                        self.metro_thread = Thread(
+                        self.tick_thread = Thread(
                             target=tick,
                             args=(
                                 self.bpm,
                                 self.stop_tick_event,
+                                td_metronome_first_tick,
                                 self.params.tag,
                             ),
                             name="recorder metronome",
                         )
-                        self.metro_thread.start()
+                        self.tick_thread.start()
                         t_recording_start = datetime.now()
 
                 elif self.is_recording and msg.type in ["note_on", "note_off"]:
@@ -203,7 +216,7 @@ class MidiRecorder(Worker):
                     if len(self.recorded_notes) == 0:
                         # set times to start from this point
                         start_time = datetime.now()
-                        # time since last beat
+                        console.log(f"{self.tag} start_time: {start_time}")
 
                         # calculate ticks since the start of the previous beat
                         time_since_recording = (
