@@ -224,3 +224,7 @@ class Player(Worker):
             f"{self.tag} [yellow bold]{self.n_late_notes}[/yellow bold]/{self.n_notes} notes were late (sent > 0.001 s after scheduled)"
         )
         console.log(f"{self.tag}[green] playback finished")
+
+    def set_start_time(self, td_start: datetime):
+        self.td_start = td_start
+        console.log(f"{self.tag} start time set to {self.td_start}")

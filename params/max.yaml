@@ -1,5 +1,5 @@
 n_transitions: 4
-initialization: "recording" # kickstart random recording
+initialization: "random" # kickstart random recording
 kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid"
 seed_rearrange: True
 seed_remove: 0.25
@@ -18,13 +18,13 @@ player:
   verbose: False
   midi_port: "to Max 1"
 metronome:
-  verbose: True
+  verbose: False
   do_tick: True
 recorder:
   verbose: True
-  midi_port: 'LPK25'
+  midi_port: "LPK25"
   record: 64 # sustain
 audio:
   verbose: True
-  midi_port: 'LPK25'
+  midi_port: "LPK25"
   record: 64

@@ -9,16 +9,80 @@ from matplotlib.lines import Line2D
 from scipy.ndimage import zoom
 from bisect import bisect_left
 
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
+from dataclasses import dataclass
 
 from . import basename, console
 
-project_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-    from utils.constants import TICKS_PER_BEAT
-else:
-    from src.utils.constants import TICKS_PER_BEAT
+from utils.constants import TICKS_PER_BEAT
+
+
+@dataclass
+class MidiAugmentationConfig:
+    """
+    configuration for midi augmentation.
+
+    parameters
+    ----------
+    seed_rearrange : bool
+        whether to rearrange the file based on beats.
+    seed_remove_percentage : optional[float]
+        percentage of notes to remove (0.0 to 1.0).
+        can be used as an alternative to specific note count targets.
+    target_notes_remaining : optional[int]
+        target number of notes to leave in the file after removal.
+        e.g., if 10, the removal process aims to leave 10 notes.
+    notes_removed_per_step : optional[int]
+        number of notes to remove at each progressive step of the removal process.
+    num_variations_per_step : optional[int]
+        number of different random variations to generate for each removal step.
+    num_plays_per_segment_version : optional[int]
+        default number of times to play each generated segment version.
+        can be overridden by logic in `total_segments_for_sequence`.
+    total_segments_for_sequence : optional[int]
+        desired total number of segments in the augmented sequence (original + augmentations + best_match_cue).
+        if specified, influences how many augmentations are selected/repeated.
+    """
+
+    rearrange: bool = False
+    remove_percentage: Optional[float] = None
+    target_notes_remaining: Optional[int] = None
+    notes_removed_per_step: Optional[int] = 1
+    num_variations_per_step: Optional[int] = 1
+    num_plays_per_segment_version: Optional[int] = 1
+    total_segments_for_sequence: Optional[int] = None
+
+    def __post_init__(self):
+        # convert string 'None' values to None
+        for field in self.__dataclass_fields__:
+            if getattr(self, field) == 'None':
+                setattr(self, field, None)
+        if self.remove_percentage is not None and not (
+            0.0 <= self.remove_percentage <= 1.0
+        ):
+            raise ValueError("seed_remove_percentage must be between 0.0 and 1.0")
+        if self.target_notes_remaining is not None and self.target_notes_remaining < 0:
+            raise ValueError("target_notes_remaining cannot be negative.")
+        if self.notes_removed_per_step is not None and self.notes_removed_per_step <= 0:
+            raise ValueError("notes_removed_per_step must be positive.")
+        if (
+            self.num_variations_per_step is not None
+            and self.num_variations_per_step <= 0
+        ):
+            raise ValueError("num_variations_per_step must be positive.")
+        if (
+            self.num_plays_per_segment_version is not None
+            and self.num_plays_per_segment_version <= 0
+        ):
+            raise ValueError("num_plays_per_segment_version must be positive.")
+
+        if (
+            self.remove_percentage is not None
+            and self.target_notes_remaining is not None
+        ):
+            console.log(
+                "[yellow]warning: both seed_remove_percentage and target_notes_remaining are set. behavior might be combined or one might take precedence.[/yellow]"
+            )
 
 
 def get_bpm(file_path: str) -> int:
@@ -252,9 +316,6 @@ def csv_to_midi(csv_path: str, midi_output_path: str, verbose: bool = False) -> 
     midi.save(midi_output_path)
 
     console.log(f"[green]MIDI file created: '{midi_output_path}'")
-    # if verbose:
-    #     console.log("[bold]MIDI File Contents:[/bold]")
-    #     midi.print_tracks()
 
     return os.path.isfile(midi_output_path)
 
@@ -750,90 +811,176 @@ def beat_join(
 
 
 def remove_notes(
-    midi_path: str, output_path: str, amount: int | float, num_versions: int = 1
+    midi_path: str,
+    output_path: str,
+    config: MidiAugmentationConfig,
 ) -> list[str]:
     """
-    Remove notes from a MIDI file with intermediate versions.
+    remove notes from a midi file based on the provided augmentation configuration.
 
     Parameters
     ----------
     midi_path : str
-        Path to the input MIDI file.
+        path to the input midi file.
     output_path : str
-        Directory to save output files.
-    amount : int | float
-        Number or percentage of notes to remove.
-    num_versions : int, optional
-        Number of versions to create with the same amount of notes removed.
+        directory to save output files.
+    config : MidiAugmentationConfig
+        configuration object specifying how notes should be removed.
 
     Returns
     -------
     list[str]
-        Paths to the new MIDI files.
+        paths to the new midi files.
     """
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
     midi = pretty_midi.PrettyMIDI(midi_path)
 
-    num_notes = 0
+    # --- count notes ---
+    num_notes_original = 0
     for instrument in midi.instruments:
         if not instrument.is_drum:
-            for note in instrument.notes:
-                num_notes += 1
+            num_notes_original += len(instrument.notes)
 
-    # change from percentage to absolute number
-    if isinstance(amount, float) and amount < 1:
-        amount = int(num_notes * amount)
+    if num_notes_original == 0:
+        console.log(
+            f"\t[yellow]no non-drum notes found in {basename(midi_path)}, cannot remove notes.[/yellow]"
+        )
+        return [midi_path]
 
-    amount = int(amount)  # catch things like 1.3
-
-    # determine intermediate steps for note removal
-    steps = []
-    if amount <= 3:
-        # if removing 3 or fewer notes, just save the final version
-        steps = [amount]
+    # --- calculate notes to remove ---
+    notes_to_remove_total = 0
+    if config.remove_percentage is not None:
+        notes_to_remove_total = int(num_notes_original * config.remove_percentage)
+    elif config.target_notes_remaining is not None:
+        notes_to_remove_total = num_notes_original - config.target_notes_remaining
     else:
-        # save up to 3 intermediate versions
-        if amount % 2 == 1:  # odd
-            steps = [
-                1,
-                amount // 2 + (amount % 4 > 0),
-                amount,
-            ]  # first, middle-ish, last
-        else:  # even
-            steps = [
-                2,
-                amount // 2 + (amount % 4 > 0),
-                amount,
-            ]  # first, middle-ish, last
+        console.log(
+            f"\t[yellow]no removal criteria (percentage or target_notes_remaining) specified for {basename(midi_path)}.[/yellow]"
+        )
+        return [midi_path]
 
-    # console.log(f"[bold white]MIDI[/bold white]\t\t{amount} -> {steps}")
+    if notes_to_remove_total <= 0:
+        console.log(
+            f"\t[yellow]calculated notes to remove is {notes_to_remove_total} for {basename(midi_path)}, no notes removed.[/yellow]"
+        )
+        # If target_notes_remaining was higher than current notes, or percentage was 0
+        return [midi_path]
 
-    # Create a single random selection of indices to remove
-    all_indices = np.random.permutation(range(num_notes))
+    notes_to_remove_total = min(notes_to_remove_total, num_notes_original)
+
+    # determine actual steps for note removal based on config
+    removal_steps = []
+    if config.notes_removed_per_step and config.notes_removed_per_step > 0:
+        current_removed_count = 0
+        while current_removed_count < notes_to_remove_total:
+            current_removed_count += config.notes_removed_per_step
+            removal_steps.append(min(current_removed_count, notes_to_remove_total))
+        if not removal_steps or removal_steps[-1] != notes_to_remove_total:
+            # ensure the final target removal count is a step, if not already included
+            if notes_to_remove_total > 0 and (
+                not removal_steps or notes_to_remove_total > removal_steps[-1]
+            ):
+                removal_steps.append(notes_to_remove_total)
+    elif (
+        notes_to_remove_total > 0
+    ):  # if no per_step, just one step for the total amount
+        removal_steps.append(notes_to_remove_total)
+
+    if not removal_steps and notes_to_remove_total > 0:
+        # Fallback if logic above didn't produce steps but removal is intended
+        removal_steps = [notes_to_remove_total]
+    elif not removal_steps and notes_to_remove_total <= 0:
+        console.log(
+            f"\t[yellow]no removal steps defined for {basename(midi_path)} as notes_to_remove_total is {notes_to_remove_total}.[/yellow]"
+        )
+        return [midi_path]
+
+    console.log(
+        f"\tremoving up to {notes_to_remove_total} notes from {basename(midi_path)} in steps: {removal_steps}"
+    )
 
     new_files = []
-    for version in range(num_versions):
-        for step in steps:
-            notes_to_remove = all_indices[:step]
+    # get all non-drum note indices once
+    # list of (instrument_idx, note_idx_in_instrument)
+    all_note_indices_in_original_midi = []
+    # maps flat index to note object for easier access if needed later
+    note_obj_map = []
+    for i, instrument in enumerate(midi.instruments):
+        if not instrument.is_drum:
+            for j, note in enumerate(instrument.notes):
+                all_note_indices_in_original_midi.append((i, j))
+                note_obj_map.append(note)
 
-            new_midi = pretty_midi.PrettyMIDI(
+    if not all_note_indices_in_original_midi:
+        return []  # Should have been caught by num_notes_original == 0
+
+    num_variations = (
+        config.num_variations_per_step if config.num_variations_per_step else 1
+    )
+
+    for version_num in range(num_variations):
+        # for each variation, we need a new random permutation of notes to remove
+        # these are indices into the `all_note_indices_in_original_midi` list
+        permuted_global_indices = np.random.permutation(
+            len(all_note_indices_in_original_midi)
+        )
+
+        for num_to_remove_this_step in removal_steps:
+            if (
+                num_to_remove_this_step == 0
+            ):  # Skip if a step is 0 (e.g. if notes_removed_per_step > notes_to_remove_total initially)
+                continue
+
+            # select the first 'num_to_remove_this_step' from the permuted list
+            global_indices_to_remove_for_this_step_version = permuted_global_indices[
+                :num_to_remove_this_step
+            ]
+
+            # convert these global indices to a set of (instrument_idx, note_idx_in_instrument) for quick lookup
+            actual_notes_to_omit_coords = set()
+            for global_idx in global_indices_to_remove_for_this_step_version:
+                actual_notes_to_omit_coords.add(
+                    all_note_indices_in_original_midi[global_idx]
+                )
+
+            new_pm_obj = pretty_midi.PrettyMIDI(
                 initial_tempo=get_bpm(midi_path), resolution=TICKS_PER_BEAT
             )
-            new_inst = pretty_midi.Instrument(program=0, name=f"{version+1}-{step}")
-            for instrument in midi.instruments:
-                if not instrument.is_drum:
-                    for idx, note in enumerate(instrument.notes):
-                        if idx not in notes_to_remove:
-                            new_inst.notes.append(note)
-            new_midi.instruments.append(new_inst)
+
+            for original_instrument_idx, instrument in enumerate(midi.instruments):
+                new_inst = pretty_midi.Instrument(
+                    program=instrument.program,
+                    is_drum=instrument.is_drum,
+                    name=f"{basename(midi_path).split('.')[0]}_v{version_num+1:02d}_r{num_to_remove_this_step:02d}",
+                )
+                if instrument.is_drum:
+                    new_inst.notes.extend(instrument.notes)  # copy drum notes as is
+                else:
+                    for original_note_idx, note in enumerate(instrument.notes):
+                        if (
+                            original_instrument_idx,
+                            original_note_idx,
+                        ) not in actual_notes_to_omit_coords:
+                            new_inst.notes.append(
+                                note
+                            )  # note objects are copied by pretty_midi when appending
+
+                if new_inst.notes:  # only add instrument if it has notes
+                    new_pm_obj.instruments.append(new_inst)
+
+            if not any(not i.is_drum and i.notes for i in new_pm_obj.instruments):
+                console.log(
+                    f"[yellow]variant v{version_num+1:02d}_r{num_to_remove_this_step:02d} for {basename(midi_path)} resulted in no non-drum notes, skipping.[/yellow]"
+                )
+                continue
 
             pf_new = os.path.join(
                 output_path,
-                f"{os.path.basename(midi_path).split('.')[0]}_{version+1:02d}-{step:02d}.mid",
+                f"{basename(midi_path).split('.')[0]}_v{version_num+1:02d}_r{num_to_remove_this_step:02d}.mid",
             )
-            new_midi.write(pf_new)
+            new_pm_obj.write(pf_new)
             new_files.append(pf_new)
 
     return new_files
@@ -1075,7 +1222,7 @@ def ramp_vel(file_paths: list[str], target_vel: int, bpm: int) -> None:
 
     total_global_beats = len(notes_by_beat)
     if total_global_beats == 0:
-        console.log("[orange]no non-drum notes found in any beats.[/orange]")
+        console.log("\t[orange]no non-drum notes found in any beats.[/orange]")
         return
 
     # calculate average velocity per global beat
@@ -1108,7 +1255,7 @@ def ramp_vel(file_paths: list[str], target_vel: int, bpm: int) -> None:
     for i, avg_vel in enumerate(avg_vels_per_beat):
         if avg_vel <= 0:
             console.log(
-                f"[orange]warning: beat {i} has zero or invalid average velocity. using 64.[/orange]"
+                f"\t[orange]warning: beat {i} has zero or invalid average velocity. using 64.[/orange]"
             )
             avg_vels_per_beat[i] = 64  # use a default neutral velocity
 
@@ -1194,7 +1341,7 @@ def ramp_vel(file_paths: list[str], target_vel: int, bpm: int) -> None:
                     scaling_factors_per_beat[first_beat_idx : last_beat_idx + 1]
                 )
                 console.log(
-                    f"processed {basename(file_path)} (beats {first_beat_idx}-{last_beat_idx}) with avg scaling factor {avg_factor:.2f}"
+                    f"\tprocessed {basename(file_path)} (beats {first_beat_idx}-{last_beat_idx}) with avg scaling factor {avg_factor:.2f}"
                 )
             else:
                 console.log(
@@ -1203,5 +1350,116 @@ def ramp_vel(file_paths: list[str], target_vel: int, bpm: int) -> None:
 
         except Exception as e:
             console.log(
-                f"[red]error writing midi file {basename(file_path)}: {e}[/red]"
+                f"\t[red]error writing midi file {basename(file_path)}: {e}[/red]"
             )
+
+
+def jitter(
+    midi: pretty_midi.PrettyMIDI,
+    specifier: str,
+    limit: float,
+    percentage: float,
+    jitter_velocity: bool = False,
+) -> pretty_midi.PrettyMIDI:
+    """
+    apply random timing and/or velocity jitter to a percentage of notes in a midi object.
+
+    Parameters
+    ----------
+    midi : pretty_midi.PrettyMIDI
+        the midi object to modify.
+    specifier : str
+        which part of the note timing to jitter: "start", "end", or "both".
+    limit : float
+        the maximum timing jitter amount in seconds (applied in both positive and negative directions).
+    percentage : float
+        the percentage of notes (0.0 to 1.0) to apply timing and/or velocity jitter to.
+    jitter_velocity : bool, optional
+        if true, apply velocity jitter to a separate random selection of notes (same percentage). defaults to false.
+
+    Returns
+    -------
+    pretty_midi.PrettyMIDI
+        the modified midi object.
+    """
+    if specifier not in ["start", "end", "both"]:
+        raise ValueError("specifier must be one of 'start', 'end', or 'both'")
+
+    all_notes = []
+    instrument_map = []  # keep track of (instrument_index, note_index)
+
+    for i, instrument in enumerate(midi.instruments):
+        # skip drum tracks
+        if instrument.is_drum:
+            continue
+        for j, note in enumerate(instrument.notes):
+            all_notes.append(note)
+            instrument_map.append((i, j))
+
+    num_notes = len(all_notes)
+    if num_notes == 0:
+        return midi  # nothing to jitter
+
+    num_to_jitter = int(num_notes * percentage)
+
+    if num_to_jitter > 0:
+        # --- Timing Jitter ---
+        indices_to_jitter_time = np.random.choice(
+            range(num_notes), num_to_jitter, replace=False
+        )
+        min_duration = 0.01  # minimum note duration in seconds
+
+        for idx in indices_to_jitter_time:
+            instrument_idx, note_idx = instrument_map[idx]
+            note = midi.instruments[instrument_idx].notes[note_idx]
+
+            start_orig = note.start
+            end_orig = note.end
+
+            new_start = start_orig
+            new_end = end_orig
+
+            if specifier in ["start", "both"]:
+                jitter_amount = np.random.uniform(-limit, limit)
+                new_start = max(0, start_orig + jitter_amount)  # ensure start >= 0
+
+            if specifier in ["end", "both"]:
+                jitter_amount = np.random.uniform(-limit, limit)
+                # when jittering end, ensure it's after the (potentially modified) start
+                new_end = max(new_start + min_duration, end_orig + jitter_amount)
+            elif specifier == "start":
+                # if only start is jittered, preserve original duration
+                duration = end_orig - start_orig
+                new_end = new_start + duration
+
+            # final check to ensure end > start
+            if new_end <= new_start:
+                new_end = new_start + min_duration
+
+            note.start = new_start
+            note.end = new_end
+
+    if jitter_velocity and num_to_jitter > 0:
+        # --- Velocity Jitter ---
+        indices_to_jitter_vel = np.random.choice(
+            range(num_notes), num_to_jitter, replace=False
+        )
+
+        for idx in indices_to_jitter_vel:
+            instrument_idx, note_idx = instrument_map[idx]
+            note = midi.instruments[instrument_idx].notes[note_idx]
+
+            original_velocity = note.velocity
+            # calculate velocity change limit (30%)
+            velocity_change_limit = original_velocity * 0.30
+            # generate random velocity jitter
+            velocity_jitter = np.random.uniform(
+                -velocity_change_limit, velocity_change_limit
+            )
+            # calculate new velocity and clamp to valid range [0, 127]
+            new_velocity = int(round(original_velocity + velocity_jitter))
+            new_velocity = max(0, min(127, new_velocity))
+
+            note.velocity = new_velocity
+
+    return midi

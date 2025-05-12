@@ -1,10 +1,16 @@
-n_transitions: 200
+n_transitions: 32
 initialization: "recording" # kickstart random recording audio
-kickstart_path: "data/datasets/20250320/augmented/20240429-068-06_0084-0091_t10s03.mid"
-# kickstart_path: "data/datasets/20250320/augmented/20241229-094-10_0091-0096_t00s00.mid"
+kickstart_path: "data/datasets/20250420/augmented/20240429-068-06_0084-0091_t10s03.mid"
+# kickstart_path: "data/datasets/20250420/augmented/20241229-094-10_0091-0096_t00s00.mid"
 # kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid" # path to midi or matches.json
-seed_rearrange: True
-seed_remove: 0.5
+augmentation:
+  rearrange: True
+  remove: 0.5
+  target_notes_remaining: ~
+  notes_removed_per_step: 2
+  num_variations_per_step: 3
+  num_plays_per_segment_version: 1
+  total_segments_for_sequence: ~
 scheduler:
   verbose: True
 seeker:

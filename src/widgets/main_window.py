@@ -59,8 +59,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Window dimensions
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(800, 600)
-        self.resize(int(geometry.width() * 0.7), int(geometry.height() * 0.7))
-        # self.setFixedSize(int(geometry.width() * 0.8), int(geometry.height() * 0.8))
+        self.resize(int(geometry.width() * 0.8), int(geometry.height() * 0.8))
 
     def _build_timer(self):
         # Create velocity label (left side)
@@ -209,7 +208,13 @@ class MainWindow(QtWidgets.QMainWindow):
         audio_recorder = workers.AudioRecorder(
             self.params.audio, self.params.bpm, self.p_log
         )
-        self.workers = Staff(seeker, player, scheduler, midi_recorder, audio_recorder)
+        panther = workers.Panther(self.params.panther, self.params.bpm)
+        self.workers = Staff(
+            seeker, player, scheduler, midi_recorder, audio_recorder, panther
+        )
+
+        # connect seeker and panther
+        seeker.set_panther(panther)
 
     def switch_to_piano_roll(self, q_gui: Queue):
         console.log(f"{self.tag} switching to piano roll view")

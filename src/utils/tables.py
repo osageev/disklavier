@@ -83,6 +83,8 @@ def build_neighbor_table(
         console.print_exception(show_locals=True)
         return False
 
+    console.log(n_table.head())
+
     return os.path.exists(output_path)
 
 
@@ -114,7 +116,7 @@ def pitch_histograms(all_files: List[str], output_path: str) -> bool:
 
         d_filenames = f.create_dataset(
             "filenames",
-            (num_files, 1),
+            (num_files),
             dtype=h5py.string_dtype(encoding="utf-8"),
             fillvalue="",
         )
@@ -430,6 +432,13 @@ def graph(
             for i in range(len(files)):
                 for j in neighbors[i]:
                     if i < j:
+                        if (
+                            float(similarity[i, j]) < 0.000
+                            or float(similarity[i, j]) > 1.01
+                        ):
+                            raise ValueError(
+                                f"similarity is out of bounds: {similarity[i, j]}"
+                            )
                         edges.append((files[i], files[j], float(1 - similarity[i, j])))
                 progress.advance(sec_task)
 

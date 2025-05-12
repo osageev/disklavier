@@ -13,7 +13,7 @@ USER = "finlay"
 REMOTE_HOST = "129.173.66.44"
 PORT = 22
 P_REMOTE = "/home/finlay/disklavier/data/outputs/uploads"
-tag = "[#5f00af]panthr[/#5f00af]:"
+tag = "[#af5fff]panthr[/#af5fff]:"
 
 
 def send_embedding(
@@ -104,23 +104,23 @@ def send_embedding(
             console.log(f"{tag} upload complete, waiting for embedding...")
 
         # wait for new tensor
-        while 1:
-            try:
-                sftp.stat(pf_tensor_remote)
-                break
-            except FileNotFoundError:
-                time.sleep(0.01)
+        if not wait_for_remote_file(sftp, pf_tensor_remote):
+            raise TimeoutError(
+                f"{tag} remote embedding file '{pf_tensor_remote}' did not appear or stabilize within 2 seconds."
+            )
 
         sftp.get(pf_tensor_remote, pf_tensor_local)
-        console.log(f"{tag} downloaded embedding file '{pf_tensor_local}'")
+        if verbose:
+            console.log(f"{tag} downloaded embedding file '{pf_tensor_local}'")
 
         sftp.close()
         ssh.close()
 
-    console.log(f"{tag} loading embedding from '{pf_tensor_local}'")
-    embedding = torch.load(pf_tensor_local, weights_only=False).numpy().reshape(1, -1)
     if verbose:
-        console.log(f"{tag} loaded embedding {embedding.shape}")
+        console.log(f"{tag} loading embedding from '{pf_tensor_local}'")
+    embedding = torch.load(pf_tensor_local, weights_only=False).numpy().reshape(1, -1)
+
+    console.log(f"{tag} loaded embedding {embedding.shape}")
 
     return embedding
 
@@ -167,7 +167,7 @@ def wait_for_file(
 def wait_for_remote_file(
     sftp: paramiko.SFTPClient,
     remote_file_path: str,
-    max_wait: float = 5.0,
+    max_wait: float = 2.0,
     check_interval: float = 0.01,
 ) -> bool:
     """

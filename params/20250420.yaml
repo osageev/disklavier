@@ -33,6 +33,6 @@ representations: ["pitch-histogram", "specdiff",  "clamp"]
 model_dir: "data/models"
 device_name: "cuda:1"
 graphs: ["specdiff"]
-n_graph_connections: 250
+n_graph_connections: 150
 find_neighbors: true
 fix_tempo: true
