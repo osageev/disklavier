@@ -514,9 +514,7 @@ class RunWorker(QtCore.QThread):
             return []
 
         for m_path in valid_midi_paths:
-            embedding = self.staff.seeker.get_embedding(
-                m_path
-            )  # model is internal to seeker
+            embedding = self.staff.seeker.get_embedding(m_path)
             if embedding is None or embedding.sum() == 0:  # check for empty embedding
                 console.log(
                     f"\t\t[orange italic]{basename(m_path)} has no notes or embedding failed, skipping[/orange italic]"

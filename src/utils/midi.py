@@ -53,6 +53,10 @@ class MidiAugmentationConfig:
     total_segments_for_sequence: Optional[int] = None
 
     def __post_init__(self):
+        # convert string 'None' values to None
+        for field in self.__dataclass_fields__:
+            if getattr(self, field) == 'None':
+                setattr(self, field, None)
         if self.remove_percentage is not None and not (
             0.0 <= self.remove_percentage <= 1.0
         ):
@@ -312,9 +316,6 @@ def csv_to_midi(csv_path: str, midi_output_path: str, verbose: bool = False) -> 
     midi.save(midi_output_path)
 
     console.log(f"[green]MIDI file created: '{midi_output_path}'")
-    # if verbose:
-    #     console.log("[bold]MIDI File Contents:[/bold]")
-    #     midi.print_tracks()
 
     return os.path.isfile(midi_output_path)
 

@@ -5,12 +5,12 @@ kickstart_path: "data/datasets/20250420/augmented/20240429-068-06_0084-0091_t10s
 # kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid" # path to midi or matches.json
 augmentation:
   rearrange: True
-  remove: 0.2
-  target_notes_remaining: null
-  notes_removed_per_step: 1
-  num_variations_per_step: 1
+  remove: 0.5
+  target_notes_remaining: ~
+  notes_removed_per_step: 2
+  num_variations_per_step: 3
   num_plays_per_segment_version: 1
-  total_segments_for_sequence: null
+  total_segments_for_sequence: ~
 scheduler:
   verbose: True
 seeker:
