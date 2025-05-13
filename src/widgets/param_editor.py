@@ -71,6 +71,33 @@ class ParameterEditorWidget(QtWidgets.QWidget):
         """
         main_layout = QtWidgets.QVBoxLayout(self)
 
+        # Apply a stylesheet for larger text
+        self.setStyleSheet(
+            """
+            QLabel {
+                font-size: 14px;
+            }
+            QLineEdit {
+                font-size: 14px;
+            }
+            QComboBox {
+                font-size: 14px;
+            }
+            QCheckBox {
+                font-size: 14px; /* Or adjust as needed for checkbox text if separate */
+            }
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 5px;
+            }
+        """
+        )
+
         # Scroll area setup
         scroll_area = QtWidgets.QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -111,7 +138,9 @@ class ParameterEditorWidget(QtWidgets.QWidget):
 
         # Display top-level parameters
         keys = list(self.params.keys())
-        keys.sort(key=lambda x: key_order.index(x) if x in key_order else len(key_order))
+        keys.sort(
+            key=lambda x: key_order.index(x) if x in key_order else len(key_order)
+        )
         for key in keys:
             if (
                 isinstance(self.params[key], (int, float, str, bool))
@@ -123,7 +152,8 @@ class ParameterEditorWidget(QtWidgets.QWidget):
                 (dict, omegaconf.OmegaConf, omegaconf.dictconfig.DictConfig),
             ):
                 # Create section header
-                section_group = QtWidgets.QGroupBox(key)
+                formatted_section_title = key.replace("_", " ").title()
+                section_group = QtWidgets.QGroupBox(formatted_section_title)
                 section_layout = QtWidgets.QVBoxLayout(section_group)
 
                 # Add nested parameters
@@ -156,7 +186,13 @@ class ParameterEditorWidget(QtWidgets.QWidget):
         row_layout = QtWidgets.QHBoxLayout(frame)
         row_layout.setContentsMargins(0, 2, 0, 2)
 
-        label = QtWidgets.QLabel(key)
+        # Format display key
+        display_key = key.split(".")[-1]  # Get the part after the last dot
+        display_key = display_key.replace(
+            "_", " "
+        ).title()  # Replace underscores and capitalize
+
+        label = QtWidgets.QLabel(display_key)
         label.setFixedWidth(300)
         row_layout.addWidget(label)
 
