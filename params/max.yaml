@@ -1,6 +1,7 @@
-n_transitions: 4
-initialization: "recording" # kickstart random recording
-kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid"
+n_transitions: 40
+initialization: "kickstart" # kickstart random recording
+kickstart_path: "/Users/finlay/Documents/Programming/disklavier/data/outputs/logs/250512-125822_specdiff_recording_9878761/player-query.mid"
+# kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid"
 augmentation:
   rearrange: True
   remove: 0.1

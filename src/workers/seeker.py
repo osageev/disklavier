@@ -149,7 +149,7 @@ class Seeker(Worker, QtCore.QObject):
             Reference to the MidiRecorder instance.
         """
         self._recorder = recorder
-        console.log(f"{self.tag} connected to recorder for velocity updates")
+        console.log(f"{self.tag} connected to midi recorder")
 
     def set_panther(self, panther: Panther):
         """
@@ -276,7 +276,7 @@ class Seeker(Worker, QtCore.QObject):
                 )
                 query_file = new_query_file
 
-        # load query embedding
+        # --- load query embedding ---
         # first, look in existing index
         # then, if no embedding is found, calculate manually
         try:
@@ -287,8 +287,6 @@ class Seeker(Worker, QtCore.QObject):
                 embedding = self.faiss_index.reconstruct(int(self.filenames.index(query_file)))  # type: ignore
         except (ValueError, KeyError):
             pf_new = self.played_files[-1]
-            # if "player" in pf_new:
-            #     pf_new = self.augment_recording(pf_new)
 
             console.log(
                 f"{self.tag}[yellow] unable to find embedding for '{query_file}', calculating manually from '{pf_new}'"
@@ -308,7 +306,7 @@ class Seeker(Worker, QtCore.QObject):
             dtype=np.float32,
         ).reshape(1, -1)
 
-        # query index
+        # --- query FAISS index ---
         if self.verbose and query_file in self.filenames:
             console.log(f"{self.tag} querying with key '{query_file}'")
 
@@ -319,7 +317,7 @@ class Seeker(Worker, QtCore.QObject):
                     f"{self.tag}\t{i}: {self.filenames[indices[i]]} {similarities[i]:.05f}"
                 )
 
-        # find most similar valid match
+        # --- find most similar valid match ---
         if "player" in query_file:
             next_file = self._get_random()
         else:
@@ -329,9 +327,11 @@ class Seeker(Worker, QtCore.QObject):
         if self.params.match != "current":
             played_files.append(query_file)
         for idx, similarity in zip(indices, similarities):
+            # this should always skip the first file
+            # first file should always be the query file
             if self.filenames[idx] == query_file:
-                # this should always skip the first file
                 continue
+            
             segment_name = str(self.filenames[idx])
             if "player" in query_file:
                 next_file = f"{segment_name}.mid"
@@ -339,6 +339,7 @@ class Seeker(Worker, QtCore.QObject):
                 break
             # dont replay files
             if segment_name in played_files:
+                console.log(f"{self.tag} skipping replay of '{segment_name}'")
                 continue
 
             next_segment_name = self.base_file(segment_name)

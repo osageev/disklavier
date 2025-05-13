@@ -15,6 +15,7 @@ blocked_params = [
     "record",
     "channels",
     "system",
+    "panther"
 ]
 
 key_order = [
