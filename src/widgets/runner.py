@@ -51,7 +51,6 @@ class RunWorker(QtCore.QThread):
     last_checked_beat: float = 0.0
     previous_player_embedding: Optional[np.ndarray] = None
     playback_cutoff_tick: float = float("inf")
-    player_embedding_diff_threshold: float = 1.0  # TODO: tune this
     player_segment_beat_interval: int = 8
     adjustment_lookahead_s: float = 3.0
 
@@ -564,9 +563,9 @@ class RunWorker(QtCore.QThread):
                     f"{self.tag} player embedding diff magnitude: {diff_magnitude:.4f}"
                 )
 
-            if diff_magnitude > self.player_embedding_diff_threshold:
+            if diff_magnitude > self.params.player_embedding_diff_threshold:
                 console.log(
-                    f"{self.tag} [yellow]embedding diff threshold exceeded ({diff_magnitude:.4f} > {self.player_embedding_diff_threshold}). adjusting trajectory..."
+                    f"{self.tag} [yellow]embedding diff threshold exceeded ({diff_magnitude:.4f} > {self.params.player_embedding_diff_threshold}). adjusting trajectory..."
                 )
                 try:
                     # self._adjust_playback_trajectory(embedding_diff)

@@ -137,7 +137,7 @@ class Scheduler(Worker):
                         else:
                             current_tt_abs = tt_upper_bound
                     self.tt_all_messages.append(current_tt_abs)
-                    tt_max_abs = max(tt_max_abs, current_tt_abs)  # update max tick time
+                    tt_max_abs_in_segment = max(tt_max_abs_in_segment, current_tt_abs)  # update max tick time
 
                     # console.log(f"{self.tag} adding message to queue: ({current_tt_abs}, ({msg}))")
 
@@ -180,7 +180,7 @@ class Scheduler(Worker):
 
         _ = self._copy_midi(pf_midi)
 
-        return ts_seg_len, ts_offset, tt_max_abs
+        return ts_seg_len, ts_offset, tt_max_abs_in_segment
 
     def init_schedule(self, pf_midi: str, offset_s: float = 0):
         """Initialize a MIDI file to hold a playback recording."""
