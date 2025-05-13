@@ -20,6 +20,7 @@ class MidiRecorder(Worker, QtCore.QObject):
     stop_event: Optional[Event] = None
     midi_thread: Thread
     ts_window_duration: float = 1.0
+    first_note_timestamp: Optional[datetime] = None
 
     # published velocity statistics
     _avg_velocity: float = 0.0
@@ -218,10 +219,10 @@ class MidiRecorder(Worker, QtCore.QObject):
                 elif self.is_recording and msg.type in ["note_on", "note_off"]:
                     current_time = datetime.now()
 
-                    # emit progress if recording_start_timestamp is set
-                    if hasattr(self, "recording_start_timestamp"):
+                    # emit progress if first_note_timestamp is set
+                    if self.first_note_timestamp:
                         elapsed_seconds = (
-                            current_time - self.recording_start_timestamp
+                            current_time - self.first_note_timestamp
                         ).total_seconds()
                         elapsed_beats = elapsed_seconds * (self.bpm / 60.0)
                         self.s_recording_progress.emit(elapsed_seconds, elapsed_beats)
@@ -229,6 +230,7 @@ class MidiRecorder(Worker, QtCore.QObject):
                     if len(self.recorded_notes) == 0:
                         # set times to start from this point
                         start_time = datetime.now()
+                        self.first_note_timestamp = start_time
                         console.log(f"{self.tag} start_time: {start_time}")
 
                         # calculate ticks since the start of the previous beat

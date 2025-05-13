@@ -284,8 +284,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Switch to RecordingWidget
         self.recording_widget.reset_widget()
         self.setCentralWidget(self.recording_widget)
-        self.status.showMessage("recording/monitoring view active")
-        self.status_label.setText("Recording/Monitoring View")
+        self.status.showMessage("recording view active")
+        self.status_label.setText("Recording View")
 
         # Start the main processing in a QThread
         self.run_thread = RunWorker(self)
