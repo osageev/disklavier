@@ -49,6 +49,9 @@ class Seeker(Worker, QtCore.QObject):
     # filename to index mapping
     filename_to_index: dict[str, int] = {}
 
+    # probability distribution for probabilities mode
+    probabilities_dist: list[float] = [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6]
+
     # velocity tracking
     _recorder = None
     _avg_velocity: float = 0.0
@@ -78,8 +81,99 @@ class Seeker(Worker, QtCore.QObject):
         self.current_path = []
         self.filename_to_index = {}
 
+        if (
+            hasattr(params, "probabilities_dist")
+            and params.probabilities_dist is not None
+        ):
+            self.probabilities_dist = list(params.probabilities_dist)
+        else:
+            # keep default if not in params
+            pass
+
+        # validate and normalize probabilities_dist
+        if not (
+            isinstance(self.probabilities_dist, list)
+            and len(self.probabilities_dist) == 6
+            and all(isinstance(p, (int, float)) for p in self.probabilities_dist)
+        ):
+            console.log(
+                f"{self.tag} [yellow]Warning: seeker.probabilities_dist is invalid. "
+                f"Expected a list of 6 numbers. Got: {self.probabilities_dist}. "
+                f"Reverting to default: {[1/6]*6}[/yellow]"
+            )
+            self.probabilities_dist = [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6]
+
+        if any(p < 0 for p in self.probabilities_dist):
+            console.log(
+                f"{self.tag} [yellow]Warning: seeker.probabilities_dist contains negative values: "
+                f"{self.probabilities_dist}. Clamping to 0.[/yellow]"
+            )
+            self.probabilities_dist = [max(0.0, p) for p in self.probabilities_dist]
+
+        current_sum = sum(self.probabilities_dist)
+        tolerance = 1e-6
+
+        if abs(current_sum - 1.0) > tolerance:
+            console.log(
+                f"{self.tag} [yellow]Warning: seeker.probabilities_dist (sum: {current_sum:.4f}) "
+                f"does not sum to 1.0. Adjusting probabilities.[/yellow]"
+            )
+            if current_sum < 1.0:
+                if current_sum == 0:  # avoid division by zero if all are zero
+                    console.log(
+                        f"{self.tag} [yellow]All probabilities were zero. Setting to uniform distribution.[/yellow]"
+                    )
+                    self.probabilities_dist = [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6]
+                else:  # only add to first element if sum is positive
+                    diff = 1.0 - current_sum
+                    self.probabilities_dist[0] += diff
+            else:  # current_sum > 1.0
+                surplus = current_sum - 1.0
+                # try to subtract from actions 2-6 (indices 1-5)
+                # Calculate the total amount that can be reduced from elements 1-5
+                reducible_amount_1_5 = sum(
+                    max(0, self.probabilities_dist[i] - 0) for i in range(1, 6)
+                )
+
+                if reducible_amount_1_5 >= surplus:
+                    # Distribute the surplus reduction proportionally among elements 1-5
+                    for i in range(1, 6):
+                        if (
+                            self.probabilities_dist[i] > 0 and reducible_amount_1_5 > 0
+                        ):  # ensure reducible_amount_1_5 is not zero
+                            reduction = surplus * (
+                                self.probabilities_dist[i] / reducible_amount_1_5
+                            )
+                            self.probabilities_dist[i] -= reduction
+                            if self.probabilities_dist[i] < 0:
+                                self.probabilities_dist[i] = 0.0  # clamp
+                else:
+                    # Reduce elements 1-5 to 0 and subtract remaining surplus from element 0
+                    for i in range(1, 6):
+                        surplus -= self.probabilities_dist[i]
+                        self.probabilities_dist[i] = 0.0
+                    self.probabilities_dist[0] -= surplus
+                    if self.probabilities_dist[0] < 0:
+                        self.probabilities_dist[0] = 0.0
+
+            # final normalization
+            final_sum = sum(self.probabilities_dist)
+            if final_sum > 0:
+                self.probabilities_dist = [
+                    p / final_sum for p in self.probabilities_dist
+                ]
+            else:  # if sum is still zero
+                console.log(
+                    f"{self.tag} [yellow]All probabilities became zero after adjustment. Setting to uniform distribution.[/yellow]"
+                )
+                self.probabilities_dist = [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6]
+
+            console.log(
+                f"{self.tag} Adjusted probabilities: {[f'{p:.4f}' for p in self.probabilities_dist]}"
+            )
+
         if self.verbose:
-            console.log(f"{self.tag} settings:\n{self.__dict__}")
+            console.log(f"{self.tag} settings:\\n{self.__dict__}")
 
         console.log(
             f"{self.tag} loading FAISS index from '{self.p_table}/{self.params.metric}.faiss'"
@@ -210,6 +304,8 @@ class Seeker(Worker, QtCore.QObject):
             case "graph":
                 # TODO: fix similarities if possible
                 next_file, similarity = self._get_graph()
+            case "probabilities":
+                next_file, similarity = self._get_probabilities()
             case "random" | "shuffle" | _:
                 next_file = self._get_random()
 
@@ -331,7 +427,7 @@ class Seeker(Worker, QtCore.QObject):
             # first file should always be the query file
             if self.filenames[idx] == query_file:
                 continue
-            
+
             segment_name = str(self.filenames[idx])
             if "player" in query_file:
                 next_file = f"{segment_name}.mid"
@@ -842,3 +938,207 @@ class Seeker(Worker, QtCore.QObject):
         best_similarity = similarities[0]
 
         return best_match, best_similarity
+
+    def _get_probabilities(self) -> tuple[str, float]:
+        """
+        get the next segment based on a probability distribution over actions.
+
+        actions can be:
+        - "current": find a segment similar to the current one.
+        - "next", "next_2": find a segment similar to the next/next+1 chronological segment.
+        - "prev", "prev_2": find a segment similar to the previous/previous-1 chronological segment.
+        - "transition": find a segment similar to the current one, but from a different track.
+
+        returns
+        -------
+        tuple[str, float]
+            path to midi file to play next, and similarity measure.
+        """
+        actions = ["current", "next", "next_2", "prev", "prev_2", "transition"]
+        chosen_action_idx = self.rng.choice(len(actions), p=self.probabilities_dist)
+        chosen_action = actions[chosen_action_idx]
+        console.log(f"{self.tag} probabilities mode selected action: '{chosen_action}'")
+
+        # determine query file and augmentation
+        # self.played_files[-1] is like "trackA_seg01_t00s00.mid"
+        current_played_full_filename = self.played_files[-1]
+        # current_played_file_key is like "trackA_seg01_t00s00" (used in self.filenames, self.filename_to_index)
+        current_played_file_key = basename(current_played_full_filename)
+        # current_played_file_base_for_neighbor is like "trackA_seg01" (used for neighbor_table.loc)
+        current_played_file_base_for_neighbor = self.base_file(
+            current_played_full_filename
+        )[:-4]
+        # current_augmentation_key_part is like "_t00s00"
+        current_augmentation_key_part = current_played_file_key.replace(
+            current_played_file_base_for_neighbor, "", 1
+        )
+
+        query_file_base_key: str
+        augmentation_key_part: str
+
+        if chosen_action == "current" or chosen_action == "transition":
+            query_file_base_key = current_played_file_base_for_neighbor
+            augmentation_key_part = current_augmentation_key_part
+        else:  # "next", "next_2", "prev", "prev_2"
+            try:
+                neighbor = self.neighbor_table.loc[
+                    current_played_file_base_for_neighbor, chosen_action
+                ]
+                if (
+                    pd.isna(neighbor) or neighbor is None
+                ):  # check for NaN or None from table
+                    raise KeyError  # treat as missing
+                query_file_base_key = str(neighbor)
+                augmentation_key_part = "_t00s00"  # safer default for neighbors
+            except KeyError:
+                console.log(
+                    f"{self.tag} [yellow]neighbor '{chosen_action}' not found for "
+                    f"'{current_played_file_base_for_neighbor}'. falling back to 'current'.[/yellow]"
+                )
+                # chosen_action = "current" # for logical consistency if we were to use it later
+                query_file_base_key = current_played_file_base_for_neighbor
+                augmentation_key_part = current_augmentation_key_part
+
+        full_query_file_key = query_file_base_key + augmentation_key_part
+        if self.verbose:
+            console.log(f"{self.tag} query key for embedding: '{full_query_file_key}'")
+
+        # get query embedding
+        embedding: Optional[np.ndarray] = None
+        try:
+            embedding = self.faiss_index.reconstruct(
+                int(self.filename_to_index[full_query_file_key])
+            )
+        except (
+            KeyError,
+            ValueError,
+        ):  # also handles if full_query_file_key not in filename_to_index
+            try:  # fallback to list.index if filename_to_index is out of sync (should be rare)
+                embedding = self.faiss_index.reconstruct(
+                    int(self.filenames.index(full_query_file_key))
+                )
+            except (
+                ValueError,
+                IndexError,
+            ):  # valueerror if not in list, indexerror if list empty
+                pass  # embedding remains None
+
+        if embedding is None:
+            # path to the actual midi file needed for get_embedding()
+            # this assumes full_query_file_key is for a dataset file
+            # TODO: needs robust handling for player files if they can be query sources here
+            pf_for_embedding_calc = os.path.join(
+                self.p_dataset, full_query_file_key + ".mid"
+            )
+            console.log(
+                f"{self.tag}[yellow] unable to find embedding for '{full_query_file_key}', "
+                f"calculating manually from '{pf_for_embedding_calc}'[/yellow]"
+            )
+
+            calculated_embedding = self.get_embedding(
+                pf_for_embedding_calc
+            )  # returns np.ndarray or None
+
+            if (
+                calculated_embedding is not None
+                and calculated_embedding.ndim == 2
+                and calculated_embedding.shape[0] == 1
+                and calculated_embedding.shape[1] > 1
+            ):
+                embedding = calculated_embedding
+                embedding /= np.linalg.norm(
+                    embedding, axis=1, keepdims=True
+                )  # normalize
+                self.faiss_index.add(embedding)
+                self.filenames.append(full_query_file_key)
+                self.filename_to_index[full_query_file_key] = len(self.filenames) - 1  # type: ignore
+                console.log(
+                    f"{self.tag} added [dark_red bold]{full_query_file_key}[/dark_red bold] to index"
+                )
+            else:
+                metric_key = str(self.params.metric)
+                embedding_size = EMBEDDING_SIZES.get(
+                    metric_key, 512
+                )  # default if metric unknown
+                console.log(
+                    f"{self.tag} [red]error: embedding for {full_query_file_key} from {pf_for_embedding_calc} "
+                    f"has wrong shape or is none: {calculated_embedding.shape if calculated_embedding is not None else 'None'}. "
+                    f"using random vector of size {embedding_size}.[/red]"
+                )
+                embedding = self.rng.random((1, embedding_size)).astype(np.float32)
+                embedding /= np.linalg.norm(embedding, axis=1, keepdims=True)
+
+        query_embedding = np.array(embedding, dtype=np.float32).reshape(1, -1)
+        # ensure normalization again, as reconstruct might not guarantee it or if loaded from bad state.
+        if (
+            np.linalg.norm(query_embedding) > 1e-5
+        ):  # avoid division by zero for zero vectors
+            query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
+
+        # faiss search
+        indices, similarities = self._faiss_search(query_embedding)
+
+        # filter and select match
+        # played_base_files contains keys like "trackA_seg01"
+        played_base_files = {self.base_file(f)[:-4] for f in self.played_files}
+
+        next_file_to_play: Optional[str] = None
+        found_similarity: float = 0.0
+
+        for idx, sim in zip(indices, similarities):
+            candidate_filename_key = self.filenames[idx]  # e.g., "trackB_seg05_t00s00"
+
+            # skip if query itself
+            if candidate_filename_key == full_query_file_key:
+                continue
+
+            candidate_base_filename_key = self.base_file(
+                candidate_filename_key + ".mid"
+            )[
+                :-4
+            ]  # e.g., "trackB_seg05"
+
+            # skip if already played (and not allowing multiple plays)
+            if (
+                not self.allow_multiple_plays
+                and candidate_base_filename_key in played_base_files
+            ):
+                if self.verbose:
+                    console.log(
+                        f"{self.tag} skipping replay of base '{candidate_base_filename_key}' from '{candidate_filename_key}'"
+                    )
+                continue
+
+            if chosen_action == "transition":
+                candidate_track = candidate_filename_key.split("_")[0]
+                current_track_for_transition_check = current_played_file_key.split("_")[
+                    0
+                ]
+                if candidate_track == current_track_for_transition_check:
+                    if self.verbose:
+                        console.log(
+                            f"{self.tag} skipping same track '{candidate_track}' for transition from '{candidate_filename_key}'"
+                        )
+                    continue
+
+            # if all checks pass
+            next_file_to_play = (
+                candidate_filename_key + ".mid"
+            )  # e.g., "trackB_seg05_t00s00.mid"
+            found_similarity = float(sim)
+            if self.verbose:
+                console.log(
+                    f"{self.tag} probabilities match found: '{next_file_to_play}' sim: {found_similarity:.4f}"
+                )
+            break  # found a match
+
+        # fallback
+        if next_file_to_play is None:
+            console.log(
+                f"{self.tag} no valid match found for action '{chosen_action}' "
+                f"based on query '{full_query_file_key}'. choosing randomly."
+            )
+            random_filename_part = self._get_random()  # returns "file_aug.mid"
+            return os.path.join(self.p_dataset, random_filename_part), 0.0
+
+        return os.path.join(self.p_dataset, next_file_to_play), found_similarity
