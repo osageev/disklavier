@@ -1,8 +1,14 @@
 n_transitions: 4
-initialization: "random" # kickstart random recording
+initialization: "recording" # kickstart random recording
 kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid"
-seed_rearrange: True
-seed_remove: 0.25
+augmentation:
+  rearrange: True
+  remove: 0.1
+  target_notes_remaining: ~
+  notes_removed_per_step: 2
+  num_variations_per_step: 3
+  num_plays_per_segment_version: 1
+  total_segments_for_sequence: ~
 scheduler:
   verbose: True
 seeker:

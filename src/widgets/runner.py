@@ -35,6 +35,8 @@ class RunWorker(QtCore.QThread):
     s_switch_to_pr = QtCore.Signal(object)
     s_transition_times = QtCore.Signal(list)
     s_segments_remaining = QtCore.Signal(int)
+    s_augmentation_started = QtCore.Signal(int)
+    s_embedding_processed = QtCore.Signal()
 
     # queues
     q_playback = PriorityQueue()
@@ -50,6 +52,7 @@ class RunWorker(QtCore.QThread):
 
         # connect signals
         self.s_switch_to_pr.connect(self.main_window.switch_to_piano_roll)
+        self.staff.seeker.s_embedding_calculated.connect(self.s_embedding_processed)
 
         # file paths from main window
         self.p_log = main_window.p_log
@@ -512,6 +515,10 @@ class RunWorker(QtCore.QThread):
             if os.path.exists(pf_midi):
                 return [pf_midi]
             return []
+
+        # Emit signal for augmentation start with total number of embeddings to calculate
+        total_embeddings_to_calculate = len(valid_midi_paths)
+        self.s_augmentation_started.emit(total_embeddings_to_calculate)
 
         for m_path in valid_midi_paths:
             embedding = self.staff.seeker.get_embedding(m_path)

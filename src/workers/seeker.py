@@ -8,6 +8,7 @@ from glob import glob
 from shutil import copy2
 from pretty_midi import PrettyMIDI
 from scipy.spatial.distance import cosine
+from PySide6 import QtCore
 
 from workers.panther import Panther
 from typing import Optional
@@ -19,7 +20,9 @@ from utils.modes import find_path
 from utils.constants import SUPPORTED_EXTENSIONS, EMBEDDING_SIZES
 
 
-class Seeker(Worker):
+class Seeker(Worker, QtCore.QObject):
+    s_embedding_calculated = QtCore.Signal()
+
     # required tables
     filenames: list[str] = []
     faiss_index: faiss.IndexFlatIP
@@ -62,6 +65,7 @@ class Seeker(Worker):
         playlist_path: str,
         bpm: int,
     ):
+        QtCore.QObject.__init__(self)
         super().__init__(params, bpm=bpm)
         self.p_aug = aug_path
         self.p_table = table_path
@@ -724,11 +728,15 @@ class Seeker(Worker):
                     f"{self.tag} [red]error: failed to get embedding from panther[/red]"
                 )
                 # Handle failure: return dummy or raise error
+                # For now, emit signal even on failure to indicate an attempt was made.
+                self.s_embedding_calculated.emit()
                 return np.zeros((1, 512), dtype=np.float32)  # Placeholder
             embedding = embedding_opt
             console.log(
                 f"{self.tag} got [italic bold]{self.params.metric}[/italic bold] embedding {embedding.shape}"
             )
+
+        self.s_embedding_calculated.emit()
         return embedding
 
     def _faiss_search(
