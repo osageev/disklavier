@@ -212,7 +212,7 @@ class RunWorker(QtCore.QThread):
                 else:
                     pass
 
-                if remaining_seconds < self.params.startup_delay * 2:
+                if remaining_seconds < self.params.startup_delay + 1:
                     pf_next_file, similarity = self.staff.seeker.get_next()
                     self._queue_file(pf_next_file, similarity)
 
@@ -315,7 +315,7 @@ class RunWorker(QtCore.QThread):
             self.n_files_queued,
             start_time.strftime("%y-%m-%d %H:%M:%S"),
             file_path,
-            similarity if similarity is not None else "----",
+            f"{similarity:.5f}" if similarity is not None else "----",
         )
 
         remaining_seconds_log = 0
@@ -544,40 +544,23 @@ class RunWorker(QtCore.QThread):
 
         final_paths_to_play = []
 
-        # the logic for selecting which versions to play (original, specific augmentations, best_match_from_dataset cue)
-        # will depend on config.total_segments_for_sequence and config.num_plays_per_segment_version.
-        # for now, let's refine the selection of `final_paths` based on whether removal happened and a best_aug was found.
-
         if (
             config.remove_percentage is not None
             or config.target_notes_remaining is not None
         ):
             # if note removal was part of the process
             if best_aug:
-                # if a best_aug was found among the (potentially numerous) removed versions,
-                # we need to decide which of the "family" of augmentations related to best_aug to return.
-                # for now, let's assume we want all versions that led to this best_aug (e.g. _v01_r02, _v01_r04 if _v01_r04 was best_aug)
-                # this is a simplification; the user request implies a more structured selection later.
-
-                # extract base name and variation from best_aug to find siblings
                 best_aug_basename = basename(best_aug)
                 parts = best_aug_basename.split("_")
-                # example: file_rearranged_a01_v01_r05.mid or file_v01_r05.mid
 
                 key_prefix = ""
-                if (
-                    "_rearranged_a" in best_aug_basename and "_v" in best_aug_basename
-                ):  # rearranged and removed
+                if "_rearranged_a" in best_aug_basename and "_v" in best_aug_basename:
                     key_prefix = "_".join(
                         parts[:-1]
                     )  # everything before the last _rXX part
-                elif (
-                    "_v" in best_aug_basename
-                ):  # only removed, no rearrangement in this name part
+                elif "_v" in best_aug_basename:
                     key_prefix = "_".join(parts[:-1])
-                else:  # original file, or only rearranged (no _v part means no versioning from removal)
-                    # if it was only rearranged, best_aug would be like 'file_rearranged_a01.mid'
-                    # if it was original, best_aug would be 'file.mid'
+                else:
                     key_prefix = best_aug_basename.split(".")[0]
 
                 for (
@@ -588,16 +571,12 @@ class RunWorker(QtCore.QThread):
                         # key_prefix is 'file_v01_r'. This will match 'file_v01_r02.mid', 'file_v01_r05.mid' etc.
                         # This seems to align with "play the augmentation which is missing X notes, Y notes"
                         final_paths_to_play.append(m_path)
-
-                # sort them to have a predictable order (e.g., by number of notes removed)
                 final_paths_to_play.sort()
 
-                if (
-                    not final_paths_to_play and best_aug
-                ):  # if somehow the prefix logic failed but we have a best_aug
+                # if somehow the prefix logic failed but we have a best_aug
+                if not final_paths_to_play and best_aug:
                     final_paths_to_play.append(best_aug)
-
-            else:  # no best_aug found after removal attempts (maybe all had 0 similarity or failed embedding)
+            else:
                 console.log(
                     "[yellow]warning: note removal active, but no 'best_aug' identified. returning original file or first valid path.[/yellow]"
                 )
@@ -633,23 +612,79 @@ class RunWorker(QtCore.QThread):
                 seen.add(p)
         final_paths_to_play = unique_final_paths
 
+        # Apply total_segments_for_sequence if specified
+        num_segments_target = config.total_segments_for_sequence
+
+        if (
+            num_segments_target is not None
+            and isinstance(num_segments_target, int)
+            and num_segments_target > 0
+            and len(final_paths_to_play) > num_segments_target
+        ):
+
+            N_current = len(final_paths_to_play)
+            K_target = num_segments_target
+
+            console.log(
+                f"{self.tag} attempting to select {K_target} segments from {N_current} available augmentations for '{basename(pf_midi)}': {[basename(p) for p in final_paths_to_play]}"
+            )
+
+            selected_paths_subset = []
+            if K_target == 1:
+                # If only one segment is desired, pick the first from the current list
+                if N_current > 0:
+                    selected_paths_subset = [final_paths_to_play[0]]
+            elif (
+                K_target > 1
+            ):  # K_target < N_current is guaranteed by the outer if, and N_current >= K_target
+                # Build a new list with K_target elements, ensuring the first and last of the original
+                # final_paths_to_play are included, with other elements spaced evenly.
+
+                temp_indices = []
+                for i in range(K_target):
+                    # Calculate the index in the original list of N_current items
+                    # The i-th item (0 to K_target-1) maps to an index from 0 to N_current-1
+                    idx = round(i * (N_current - 1) / (K_target - 1))
+                    temp_indices.append(int(idx))
+
+                # Remove duplicates from indices (can happen if K_target is close to N_current due to rounding)
+                # and maintain order.
+                unique_selected_indices = []
+                seen_indices_set = set()
+                for idx_val in temp_indices:
+                    if idx_val not in seen_indices_set:
+                        unique_selected_indices.append(idx_val)
+                        seen_indices_set.add(idx_val)
+
+                # Create the subset of paths using the unique, sorted indices
+                if unique_selected_indices:
+                    selected_paths_subset = [
+                        final_paths_to_play[i] for i in unique_selected_indices
+                    ]
+
+            if selected_paths_subset:
+                final_paths_to_play = selected_paths_subset
+                console.log(
+                    f"{self.tag} selected {len(final_paths_to_play)} segments: {[basename(p) for p in final_paths_to_play]}"
+                )
+            elif N_current > 0:
+                console.log(
+                    f"{self.tag} [yellow]warning: failed to select subset (K_target={K_target}, N_current={N_current}), using original {len(final_paths_to_play)} segments for '{basename(pf_midi)}'.[/yellow]"
+                )
+
         # Add the best matching original file from the dataset to cue the system for the next segment
-        if best_match_from_dataset:  # this is a filename stem
-            # Construct the full path to the dataset file
-            # Assuming self.args.dataset_path is the directory containing dataset MIDIs
-            # And seeker returns filename stems without .mid
-            path_to_best_match_in_dataset = os.path.join(
+        if best_match_from_dataset:
+            pf_best_match = os.path.join(
                 self.args.dataset_path, best_match_from_dataset + ".mid"
             )
-            if os.path.exists(path_to_best_match_in_dataset):
+            if os.path.exists(pf_best_match):
                 if (
-                    not final_paths_to_play
-                    or final_paths_to_play[-1] != path_to_best_match_in_dataset
+                    not final_paths_to_play or final_paths_to_play[-1] != pf_best_match
                 ):  # avoid adding if it's already the last one
-                    final_paths_to_play.append(path_to_best_match_in_dataset)
+                    final_paths_to_play.append(pf_best_match)
             else:
                 console.log(
-                    f"[yellow]warning: best match from dataset '{path_to_best_match_in_dataset}' not found.[/yellow]"
+                    f"[yellow]warning: best match from dataset '{pf_best_match}' not found.[/yellow]"
                 )
 
         if not final_paths_to_play and os.path.exists(pf_midi):

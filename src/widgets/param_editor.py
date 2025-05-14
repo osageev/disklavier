@@ -15,7 +15,11 @@ blocked_params = [
     "record",
     "channels",
     "system",
-    "panther"
+    "user",
+    "remote_host",
+    "port",
+    "remote_dir",
+    "startup_delay",
 ]
 
 key_order = [
@@ -42,6 +46,7 @@ class ParameterEditorWidget(QtWidgets.QWidget):
                 "random",
                 "sequential",
                 "graph",
+                "probabilities",
             ],
             "seeker.metric": [
                 "pitch-histogram",
@@ -197,7 +202,14 @@ class ParameterEditorWidget(QtWidgets.QWidget):
         row_layout.addWidget(label)
 
         # Use appropriate widget based on parameter type and options
-        if key in self.param_options:
+        if key == "seeker.probabilities_dist":
+            # display list as comma-separated string
+            str_value = ", ".join(map(str, value))
+            widget = QtWidgets.QLineEdit(str_value)
+            widget.setFixedWidth(400)
+            row_layout.addWidget(widget)
+            self.param_widgets[key] = widget
+        elif key in self.param_options:
             widget = QtWidgets.QComboBox()
             widget.addItems(self.param_options[key])
             widget.setCurrentText(str(value))
@@ -241,7 +253,27 @@ class ParameterEditorWidget(QtWidgets.QWidget):
             elif isinstance(widget, QtWidgets.QLineEdit):
                 text_value = widget.text()
                 original_value = self.get_param_value(key)
-                if isinstance(original_value, int):
+
+                if key == "seeker.probabilities_dist":
+                    try:
+                        parsed_values = [
+                            float(x.strip()) for x in text_value.split(",")
+                        ]
+                        if len(parsed_values) == 6:
+                            value = parsed_values
+                        else:
+                            console.log(
+                                f"[red]Error: seeker.probabilities_dist requires 6 comma-separated numbers. "
+                                f"Got: {text_value}. Reverting to original.[/red]"
+                            )
+                            value = original_value  # revert
+                    except ValueError:
+                        console.log(
+                            f"[red]Error: Invalid input for seeker.probabilities_dist. "
+                            f"Expected comma-separated numbers. Got: {text_value}. Reverting to original.[/red]"
+                        )
+                        value = original_value  # revert
+                elif isinstance(original_value, int):
                     try:
                         value = int(text_value)
                     except ValueError:

@@ -173,7 +173,7 @@ class Seeker(Worker, QtCore.QObject):
             )
 
         if self.verbose:
-            console.log(f"{self.tag} settings:\\n{self.__dict__}")
+            console.log(f"{self.tag} settings:\n{self.__dict__}")
 
         console.log(
             f"{self.tag} loading FAISS index from '{self.p_table}/{self.params.metric}.faiss'"
@@ -358,114 +358,103 @@ class Seeker(Worker, QtCore.QObject):
                 f"{self.tag} {len(self.played_files)} played files:\n{self.played_files[-5:]}"
             )
 
-        query_file = basename(self.played_files[-1])
-
-        if self.params.match != "current" and query_file in self.filenames:
-            track, segment, augmentation = query_file.split("_")
-            new_query_file = self.neighbor_table.loc[
+        # --- handle not matching against current file ---
+        query_file_key = basename(self.played_files[-1])
+        if (
+            self.params.match != "current" and query_file_key in self.filenames
+        ):  # query_file_key should be in filenames if it was played
+            track, segment, augmentation = query_file_key.split("_")
+            # neighbor_table uses base keys (track_seg)
+            neighbor_base_key = self.neighbor_table.loc[
                 f"{track}_{segment}", self.params.match
             ]
-            new_query_file = f"{new_query_file}_{augmentation}"
-            if new_query_file is not None:
+            # Reconstruct the key with augmentation
+            new_query_file_key = f"{neighbor_base_key}_{augmentation}"
+            if new_query_file_key is not None:
                 console.log(
-                    f"{self.tag} finding match for '{new_query_file}' instead of '{query_file}' due to match mode {self.params.match}"
+                    f"{self.tag} finding match for '{new_query_file_key}' instead of '{query_file_key}' due to match mode {self.params.match}"
                 )
-                query_file = new_query_file
-
-        # --- load query embedding ---
-        # first, look in existing index
-        # then, if no embedding is found, calculate manually
-        try:
-            # Use dictionary lookup instead of list.index() with fallback
-            try:
-                embedding = self.faiss_index.reconstruct(int(self.filename_to_index[query_file]))  # type: ignore
-            except KeyError:
-                embedding = self.faiss_index.reconstruct(int(self.filenames.index(query_file)))  # type: ignore
-        except (ValueError, KeyError):
-            pf_new = self.played_files[-1]
-
+                query_file_key = new_query_file_key
+        if self.verbose and query_file_key in self.filenames:
             console.log(
-                f"{self.tag}[yellow] unable to find embedding for '{query_file}', calculating manually from '{pf_new}'"
+                f"{self.tag} querying with key '{query_file_key}' for _get_best"
             )
 
-            # Add the new embedding to the index and update filenames list and dictionary
-            embedding = self.get_embedding(pf_new)
-            embedding /= np.linalg.norm(embedding, axis=1, keepdims=True)
-            self.faiss_index.add(embedding)  # type: ignore
-            self.filenames.append(query_file)
-            self.filename_to_index[query_file] = len(self.filenames) - 1
-            console.log(
-                f"{self.tag} added [dark_red bold]{query_file}[/dark_red bold] to index"
-            )
-        query_embedding = np.array(
-            embedding,
-            dtype=np.float32,
-        ).reshape(1, -1)
-
-        # --- query FAISS index ---
-        if self.verbose and query_file in self.filenames:
-            console.log(f"{self.tag} querying with key '{query_file}'")
-
-        indices, similarities = self._faiss_search(query_embedding)  # type: ignore
+        # --- get embedding and search ---
+        indices, similarities = self._get_embedding_and_search(query_file_key)
         if self.verbose:
-            for i in range(3):
+            for i in range(min(3, len(indices))):
                 console.log(
                     f"{self.tag}\t{i}: {self.filenames[indices[i]]} {similarities[i]:.05f}"
                 )
 
         # --- find most similar valid match ---
-        if "player" in query_file:
-            next_file = self._get_random()
-        else:
-            next_file = self._get_neighbor()
-        # TODO: fix this (what the hell did i mean by this?)
-        played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
+        next_file = self._get_random()
+        final_similarity = 0.0
+        played_base_keys_for_check = {
+            os.path.splitext(self.base_file(f))[0] for f in self.played_files
+        }
+
         if self.params.match != "current":
-            played_files.append(query_file)
-        for idx, similarity in zip(indices, similarities):
-            # this should always skip the first file
-            # first file should always be the query file
-            if self.filenames[idx] == query_file:
+            played_base_keys_for_check.add(
+                os.path.splitext(self.base_file(query_file_key + ".mid"))[0]
+            )
+
+        for idx, similarity_val in zip(indices, similarities):
+            segment_name_key = str(self.filenames[idx])
+
+            if segment_name_key == query_file_key:
                 continue
 
-            segment_name = str(self.filenames[idx])
-            if "player" in query_file:
-                next_file = f"{segment_name}.mid"
-                console.log(f"{self.tag} found player match: '{next_file}'")
+            if query_file_key.startswith("player"):
+                next_file = f"{segment_name_key}.mid"
+                final_similarity = float(similarity_val)
+                console.log(
+                    f"{self.tag} found player source match: '{next_file}' sim {final_similarity:.4f}"
+                )
                 break
-            # dont replay files
-            if segment_name in played_files:
-                console.log(f"{self.tag} skipping replay of '{segment_name}'")
+
+            # dont replay files based on their base version (track_seg)
+            segment_base_key = os.path.splitext(
+                self.base_file(segment_name_key + ".mid")
+            )[0]
+            if segment_base_key in played_base_keys_for_check:
+                if self.verbose:
+                    console.log(
+                        f"{self.tag} skipping replay of base '{segment_base_key}' from '{segment_name_key}'"
+                    )
                 continue
 
-            next_segment_name = self.base_file(segment_name)
-            next_track = next_segment_name.split("_")[0]
-            last_track = self.played_files[-1].split("_")[0]
+            next_track = segment_name_key.split("_")[0]
             # switch to different track after self.n_transition_interval segments
             if hop and self.n_segment_repeats >= self.n_transition_interval:
-                played_tracks = [file.split("_")[0] for file in self.played_files]
-                if next_track in played_tracks:
-                    console.log(
-                        f"{self.tag} transitioning to next track and skipping '{next_segment_name}'"
-                    )
+                played_tracks_bases = {
+                    basename(f).split("_")[0] for f in self.played_files
+                }
+                if next_track in played_tracks_bases:
+                    if self.verbose:
+                        console.log(
+                            f"{self.tag} transitioning hop: skipping '{segment_name_key}' from same track family '{next_track}'"
+                        )
                     continue
                 else:
-                    next_file = f"{segment_name}.mid"
+                    next_file = f"{segment_name_key}.mid"
+                    final_similarity = float(similarity_val)
+                    if self.verbose:
+                        console.log(
+                            f"{self.tag} transitioning hop: new track found '{next_file}'"
+                        )
                     break
-            # no shift because it sounds bad
-            if (
-                next_segment_name
-                not in played_files
-                # and segment_name.endswith("s00")
-                # and next_track == last_track
-            ):
-                next_file = f"{segment_name}.mid"
-                break
+
+            next_file = f"{segment_name_key}.mid"
+            final_similarity = float(similarity_val)
+            break
 
         console.log(
-            f"{self.tag} best match is '{next_file}' with similarity {similarity:.05f}"
+            f"{self.tag} best match is '{next_file}' with similarity {final_similarity:.05f}"
         )
-        return next_file, similarity
+
+        return next_file, final_similarity
 
     def _get_easy(self) -> str:
         if self.verbose:
@@ -704,7 +693,7 @@ class Seeker(Worker, QtCore.QObject):
                 sim = float(
                     1
                     - cosine(
-                        self.faiss_index.reconstruct(self.filename_to_index[self.current_path[self.path_position][0][:-4]]),  # type: ignore
+                        self.faiss_index.reconstruct(self.filename_to_index[os.path.splitext(self.current_path[self.path_position][0])[0]]),  # type: ignore
                         self.faiss_index.reconstruct(self.filename_to_index[basename(self.played_files[-1])]),  # type: ignore
                     )
                 )
@@ -913,15 +902,6 @@ class Seeker(Worker, QtCore.QObject):
             faiss_index = faiss.read_index(pf_index)
             console.log(f"{self.tag}\tloaded faiss index from '{pf_index}'")
 
-        # TODO: embed augmented set with clap and remove this
-        if "clap" in metric:
-            input_path = self.p_dataset.replace("augmented", "segmented")
-            filenames = list(glob(os.path.join(input_path, "*.mid")))
-            filenames.sort()
-            console.log(f"{self.tag}\tfound {len(filenames)} files:\n\t{filenames[:5]}")
-        else:
-            filenames = self.filenames
-
         # get matches
         indices, similarities = self._faiss_search(
             query_embedding,
@@ -931,10 +911,10 @@ class Seeker(Worker, QtCore.QObject):
         if self.verbose:
             for i in range(3):
                 console.log(
-                    f"{self.tag}\t\t'{filenames[indices[i]]}' ({indices[i]:04d}): {similarities[i]:.4f}"
+                    f"{self.tag}\t\t'{self.filenames[indices[i]]}' ({indices[i]:04d}): {similarities[i]:.4f}"
                 )
 
-        best_match = filenames[indices[0]]
+        best_match = self.filenames[indices[0]]
         best_similarity = similarities[0]
 
         return best_match, best_similarity
@@ -949,30 +929,26 @@ class Seeker(Worker, QtCore.QObject):
         - "prev", "prev_2": find a segment similar to the previous/previous-1 chronological segment.
         - "transition": find a segment similar to the current one, but from a different track.
 
-        returns
+        Returns
         -------
         tuple[str, float]
             path to midi file to play next, and similarity measure.
         """
+        # --- select action ---
         actions = ["current", "next", "next_2", "prev", "prev_2", "transition"]
-        chosen_action_idx = self.rng.choice(len(actions), p=self.probabilities_dist)
-        chosen_action = actions[chosen_action_idx]
+        chosen_action = actions[
+            self.rng.choice(len(actions), p=self.probabilities_dist)
+        ]
         console.log(f"{self.tag} probabilities mode selected action: '{chosen_action}'")
 
-        # determine query file and augmentation
-        # self.played_files[-1] is like "trackA_seg01_t00s00.mid"
-        current_played_full_filename = self.played_files[-1]
-        # current_played_file_key is like "trackA_seg01_t00s00" (used in self.filenames, self.filename_to_index)
-        current_played_file_key = basename(current_played_full_filename)
-        # current_played_file_base_for_neighbor is like "trackA_seg01" (used for neighbor_table.loc)
-        current_played_file_base_for_neighbor = self.base_file(
-            current_played_full_filename
-        )[:-4]
-        # current_augmentation_key_part is like "_t00s00"
+        # --- get query file key ---
+        current_played_file_key = basename(self.played_files[-1])
+        current_played_file_base_for_neighbor = os.path.splitext(
+            self.base_file(self.played_files[-1])
+        )[0]
         current_augmentation_key_part = current_played_file_key.replace(
             current_played_file_base_for_neighbor, "", 1
         )
-
         query_file_base_key: str
         augmentation_key_part: str
 
@@ -984,10 +960,9 @@ class Seeker(Worker, QtCore.QObject):
                 neighbor = self.neighbor_table.loc[
                     current_played_file_base_for_neighbor, chosen_action
                 ]
-                if (
-                    pd.isna(neighbor) or neighbor is None
-                ):  # check for NaN or None from table
-                    raise KeyError  # treat as missing
+                # check for NaN or None from table
+                if pd.isna(neighbor) or neighbor is None:
+                    raise KeyError
                 query_file_base_key = str(neighbor)
                 augmentation_key_part = "_t00s00"  # safer default for neighbors
             except KeyError:
@@ -995,150 +970,167 @@ class Seeker(Worker, QtCore.QObject):
                     f"{self.tag} [yellow]neighbor '{chosen_action}' not found for "
                     f"'{current_played_file_base_for_neighbor}'. falling back to 'current'.[/yellow]"
                 )
-                # chosen_action = "current" # for logical consistency if we were to use it later
                 query_file_base_key = current_played_file_base_for_neighbor
                 augmentation_key_part = current_augmentation_key_part
 
-        full_query_file_key = query_file_base_key + augmentation_key_part
+        if "player" not in query_file_base_key:
+            full_query_file_key = query_file_base_key + augmentation_key_part
+        else:
+            full_query_file_key = query_file_base_key
         if self.verbose:
-            console.log(f"{self.tag} query key for embedding: '{full_query_file_key}'")
-
-        # get query embedding
-        embedding: Optional[np.ndarray] = None
-        try:
-            embedding = self.faiss_index.reconstruct(
-                int(self.filename_to_index[full_query_file_key])
-            )
-        except (
-            KeyError,
-            ValueError,
-        ):  # also handles if full_query_file_key not in filename_to_index
-            try:  # fallback to list.index if filename_to_index is out of sync (should be rare)
-                embedding = self.faiss_index.reconstruct(
-                    int(self.filenames.index(full_query_file_key))
-                )
-            except (
-                ValueError,
-                IndexError,
-            ):  # valueerror if not in list, indexerror if list empty
-                pass  # embedding remains None
-
-        if embedding is None:
-            # path to the actual midi file needed for get_embedding()
-            # this assumes full_query_file_key is for a dataset file
-            # TODO: needs robust handling for player files if they can be query sources here
-            pf_for_embedding_calc = os.path.join(
-                self.p_dataset, full_query_file_key + ".mid"
-            )
             console.log(
-                f"{self.tag}[yellow] unable to find embedding for '{full_query_file_key}', "
-                f"calculating manually from '{pf_for_embedding_calc}'[/yellow]"
+                f"{self.tag} query key for probabilities embedding: '{full_query_file_key}'"
             )
 
-            calculated_embedding = self.get_embedding(
-                pf_for_embedding_calc
-            )  # returns np.ndarray or None
-
-            if (
-                calculated_embedding is not None
-                and calculated_embedding.ndim == 2
-                and calculated_embedding.shape[0] == 1
-                and calculated_embedding.shape[1] > 1
-            ):
-                embedding = calculated_embedding
-                embedding /= np.linalg.norm(
-                    embedding, axis=1, keepdims=True
-                )  # normalize
-                self.faiss_index.add(embedding)
-                self.filenames.append(full_query_file_key)
-                self.filename_to_index[full_query_file_key] = len(self.filenames) - 1  # type: ignore
-                console.log(
-                    f"{self.tag} added [dark_red bold]{full_query_file_key}[/dark_red bold] to index"
-                )
-            else:
-                metric_key = str(self.params.metric)
-                embedding_size = EMBEDDING_SIZES.get(
-                    metric_key, 512
-                )  # default if metric unknown
-                console.log(
-                    f"{self.tag} [red]error: embedding for {full_query_file_key} from {pf_for_embedding_calc} "
-                    f"has wrong shape or is none: {calculated_embedding.shape if calculated_embedding is not None else 'None'}. "
-                    f"using random vector of size {embedding_size}.[/red]"
-                )
-                embedding = self.rng.random((1, embedding_size)).astype(np.float32)
-                embedding /= np.linalg.norm(embedding, axis=1, keepdims=True)
-
-        query_embedding = np.array(embedding, dtype=np.float32).reshape(1, -1)
-        # ensure normalization again, as reconstruct might not guarantee it or if loaded from bad state.
-        if (
-            np.linalg.norm(query_embedding) > 1e-5
-        ):  # avoid division by zero for zero vectors
-            query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
-
-        # faiss search
-        indices, similarities = self._faiss_search(query_embedding)
+        indices, similarities = self._get_embedding_and_search(full_query_file_key)
 
         # filter and select match
-        # played_base_files contains keys like "trackA_seg01"
-        played_base_files = {self.base_file(f)[:-4] for f in self.played_files}
+        played_base_files = {
+            os.path.splitext(self.base_file(f))[0] for f in self.played_files
+        }
 
         next_file_to_play: Optional[str] = None
         found_similarity: float = 0.0
 
         for idx, sim in zip(indices, similarities):
-            candidate_filename_key = self.filenames[idx]  # e.g., "trackB_seg05_t00s00"
+            candidate_filename_key = self.filenames[idx]
 
-            # skip if query itself
             if candidate_filename_key == full_query_file_key:
                 continue
 
-            candidate_base_filename_key = self.base_file(
-                candidate_filename_key + ".mid"
-            )[
-                :-4
-            ]  # e.g., "trackB_seg05"
+            candidate_base_filename_key = os.path.splitext(
+                self.base_file(candidate_filename_key + ".mid")
+            )[0]
 
-            # skip if already played (and not allowing multiple plays)
             if (
                 not self.allow_multiple_plays
                 and candidate_base_filename_key in played_base_files
             ):
                 if self.verbose:
                     console.log(
-                        f"{self.tag} skipping replay of base '{candidate_base_filename_key}' from '{candidate_filename_key}'"
+                        f"{self.tag} probabilities: skipping replay of base '{candidate_base_filename_key}' from '{candidate_filename_key}'"
                     )
                 continue
 
             if chosen_action == "transition":
                 candidate_track = candidate_filename_key.split("_")[0]
-                current_track_for_transition_check = current_played_file_key.split("_")[
-                    0
-                ]
-                if candidate_track == current_track_for_transition_check:
+                # current_track_for_transition_check is based on the original current_played_file_key
+                original_query_track = current_played_file_key.split("_")[0]
+                if candidate_track == original_query_track:
                     if self.verbose:
                         console.log(
-                            f"{self.tag} skipping same track '{candidate_track}' for transition from '{candidate_filename_key}'"
+                            f"{self.tag} probabilities: skipping same track '{candidate_track}' for transition from '{candidate_filename_key}'"
                         )
                     continue
 
-            # if all checks pass
-            next_file_to_play = (
-                candidate_filename_key + ".mid"
-            )  # e.g., "trackB_seg05_t00s00.mid"
+            next_file_to_play = candidate_filename_key + ".mid"
             found_similarity = float(sim)
             if self.verbose:
                 console.log(
                     f"{self.tag} probabilities match found: '{next_file_to_play}' sim: {found_similarity:.4f}"
                 )
-            break  # found a match
+            break
 
-        # fallback
         if next_file_to_play is None:
             console.log(
                 f"{self.tag} no valid match found for action '{chosen_action}' "
                 f"based on query '{full_query_file_key}'. choosing randomly."
             )
-            random_filename_part = self._get_random()  # returns "file_aug.mid"
-            return os.path.join(self.p_dataset, random_filename_part), 0.0
+            return self._get_random(), 0.0
 
-        return os.path.join(self.p_dataset, next_file_to_play), found_similarity
+        return next_file_to_play, found_similarity
+
+    def _get_embedding_and_search(
+        self, query_file_key_with_aug: str, num_matches: int = 1000
+    ) -> tuple[list[int], list[float]]:
+        """
+        retrieve or calculate an embedding for a given file key, add to index if new,
+        and then perform a faiss search.
+
+        parameters
+        ----------
+        query_file_key_with_aug : str
+            the file key with augmentation (e.g., "tracka_seg01_t00s00"), without .mid extension.
+        num_matches : int, default=1000
+            number of matches for faiss search.
+
+        returns
+        -------
+        tuple[list[int], list[float]]
+            indices and similarities from faiss search.
+        """
+        embedding: Optional[np.ndarray] = None
+        try:
+            embedding = self.faiss_index.reconstruct(
+                int(self.filename_to_index[query_file_key_with_aug])
+            )  # type: ignore
+        except (KeyError, ValueError):
+            try:
+                embedding = self.faiss_index.reconstruct(
+                    int(self.filenames.index(query_file_key_with_aug))
+                )  # type: ignore
+            except (ValueError, IndexError):
+                pass
+
+        if embedding is None:
+            final_path_for_calc_if_new: Optional[str] = None
+            for p_file_path in reversed(self.played_files):
+                if basename(p_file_path) == query_file_key_with_aug:
+                    final_path_for_calc_if_new = p_file_path
+                    break
+
+            if final_path_for_calc_if_new is None:
+                if "player" in query_file_key_with_aug:
+                    final_path_for_calc_if_new = query_file_key_with_aug + ".mid"
+                else:
+                    final_path_for_calc_if_new = os.path.join(
+                        self.p_dataset, query_file_key_with_aug + ".mid"
+                    )
+
+            console.log(
+                f"{self.tag} [yellow]embedding for '{query_file_key_with_aug}' not in FAISS, calculating from '{final_path_for_calc_if_new}'[/yellow]"
+            )
+            calculated_embedding = self.get_embedding(final_path_for_calc_if_new)
+
+            if (
+                calculated_embedding is not None
+                and calculated_embedding.ndim == 2
+                and calculated_embedding.shape[0] == 1
+                and calculated_embedding.shape[1] > 0
+            ):
+                embedding = calculated_embedding
+
+                norm_val = np.linalg.norm(embedding, axis=1, keepdims=True)
+                if norm_val > 1e-5:
+                    embedding /= norm_val
+                else:
+                    embedding = np.zeros_like(embedding)
+
+                self.faiss_index.add(embedding)  # type: ignore
+                self.filenames.append(query_file_key_with_aug)
+                self.filename_to_index[query_file_key_with_aug] = (
+                    len(self.filenames) - 1
+                )
+                console.log(
+                    f"{self.tag} added [dark_red bold]{query_file_key_with_aug}[/dark_red bold] to index"
+                )
+            else:
+                metric_key = str(self.params.metric)
+                embedding_size = EMBEDDING_SIZES.get(metric_key, 512)
+                console.log(
+                    f"{self.tag} [red]error: failed to calculate embedding for '{query_file_key_with_aug}' from '{final_path_for_calc_if_new}'. "
+                    f"shape: {calculated_embedding.shape if calculated_embedding is not None else 'None'}. "
+                    f"using random vector of size {embedding_size}.[/red]"
+                )
+                embedding = self.rng.random((1, embedding_size)).astype(np.float32)
+                norm_val = np.linalg.norm(embedding, axis=1, keepdims=True)
+                if norm_val > 1e-5:
+                    embedding /= norm_val
+                else:
+                    embedding = np.zeros_like(embedding)
+
+        query_embedding_np = np.array(embedding, dtype=np.float32).reshape(1, -1)
+        indices, similarities = self._faiss_search(
+            query_embedding_np, num_matches=num_matches
+        )
+        return indices, similarities

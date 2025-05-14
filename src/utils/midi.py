@@ -57,6 +57,7 @@ class MidiAugmentationConfig:
         for field in self.__dataclass_fields__:
             if getattr(self, field) == 'None':
                 setattr(self, field, None)
+        console.log(self)
         if self.remove_percentage is not None and not (
             0.0 <= self.remove_percentage <= 1.0
         ):
