@@ -300,7 +300,7 @@ class RunWorker(QtCore.QThread):
         console.log(f"{self.tag}[green bold] shutdown complete, exiting")
 
     def _queue_file(self, file_path: str, similarity: float | None) -> None:
-        _, ts_seg_start, tt_end_tick = self.staff.scheduler.enqueue_midi(
+        ts_seg_len, ts_seg_start, tt_end_tick = self.staff.scheduler.enqueue_midi(
             file_path, self.q_playback, self.q_gui, similarity
         )
 

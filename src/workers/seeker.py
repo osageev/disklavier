@@ -219,7 +219,7 @@ class Seeker(Worker, QtCore.QObject):
         if os.path.isfile(pf_neighbor_table):
             with console.status("\t\t\t      loading neighbor file..."):
                 if os.path.splitext(pf_neighbor_table)[1] == ".h5":
-                    self.neighbor_table = pd.read_hdf(pf_neighbor_table, key="20250420")
+                    self.neighbor_table = pd.read_hdf(pf_neighbor_table)
                 else:
                     self.neighbor_table = pd.read_parquet(pf_neighbor_table)
                 self.neighbor_table.head()
@@ -964,7 +964,7 @@ class Seeker(Worker, QtCore.QObject):
                 if pd.isna(neighbor) or neighbor is None:
                     raise KeyError
                 query_file_base_key = str(neighbor)
-                augmentation_key_part = "_t00s00"  # safer default for neighbors
+                augmentation_key_part = basename(self.played_files[-1]).split("_")[-1]
             except KeyError:
                 console.log(
                     f"{self.tag} [yellow]neighbor '{chosen_action}' not found for "
