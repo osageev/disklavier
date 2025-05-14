@@ -984,11 +984,7 @@ class Seeker(Worker, QtCore.QObject):
 
         indices, similarities = self._get_embedding_and_search(full_query_file_key)
 
-        # filter and select match
-        played_base_files = {
-            os.path.splitext(self.base_file(f))[0] for f in self.played_files
-        }
-
+        played_base_files = {basename(f) for f in self.played_files}
         next_file_to_play: Optional[str] = None
         found_similarity: float = 0.0
 
@@ -998,28 +994,37 @@ class Seeker(Worker, QtCore.QObject):
             if candidate_filename_key == full_query_file_key:
                 continue
 
-            candidate_base_filename_key = os.path.splitext(
-                self.base_file(candidate_filename_key + ".mid")
-            )[0]
-
             if (
                 not self.allow_multiple_plays
-                and candidate_base_filename_key in played_base_files
+                and basename(candidate_filename_key) in played_base_files
             ):
                 if self.verbose:
                     console.log(
-                        f"{self.tag} probabilities: skipping replay of base '{candidate_base_filename_key}' from '{candidate_filename_key}'"
+                        f"{self.tag} probabilities: skipping replay of base '{basename(candidate_filename_key)}' from '{candidate_filename_key}'"
                     )
                 continue
 
             if chosen_action == "transition":
+                # get last few played tracks
+                blocked_tracks = []
+                seen_tracks = set()
+                for segment in reversed(self.played_files):
+                    segment_track = segment.split("_")[0]
+                    if segment_track not in seen_tracks:
+                        seen_tracks.add(segment_track)
+                        blocked_tracks.append(segment_track)
+                    if (
+                        len(blocked_tracks)
+                        >= self.params.probability_transition_lookback
+                    ):
+                        break
+
+                # skip if candidate track is in blocked tracks
                 candidate_track = candidate_filename_key.split("_")[0]
-                # current_track_for_transition_check is based on the original current_played_file_key
-                original_query_track = current_played_file_key.split("_")[0]
-                if candidate_track == original_query_track:
+                if candidate_track in blocked_tracks:
                     if self.verbose:
                         console.log(
-                            f"{self.tag} probabilities: skipping same track '{candidate_track}' for transition from '{candidate_filename_key}'"
+                            f"{self.tag} probabilities: skipping transition from '{candidate_filename_key}' to blocked track '{candidate_track}'"
                         )
                     continue
 
