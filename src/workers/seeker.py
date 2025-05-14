@@ -1046,7 +1046,7 @@ class Seeker(Worker, QtCore.QObject):
         return next_file_to_play, found_similarity
 
     def _get_embedding_and_search(
-        self, query_file_key_with_aug: str, num_matches: int = 1000
+        self, query_file_key_with_aug: str, num_matches: int = 3000
     ) -> tuple[list[int], list[float]]:
         """
         retrieve or calculate an embedding for a given file key, add to index if new,
