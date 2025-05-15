@@ -355,12 +355,13 @@ class MidiRecorder(Worker, QtCore.QObject):
             self._max_velocity = 0
 
         # print velocity stats if we have data
-        if self._velocity_window:
-            console.log(
-                f"{self.tag} velocity stat updated: avg={self._avg_velocity:.2f}, min={self._min_velocity}, max={self._max_velocity}"
-            )
-        else:
-            console.log(f"{self.tag} no notes played in the last beat")
+        if self.verbose:
+            if self._velocity_window:
+                console.log(
+                    f"{self.tag} velocity stat updated: avg={self._avg_velocity:.2f}, min={self._min_velocity}, max={self._max_velocity}"
+                )
+            else:
+                console.log(f"{self.tag} no notes played in the last beat")
 
         # send velocity stats to max
         send_udp(
@@ -370,6 +371,10 @@ class MidiRecorder(Worker, QtCore.QObject):
 
     def save_midi(self, pf_recording: str) -> bool:
         """Saves the recorded notes to a MIDI file."""
+        if len(self.recorded_notes) == 0:
+            console.log(f"{self.tag} no notes recorded, skipping save")
+            return False
+
         if self.verbose:
             console.log(
                 f"{self.tag} saving recording '{os.path.basename(pf_recording)}'"

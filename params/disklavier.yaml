@@ -22,7 +22,7 @@ seeker:
   metric: "specdiff" # pitch-histogram specdiff clf-4note clf-speed clf-tpose clamp
   graph_steps: 9
   graph_track_revisit_interval: 3
-  block_shift: True
+  block_shift: False
 player:
   verbose: False
   midi_port: "Disklavier"
@@ -30,7 +30,7 @@ metronome:
   verbose: False
   do_tick: True
 recorder:
-  verbose: True
+  verbose: False
   midi_port: "Disklavier"
 audio:
   verbose: True

@@ -345,8 +345,14 @@ def combine_midi_files(input_files: list[str], output_path: str) -> bool:
 
     # add all tracks from all files
     for file_path in input_files:
-        midi = mido.MidiFile(file_path)
+        try:
+            midi = mido.MidiFile(file_path)
+        except Exception as e:
+            console.log(f"[yellow]skipping MIDI file due to error: {e}[/yellow]")
+            continue
         for track in midi.tracks:
+            if len(track) == 0:
+                continue
             # remove all set_tempo messages (one is set in player recording file)
             track[:] = [msg for msg in track if msg.type != "set_tempo"]
             combined.tracks.append(track)

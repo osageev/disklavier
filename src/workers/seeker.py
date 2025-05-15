@@ -26,35 +26,32 @@ class Seeker(Worker, QtCore.QObject):
     # required tables
     filenames: list[str] = []
     faiss_index: faiss.IndexFlatIP
+    filename_to_index: dict[str, int] = {}
     neighbor_table: pd.DataFrame | pd.Series
     neighbor_col_priorities = ["next", "next_2", "prev", "prev_2"]
-    # forced track change interval
-    n_transition_interval: int = 8  # 16 bars since segments are 2 bars
-    # number of repeats for easy mode
-    n_segment_repeats: int = 0
+
     # playback trackers
     played_files: list[str] = []
-    allow_multiple_plays = False
-    # playlist mode position tracker
-    matches_pos: int = 0
-    # TODO: i forget what this does tbh, rewrite entire playlist mode
-    matches_mode: str = "cplx"
-    playlist: dict[str, dict[str, list[tuple[str, float]]]] = {}
-    # force pitch match after finding next segment
-    pitch_match = False
-    # path tracking variables
-    current_path: list[tuple[str, float]] = []
-    path_position: int = 0
-    num_segs_diff_tracks: int = 5
-    # filename to index mapping
-    filename_to_index: dict[str, int] = {}
+    allow_multiple_plays = True
+    pitch_match = False  # force pitch match
+    offset_embedding: np.ndarray | None = None
 
     # probability distribution for probabilities mode
     probabilities_dist: list[float] = [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6]
 
     # velocity tracking
+    # TODO: unused, will be used to guide selection
     _recorder = None
     _avg_velocity: float = 0.0
+
+    # easy mode
+    n_transition_interval: int = 8  # forced track change interval
+    n_segment_repeats: int = 2  # number of repeats
+
+    # graph mode
+    path_position: int = 0
+    num_segs_diff_tracks: int = 5
+    current_path: list[tuple[str, float]] = []
 
     # reference to panther worker
     panther_worker: Optional[Panther] = None
@@ -74,12 +71,19 @@ class Seeker(Worker, QtCore.QObject):
         self.p_table = table_path
         self.p_dataset = dataset_path
         self.p_playlist = playlist_path
-        self.rng = np.random.default_rng(self.params.seed)
         self.playlist = {}
         self.filenames = []
         self.played_files = []
         self.current_path = []
         self.filename_to_index = {}
+
+        # set seed randomly if not an integer
+        if isinstance(self.params.seed, int):
+            seed = self.params.seed
+        else:
+            seed = np.random.randint(0, 10000000)
+            console.log(f"{self.tag} using random seed: {seed}")
+        self.rng = np.random.default_rng(seed)
 
         if (
             hasattr(params, "probabilities_dist")
@@ -211,9 +215,9 @@ class Seeker(Worker, QtCore.QObject):
         #             console.log(f"{self.tag} Error reconstructing/checking vector {i}: {e}")
 
         # load neighbor table
-        # old version -- backwards compat
+        # old version for backwards compat
         pf_neighbor_table = os.path.join(self.p_table, "neighbor.parquet")
-        if not os.path.isfile(pf_neighbor_table):
+        if not os.path.isfile(pf_neighbor_table):  # current version
             pf_neighbor_table = os.path.join(self.p_table, "neighbors.h5")
         console.log(f"{self.tag} looking for neighbor table '{pf_neighbor_table}'")
         if os.path.isfile(pf_neighbor_table):
@@ -296,7 +300,7 @@ class Seeker(Worker, QtCore.QObject):
             case "easy":
                 next_file = self._get_easy()
             case "playlist":
-                next_file, similarity = self._read_playlist()
+                raise NotImplementedError("playlist mode not implemented")
             case "repeat":
                 next_file = self.played_files[-1]
             case "sequential":
@@ -358,74 +362,98 @@ class Seeker(Worker, QtCore.QObject):
                 f"{self.tag} {len(self.played_files)} played files:\n{self.played_files[-5:]}"
             )
 
-        # --- handle not matching against current file ---
-        query_file_key = basename(self.played_files[-1])
-        if (
-            self.params.match != "current" and query_file_key in self.filenames
-        ):  # query_file_key should be in filenames if it was played
-            track, segment, augmentation = query_file_key.split("_")
-            # neighbor_table uses base keys (track_seg)
-            neighbor_base_key = self.neighbor_table.loc[
+        # --- determine query file ---
+        query_file = basename(self.played_files[-1])
+        # match based on neighboring file instead of current
+        if self.params.match != "current" and query_file in self.filenames:
+            track, segment, augmentation = query_file.split("_")
+            new_query_file = self.neighbor_table.loc[
                 f"{track}_{segment}", self.params.match
             ]
-            # Reconstruct the key with augmentation
-            new_query_file_key = f"{neighbor_base_key}_{augmentation}"
+            new_query_file_key = f"{new_query_file}_{augmentation}"
             if new_query_file_key is not None:
                 console.log(
-                    f"{self.tag} finding match for '{new_query_file_key}' instead of '{query_file_key}' due to match mode {self.params.match}"
+                    f"{self.tag} finding match for '{new_query_file_key}' instead of '{query_file}' due to match mode {self.params.match}"
                 )
-                query_file_key = new_query_file_key
-        if self.verbose and query_file_key in self.filenames:
+                query_file = str(new_query_file)
+
+        # --- get query embedding ---
+        # first, look in existing index then, if no embedding is found, calculate manually
+        try:
+            try:
+                embedding = self.faiss_index.reconstruct(int(self.filename_to_index[query_file]))  # type: ignore
+            except KeyError:
+                embedding = self.faiss_index.reconstruct(int(self.filenames.index(query_file)))  # type: ignore
+        except (ValueError, KeyError):
+            # couldn't find embedding in index, calculate manually
+            pf_new = self.played_files[-1]
+
             console.log(
-                f"{self.tag} querying with key '{query_file_key}' for _get_best"
+                f"{self.tag}[yellow] unable to find embedding for '{query_file}', calculating manually from '{pf_new}'"
             )
 
-        # --- get embedding and search ---
-        indices, similarities = self._get_embedding_and_search(query_file_key)
+            # add the new embedding to the index and update filenames list and dictionary
+            embedding = self.get_embedding(pf_new)
+            embedding /= np.linalg.norm(embedding, axis=1, keepdims=True)
+            self.faiss_index.add(embedding)  # type: ignore
+            self.filenames.append(query_file)
+            self.filename_to_index[query_file] = len(self.filenames) - 1
+            console.log(
+                f"{self.tag} added [green bold]{query_file}[/green bold] to index"
+            )
+        query_embedding = np.array(
+            embedding,
+            dtype=np.float32,
+        ).reshape(1, -1)
+
+        # move embedding if player offset is present
+        if self.offset_embedding is not None:
+            query_embedding += self.offset_embedding
+
+            if self.verbose:
+                console.log(
+                    f"{self.tag} added player offset to query embedding: {self.offset_embedding.shape}"
+                )
+            self.offset_embedding = None
+
+        # --- query index ---
+        if self.verbose and query_file in self.filenames:
+            console.log(f"{self.tag} querying with key '{query_file}'")
+
+        indices, similarities = self._faiss_search(query_embedding)
         if self.verbose:
             for i in range(min(3, len(indices))):
                 console.log(
-                    f"{self.tag}\t{i}: {self.filenames[indices[i]]} {similarities[i]:.05f}"
+                    f"{self.tag}\t\t{i}: {self.filenames[indices[i]]} {similarities[i]:.05f}"
                 )
 
-        # --- find most similar valid match ---
-        next_file = self._get_random()
-        final_similarity = 0.0
-        played_base_keys_for_check = {
-            os.path.splitext(self.base_file(f))[0] for f in self.played_files
-        }
-
+        # find most similar valid match
+        if "player" in query_file:
+            # no neighbor for recordings
+            next_file = self._get_random()
+        else:
+            next_file = self._get_neighbor()
+        # TODO: fix this (what the hell did i mean by this?)
+        played_files = [os.path.basename(self.base_file(f)) for f in self.played_files]
         if self.params.match != "current":
-            played_base_keys_for_check.add(
-                os.path.splitext(self.base_file(query_file_key + ".mid"))[0]
-            )
-
-        for idx, similarity_val in zip(indices, similarities):
-            segment_name_key = str(self.filenames[idx])
-
-            if segment_name_key == query_file_key:
+            played_files.append(query_file)
+        for idx, similarity in zip(indices, similarities):
+            # this should always skip the first file
+            if self.filenames[idx] == query_file:
                 continue
 
-            if query_file_key.startswith("player"):
-                next_file = f"{segment_name_key}.mid"
-                final_similarity = float(similarity_val)
-                console.log(
-                    f"{self.tag} found player source match: '{next_file}' sim {final_similarity:.4f}"
-                )
+            segment_name = str(self.filenames[idx])
+            if "player" in query_file:
+                next_file = f"{segment_name}.mid"
+                console.log(f"{self.tag} found player match: '{next_file}'")
                 break
 
-            # dont replay files based on their base version (track_seg)
-            segment_base_key = os.path.splitext(
-                self.base_file(segment_name_key + ".mid")
-            )[0]
-            if segment_base_key in played_base_keys_for_check:
-                if self.verbose:
-                    console.log(
-                        f"{self.tag} skipping replay of base '{segment_base_key}' from '{segment_name_key}'"
-                    )
+            # dont replay files
+            if segment_name in played_files and not self.allow_multiple_plays:
                 continue
 
-            next_track = segment_name_key.split("_")[0]
+            next_segment_name = self.base_file(segment_name)
+            next_track = next_segment_name.split("_")[0]
             # switch to different track after self.n_transition_interval segments
             if hop and self.n_segment_repeats >= self.n_transition_interval:
                 played_tracks_bases = {
@@ -434,20 +462,21 @@ class Seeker(Worker, QtCore.QObject):
                 if next_track in played_tracks_bases:
                     if self.verbose:
                         console.log(
-                            f"{self.tag} transitioning hop: skipping '{segment_name_key}' from same track family '{next_track}'"
+                            f"{self.tag} transitioning hop: skipping '{segment_name}' from same track family '{next_track}'"
                         )
                     continue
                 else:
-                    next_file = f"{segment_name_key}.mid"
-                    final_similarity = float(similarity_val)
+                    next_file = f"{segment_name}.mid"
+                    final_similarity = float(similarity)
                     if self.verbose:
                         console.log(
                             f"{self.tag} transitioning hop: new track found '{next_file}'"
                         )
                     break
 
-            next_file = f"{segment_name_key}.mid"
-            final_similarity = float(similarity_val)
+            # all conditions met
+            next_file = f"{segment_name}.mid"
+            final_similarity = float(similarity)
             break
 
         console.log(
@@ -471,8 +500,11 @@ class Seeker(Worker, QtCore.QObject):
                 self._get_random()
             )  # TODO: modify this to get nearest neighbor from different track
 
-    def _get_neighbor(self) -> str:
-        current_file = os.path.basename(self.played_files[-1])
+    def _get_neighbor(self, filename: Optional[str] = None) -> str:
+        if filename is None:
+            current_file = basename(self.played_files[-1])
+        else:
+            current_file = basename(filename)
 
         # transforms not needed
         # TODO: panther breaks this
@@ -750,40 +782,6 @@ class Seeker(Worker, QtCore.QObject):
 
         return str(random_file)
 
-    def _read_playlist(self) -> tuple[str, float]:
-        """Read next segment from playlist"""
-        # TODO: modify this to work from current playlist paradigm
-        if self.verbose:
-            console.log(
-                f"{self.tag} playing matches for '{[self.playlist.keys()][self.matches_pos]}'"
-            )
-            console.log(f"{self.tag} already played files:\n{self.played_files}")
-
-        for i, (q, ms) in enumerate(self.playlist.items()):
-            if i == self.matches_pos:
-                console.log(f"{self.tag} [grey30]{i}\t'{q}'")
-                for mode, matches in ms.items():
-                    console.log(f"{self.tag} [grey30]\t'{mode}'")
-                    if mode == self.matches_mode:
-                        for f, s in matches[:5]:
-                            base_files = [
-                                os.path.basename(self.base_file(f))
-                                for f in self.played_files
-                            ]
-                            if self.base_file(f) in base_files:
-                                console.log(f"{self.tag} [grey30]\t\t'{f}'\t{s}")
-                            else:
-                                console.log(f"{self.tag} [grey70]\t\t'{f}'\t{s}")
-                                file_path = f"{f}.mid"
-                                return file_path, float(s)
-                        if self.matches_mode == "cplx":
-                            raise EOFError("playlist complete")
-                        console.log(f"{self.tag} switching modes")
-                        self.matches_mode = "cplx"
-                        file_path = f"{q}.mid"
-                        return file_path, 0.0
-        return "", 0.0
-
     def get_embedding(self, pf_midi: str, model: str | None = None) -> np.ndarray:
         if not model:
             model = str(self.params.metric)
@@ -833,6 +831,8 @@ class Seeker(Worker, QtCore.QObject):
     ) -> tuple[list[int], list[float]]:
         """
         search the FAISS index for the most similar embeddings.
+
+        index param is for compare script short circuiting
         """
         # ensure that embedding is normalized
         query_embedding /= np.linalg.norm(query_embedding, axis=1, keepdims=True)
@@ -926,39 +926,33 @@ class Seeker(Worker, QtCore.QObject):
         console.log(f"{self.tag} probabilities mode selected action: '{chosen_action}'")
 
         # --- get query file key ---
-        current_played_file_key = basename(self.played_files[-1])
-        current_played_file_base_for_neighbor = os.path.splitext(
-            self.base_file(self.played_files[-1])
-        )[0]
-        current_augmentation_key_part = current_played_file_key.replace(
-            current_played_file_base_for_neighbor, "", 1
-        )
+        current_played_file = basename(self.played_files[-1])
+        current_played_file_base = self.base_file(current_played_file).split(".")[0]
+        augmentation_key_part = current_played_file.split("_")[-1]
+        console.log(f"{self.tag} current augmentation key part: '{augmentation_key_part}'")
+        
         query_file_base_key: str
-        augmentation_key_part: str
-
         if chosen_action == "current" or chosen_action == "transition":
-            query_file_base_key = current_played_file_base_for_neighbor
-            augmentation_key_part = current_augmentation_key_part
+            query_file_base_key = current_played_file_base
         else:  # "next", "next_2", "prev", "prev_2"
             try:
                 neighbor = self.neighbor_table.loc[
-                    current_played_file_base_for_neighbor, chosen_action
+                    current_played_file_base, chosen_action
                 ]
-                # check for NaN or None from table
+
                 if pd.isna(neighbor) or neighbor is None:
                     raise KeyError
+                
                 query_file_base_key = str(neighbor)
-                augmentation_key_part = basename(self.played_files[-1]).split("_")[-1]
             except KeyError:
                 console.log(
                     f"{self.tag} [yellow]neighbor '{chosen_action}' not found for "
-                    f"'{current_played_file_base_for_neighbor}'. falling back to 'current'.[/yellow]"
+                    f"'{current_played_file_base}'. falling back to 'current'.[/yellow]"
                 )
-                query_file_base_key = current_played_file_base_for_neighbor
-                augmentation_key_part = current_augmentation_key_part
+                query_file_base_key = current_played_file_base
 
         if "player" not in query_file_base_key:
-            full_query_file_key = query_file_base_key + augmentation_key_part
+            full_query_file_key = query_file_base_key + "_" + augmentation_key_part
         else:
             full_query_file_key = query_file_base_key
         if self.verbose:

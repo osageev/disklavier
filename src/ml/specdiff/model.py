@@ -49,7 +49,7 @@ class SpectrogramDiffusion:
 
     def __init__(
         self,
-        new_config: Optional[dict] = None,
+        new_config: Optional[dict]=None,
         fix_time: bool = True,
         verbose: bool = False,
     ) -> None:
@@ -109,7 +109,7 @@ class SpectrogramDiffusion:
                     )
                 tmp_dir = os.path.join(os.path.dirname(path), "tmp")
                 os.makedirs(tmp_dir, exist_ok=True)
-                tmp_file = os.path.join(tmp_dir, basename(path))
+                tmp_file = os.path.join(tmp_dir, basename(path) + ".mid")
                 change_tempo_and_trim(path, tmp_file, new_bpm)
                 path = tmp_file
 
@@ -129,12 +129,11 @@ class SpectrogramDiffusion:
 
         embeddings = []
         for i in range(0, len(all_tokens)):
-            batch = all_tokens[i].view(1, -1).cuda(self.device)
-            with torch.autocast("cuda"):
-                tokens_mask = batch > 0
-                tokens_embedded, tokens_mask = self.encoder(
-                    encoder_input_tokens=batch, encoder_inputs_mask=tokens_mask
-                )
+            batch = all_tokens[i].view(1, -1).to(self.device)
+            tokens_mask = batch > 0
+            tokens_embedded, tokens_mask = self.encoder(
+                encoder_input_tokens=batch, encoder_inputs_mask=tokens_mask
+            )
             if self.verbose:
                 console.log(
                     f"{self.tag} generated embedding {i} ({tokens_embedded.shape})"

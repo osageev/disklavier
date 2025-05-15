@@ -7,6 +7,12 @@ from utils import console
 from utils.midi import TICKS_PER_BEAT
 from .worker import Worker
 
+# Forward declaration for type hint
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from widgets.runner import RunWorker
+
 
 class Player(Worker):
     """
@@ -26,11 +32,21 @@ class Player(Worker):
     _velocity_adjustment_factor: float = 1.0
     _last_factor: float = 0
 
+    # Reference to the RunWorker for cutoff time
+    _runner: Optional["RunWorker"] = None
+
     def __init__(self, params, bpm: int, t_start: datetime):
         super().__init__(params, bpm=bpm)
-        self.midi_port = mido.open_output(params.midi_port)  # type: ignore
+        # try to open MIDI port
+        try:
+            self.midi_port = mido.open_output(params.midi_port)  # type: ignore
+        except Exception as e:
+            console.log(f"{self.tag} error opening MIDI port: {e}")
+            console.print_exception(show_locals=True)
+            exit(1)
         self.td_start = t_start
         self.td_last_note = t_start
+        self.current_transposition_interval = 0  # Added for transposition
 
         # if self.verbose:
         console.log(f"{self.tag} settings:\n{self.__dict__}")
@@ -38,17 +54,13 @@ class Player(Worker):
             f"{self.tag} initialization complete, start time is {self.td_start.strftime('%H:%M:%S.%f')[:-3]}"
         )
 
-    def set_recorder(self, recorder):
-        """
-        Set the reference to the MidiRecorder.
-
-        Parameters
-        ----------
-        recorder : MidiRecorder
-            Reference to the MidiRecorder instance.
-        """
+    def set_recorder_ref(self, recorder):
         self._recorder = recorder
         console.log(f"{self.tag} connected to recorder for velocity updates")
+
+    def set_runner_ref(self, runner_ref: "RunWorker"):
+        self._runner = runner_ref
+        console.log(f"{self.tag} connected to runner for cutoff checks")
 
     def check_velocity_updates(self) -> bool:
         """
@@ -88,7 +100,7 @@ class Player(Worker):
 
             if self._last_factor != self._velocity_adjustment_factor:
                 console.log(
-                    f"{self.tag} adjustment factor: {self._velocity_adjustment_factor:.2f}"
+                    f"{self.tag}[grey30]\tnew adjustment factor: {self._velocity_adjustment_factor:.2f}[/grey30]"
                 )
 
     def _calculate_velocity_adjustment_factor(self):
@@ -122,6 +134,19 @@ class Player(Worker):
 
         return adjustment_factor
 
+    def set_transposition(self, interval: int):
+        """
+        set the transposition interval for playback.
+
+        parameters
+        ----------
+        interval : int
+            the number of semitones to transpose.
+            positive values transpose up, negative values transpose down.
+        """
+        self.current_transposition_interval = interval
+        console.log(f"{self.tag} playback transposition set to {interval} semitones.")
+
     def play(self, queue: PriorityQueue):
         console.log(
             f"{self.tag} start time is {self.td_start.strftime('%H:%M:%S.%f')[:-3]}"
@@ -134,6 +159,16 @@ class Player(Worker):
                 self.adjust_playback_based_on_velocity()
 
             tt_abs, msg = queue.get()
+
+            # Check if message time is beyond the cutoff set by RunWorker
+            if self._runner is not None and tt_abs >= self._runner.playback_cutoff_tick:
+                if self.verbose:
+                    console.log(
+                        f"{self.tag} skipping message due to cutoff: {tt_abs} >= {self._runner.playback_cutoff_tick}"
+                    )
+                queue.task_done()  # Mark task as done even if skipped
+                continue  # Skip processing this message
+
             ts_abs = mido.tick2second(tt_abs, TICKS_PER_BEAT, self.tempo)
             if self.verbose:
                 console.log(
@@ -187,7 +222,24 @@ class Player(Worker):
 
                 msg = msg.copy(velocity=adjusted_velocity)
 
-            self.midi_port.send(msg)
+            # Apply transposition before sending
+            final_msg_to_send = msg
+            if self.current_transposition_interval != 0 and msg.type in (
+                "note_on",
+                "note_off",
+            ):
+                transposed_msg = msg.copy()
+                original_note = transposed_msg.note
+                transposed_note = original_note + self.current_transposition_interval
+                # Clamp to MIDI note range [0, 127]
+                transposed_msg.note = max(0, min(127, transposed_note))
+                if self.verbose and original_note != transposed_msg.note:
+                    console.log(
+                        f"{self.tag} transposing note {original_note} to {transposed_msg.note} (interval: {self.current_transposition_interval})"
+                    )
+                final_msg_to_send = transposed_msg
+
+            self.midi_port.send(final_msg_to_send)
             self.n_notes += 1
             queue.task_done()
 

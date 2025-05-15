@@ -5,6 +5,7 @@ initialization: "recording" # kickstart random recording audio
 kickstart_path: "data/datasets/20250320/augmented/20240429-068-06_0084-0091_t10s03.mid"
 # kickstart_path: "data/datasets/20250320/augmented/20241229-094-10_0091-0096_t00s00.mid"
 # kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid" # path to midi or matches.json
+player_tracking: false
 augmentation:
   rearrange: ~
   remove: ~
@@ -20,7 +21,7 @@ scheduler:
 seeker:
   tag: "[yellow]seeker[/yellow]:"
   verbose: True
-  seed: 9878761
+  seed: ~
   system: "live"
   mode: "best" # best easy repeat random sequential playlist graph
   match: "current" # current, next, prev, next 2, prev 2
@@ -61,3 +62,15 @@ panther:
   remote_host: "129.173.66.44"
   port: 22
   remote_dir: "/home/finlay/disklavier/data/outputs/uploads"
+midi_control:
+  cc_listener:
+    enable: false
+    port_name: "nanoKONTROL2 SLIDER/KNOB"
+    cc_number: 23
+    min_threshold: 0.0
+    max_threshold: 10.0
+    map_cc_127_to_inf: true
+  transpose_listener:
+    enable: false
+    port_name: "LPK25"
+    middle_c_note_number: 60

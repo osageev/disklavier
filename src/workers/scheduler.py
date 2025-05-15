@@ -59,6 +59,8 @@ class Scheduler(Worker):
         similarity: Optional[float] = None,
     ) -> Tuple[float, float, int]:
         midi_in = mido.MidiFile(pf_midi)
+
+        # --- calculate offset ---
         # --- determine times ---
         # number of seconds/ticks from the start of playback to start playing the file
         if (
@@ -97,7 +99,7 @@ class Scheduler(Worker):
         )
 
         if midi_in.ticks_per_beat != TICKS_PER_BEAT:
-            console.log(
+            raise ValueError(
                 f"{self.tag}[red] midi file ticks per beat mismatch!\n\tfile has {midi_in.ticks_per_beat} tpb but expected {TICKS_PER_BEAT}"
             )
 
@@ -116,7 +118,7 @@ class Scheduler(Worker):
                 if msg.type == "note_on" or msg.type == "note_off":
                     tt_abs += msg.time
                     tt_sum += msg.time
-                    # occasionally need to shift the message to avoid priority conflicts
+                    # occasionally need to shift the message to avoid priority collisions
                     current_tt_abs = tt_abs  # store original intended time
                     if current_tt_abs in self.tt_all_messages:
                         # find the nearest integer that doesn't exist in tt_all_messages
@@ -135,14 +137,13 @@ class Scheduler(Worker):
                         else:
                             current_tt_abs = tt_upper_bound
                     self.tt_all_messages.append(current_tt_abs)
-                    tt_max_abs_in_segment = max(
-                        tt_max_abs_in_segment, current_tt_abs
-                    )  # update max tick time
-                    # if self.verbose:
-                    #     console.log(
-                    #         f"{self.tag} adding message to queue: ({current_tt_abs}, ({msg}))"
-                    #     )
+                    tt_max_abs_in_segment = max(tt_max_abs_in_segment, current_tt_abs)  # update max tick time
+
+                    # console.log(f"{self.tag} adding message to queue: ({current_tt_abs}, ({msg}))")
+
                     q_piano.put((current_tt_abs, msg))
+
+                    # --- add to gui queue ---
                     if q_gui is not None:
                         # TODO: make this 10 seconds a global parameter
                         tt_delay = mido.second2tick(10, TICKS_PER_BEAT, self.tempo)
@@ -152,6 +153,8 @@ class Scheduler(Worker):
                                 (similarity if similarity is not None else 1.0, msg),
                             )
                         )
+
+                    # --- write to raw notes file ---
                     # edge case, but it does happen sometimes that multiple recorded notes start at 0, resulting in one note getting bumped to time -1
                     if current_tt_abs < 0:
                         current_tt_abs = 0
@@ -159,6 +162,7 @@ class Scheduler(Worker):
                         f"{os.path.basename(pf_midi)},{msg.type},{msg.note},{msg.velocity},{current_tt_abs}\n"
                     )
 
+        # --- generate transitions, update trackers ---
         if (
             mido.tick2second(tt_abs, TICKS_PER_BEAT, self.tempo)
             > self.ts_transitions[-1]
@@ -242,10 +246,10 @@ class Scheduler(Worker):
         if self.verbose:
             console.log(
                 f"{self.tag} segment interval is {ts_interval:.03f} seconds",
-                [
-                    f"{t:02.01f}  -> {self.td_start + timedelta(seconds=t):%H:%M:%S.%f}"
-                    for t in self.ts_transitions[:-5]
-                ],
+                # [
+                #     f"{t:02.01f}  -> {self.td_start + timedelta(seconds=t):%H:%M:%S.%f}"
+                #     for t in self.ts_transitions[:-5]
+                # ],
             )
 
         transitions = []
