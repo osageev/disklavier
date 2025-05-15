@@ -25,7 +25,7 @@ novelty: false
 
 # augmentation
 augment: true
-tempo_fold: true
+tempo_fold: false
 num_transposes: 12 # 12 semitones
 
 # supporting tables, etc.
