@@ -77,6 +77,7 @@ def build_neighbor_table(
             n_table.loc[basename(file)] = neighbors
             progress.advance(update_task)
 
+    n_table = n_table.fillna("")
     try:
         n_table.to_hdf(output_path, key=hdf_key, mode="w")
     except Exception as e:

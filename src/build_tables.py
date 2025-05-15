@@ -16,6 +16,7 @@ SUPPORTED_REPS = [
     "clamp",
 ]
 
+
 def main(config) -> None:
     start_time = time.time()
     # load files
@@ -35,8 +36,9 @@ def main(config) -> None:
             console.log(
                 f"building neighbor table for {len(segmented_files)} segmented files"
             )
+            hdf_key_name = f"dataset_{config.dataset_name}"
             built_n = table_utils.build_neighbor_table(
-                segmented_files, neighbors_path, str(config.dataset_name)
+                segmented_files, neighbors_path, hdf_key_name
             )
             if built_n:
                 console.log(
