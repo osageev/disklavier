@@ -169,10 +169,10 @@ class RunWorker(QtCore.QThread):
             # start player
             self.staff.player.set_start_time(self.td_playback_start)
             self.staff.player.td_last_note = self.td_playback_start
-            self.thread_player = Thread(
+            self.th_player = Thread(
                 target=self.staff.player.play, name="player", args=(self.q_playback,)
             )
-            self.thread_player.start()
+            self.th_player.start()
 
             # start midi recording
             self.midi_stop_event = self.staff.midi_recorder.start_recording(
@@ -217,9 +217,9 @@ class RunWorker(QtCore.QThread):
                     self._queue_file(pf_next_file, similarity)
 
                 time.sleep(0.1)
-                if not self.thread_player.is_alive():
+                if not self.th_player.is_alive():
                     console.log(f"{self.tag} player ran out of notes, exiting")
-                    self.thread_player.join(0.1)
+                    self.th_player.join(0.1)
                     break
 
             # all necessary files queued, wait for playback to finish
@@ -227,7 +227,7 @@ class RunWorker(QtCore.QThread):
             while self.q_playback.qsize() > 0:
                 self._emit_current_file()
                 time.sleep(0.1)
-            self.thread_player.join(timeout=0.1)
+            self.th_player.join(timeout=0.1)
             console.log(f"{self.tag} playback complete")
             self.s_status.emit("playback complete")
             self.s_segments_remaining.emit(0)
@@ -249,8 +249,8 @@ class RunWorker(QtCore.QThread):
                     )
                 pass
 
-        if hasattr(self, "thread_player"):
-            self.thread_player.join(timeout=0.1)
+        if hasattr(self, "th_player"):
+            self.th_player.join(timeout=0.1)
 
         console.log(f"{self.tag} stopping metronome")
         self.metronome.stop()

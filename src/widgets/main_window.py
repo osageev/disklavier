@@ -1,5 +1,4 @@
 import os
-import csv
 import yaml
 from queue import Queue
 from threading import Event
@@ -22,7 +21,7 @@ class MainWindow(QtWidgets.QMainWindow):
     tag = "[white]main[/white]  :"
     workers: Staff
     midi_stop_event: Event
-    run_thread: Optional[RunWorker] = None
+    th_run: Optional[RunWorker] = None
 
     def __init__(self, args, params):
         self.args = args
@@ -229,8 +228,8 @@ class MainWindow(QtWidgets.QMainWindow):
         console.log(f"{self.tag} switching to piano roll view")
         self.piano_roll = PianoRollWidget(q_gui, self)
         self.setCentralWidget(self.piano_roll)
-        if hasattr(self, "run_thread") and self.run_thread is not None:
-            self.run_thread.s_transition_times.connect(
+        if hasattr(self, "th_run") and self.th_run is not None:
+            self.th_run.s_transition_times.connect(
                 self.piano_roll.pr_view.update_transitions
             )
         self.status.showMessage("piano roll view activated")
@@ -288,18 +287,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_label.setText("Recording View")
 
         # Start the main processing in a QThread
-        self.run_thread = RunWorker(self)
-        self.run_thread.s_start_time.connect(self.update_start_time)
-        self.run_thread.s_status.connect(self.update_status)
-        self.run_thread.s_segments_remaining.connect(self.update_segments_display)
+        self.th_run = RunWorker(self)
+        self.th_run.s_start_time.connect(self.update_start_time)
+        self.th_run.s_status.connect(self.update_status)
+        self.th_run.s_segments_remaining.connect(self.update_segments_display)
         # Connect RunWorker signals to RecordingWidget
-        self.run_thread.s_augmentation_started.connect(
+        self.th_run.s_augmentation_started.connect(
             self.recording_widget.init_augmentation_progress
         )
-        self.run_thread.s_embedding_processed.connect(
+        self.th_run.s_embedding_processed.connect(
             self.recording_widget.update_augmentation_progress
         )
-        self.run_thread.start()
+        self.th_run.start()
 
         # Enable stop button now that system is running
         self.stop_btn.setEnabled(True)
@@ -372,10 +371,10 @@ class MainWindow(QtWidgets.QMainWindow):
         console.log(f"{self.tag} cleaning up workers...")
 
         # Stop the run thread if it exists
-        if self.run_thread is not None and self.run_thread.isRunning():
-            self.run_thread.shutdown()
-            self.run_thread.requestInterruption()
-            self.run_thread.wait(1000)  # Wait up to 1 second for thread to finish
+        if self.th_run is not None and self.th_run.isRunning():
+            self.th_run.shutdown()
+            self.th_run.requestInterruption()
+            self.th_run.wait(1000)  # Wait up to 1 second for thread to finish
 
         console.log(f"{self.tag} workers cleaned up")
 
@@ -383,6 +382,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stop_btn.setEnabled(False)
         self.start_btn.setEnabled(True)
         self.segments_label.setText("Segments Left: N/A")
+
+    def start_clicked(self):
+        """
+        handle the start button click.
+        """
+        params = self.param_editor.get_updated_params()
+        console.log(f"params: {params}")
+        self.save_and_start(params)
 
     def stop_clicked(self):
         self.cleanup_workers()
@@ -413,11 +420,3 @@ class MainWindow(QtWidgets.QMainWindow):
         super().resizeEvent(event)
         self.window_height = self.height()
         self.window_width = self.width()
-
-    def start_clicked(self):
-        """
-        handle the start button click.
-        """
-        params = self.param_editor.get_updated_params()
-        console.log(f"params: {params}")
-        self.save_and_start(params)
