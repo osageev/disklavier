@@ -134,45 +134,88 @@ class ParameterEditorWidget(QtWidgets.QWidget):
 
     def display_params(self, layout):
         """
-        display parameters in the gui.
+        display parameters in the gui, supporting up to two levels of nesting for groups.
         """
         if not self.params:
             empty_label = QtWidgets.QLabel("No parameters loaded.")
             layout.addWidget(empty_label)
             return
 
-        # Display top-level parameters
-        keys = list(self.params.keys())
-        keys.sort(
-            key=lambda x: key_order.index(x) if x in key_order else len(key_order)
-        )
-        for key in keys:
-            if (
-                isinstance(self.params[key], (int, float, str, bool))
-                and key not in blocked_params
-            ):
-                self.add_param_row(layout, key, self.params[key])
-            elif isinstance(
-                self.params[key],
-                (dict, omegaconf.OmegaConf, omegaconf.dictconfig.DictConfig),
-            ):
-                # Create section header
-                formatted_section_title = key.replace("_", " ").title()
-                section_group = QtWidgets.QGroupBox(formatted_section_title)
-                section_layout = QtWidgets.QVBoxLayout(section_group)
+        self._add_widgets_for_level(layout, self.params, [])
 
-                # Add nested parameters
-                key_added = False
-                for subkey in self.params[key].keys():
-                    if subkey not in blocked_params:
-                        full_key = f"{key}.{subkey}"
-                        self.add_param_row(
-                            section_layout, full_key, self.params[key][subkey]
-                        )
-                        key_added = True
+    def _add_widgets_for_level(self, parent_layout, current_level_params, path_parts):
+        """
+        recursively add widgets for parameters.
 
-                if key_added:
-                    layout.addWidget(section_group)
+        this helper populates `parent_layout` with parameter rows or nested group boxes
+        based on `current_level_params`. `path_parts` tracks the nesting.
+        groups are created for dictionary parameters up to two levels deep.
+
+        parameters
+        ----------
+        parent_layout : QtWidgets.QLayout
+            the layout to add widgets to.
+        current_level_params : dict or omegaconf.dictconfig.DictConfig
+            the parameters for the current nesting level.
+        path_parts : list[str]
+            a list of keys representing the path to `current_level_params`.
+
+        returns
+        -------
+        bool
+            true if any widgets were added to `parent_layout`, false otherwise.
+        """
+        keys_to_display = list(current_level_params.keys())
+
+        if not path_parts:  # only apply key_order sort at the top level
+            keys_to_display.sort(
+                key=lambda x: (
+                    key_order.index(x) if x in key_order else len(key_order),
+                    x,
+                )
+            )
+        else:
+            keys_to_display.sort()  # sorts alphabetically for sub-levels
+
+        items_added_on_this_level = False
+
+        for key in keys_to_display:
+            current_full_key_parts = path_parts + [key]
+            full_key_str = ".".join(current_full_key_parts)
+
+            # skip if the key itself or its full path is in blocked_params
+            if key in blocked_params or full_key_str in blocked_params:
+                continue
+
+            value = current_level_params[key]
+
+            if isinstance(value, (dict, omegaconf.dictconfig.DictConfig)):
+                if (
+                    len(path_parts) < 2
+                ):  # create a group box if we are at level 0 or level 1 of path_parts
+                    formatted_section_title = key.replace("_", " ").title()
+                    section_group = QtWidgets.QGroupBox(formatted_section_title)
+                    section_layout = QtWidgets.QVBoxLayout(section_group)
+
+                    children_added = self._add_widgets_for_level(
+                        section_layout, value, current_full_key_parts
+                    )
+
+                    if children_added:  # only add the group if it has content
+                        parent_layout.addWidget(section_group)
+                        items_added_on_this_level = True
+                else:
+                    # we are already 2 levels deep in groups. add parameters from this dict directly.
+                    children_added = self._add_widgets_for_level(
+                        parent_layout, value, current_full_key_parts
+                    )
+                    if children_added:
+                        items_added_on_this_level = True
+            else:  # assumed to be a primitive, list, or other type that add_param_row can handle
+                self.add_param_row(parent_layout, full_key_str, value)
+                items_added_on_this_level = True
+
+        return items_added_on_this_level
 
     def add_param_row(self, layout, key, value):
         """
@@ -291,38 +334,67 @@ class ParameterEditorWidget(QtWidgets.QWidget):
 
         return self.params
 
-    def get_param_value(self, key):
+    def get_param_value(self, key_path):
         """
-        get parameter value from the config.
+        get parameter value from the config using a dot-separated key path.
 
         parameters
         ----------
-        key : str
-            parameter key.
+        key_path : str
+            parameter key path (e.g., "section.subsection.key").
 
         returns
         -------
         any
-            parameter value.
+            parameter value, or none if the path is invalid.
         """
-        if "." in key:
-            section, subkey = key.split(".", 1)
-            return self.params[section][subkey]
-        return self.params[key]
+        keys = key_path.split(".")
+        current_value = self.params
+        try:
+            for k_segment in keys:
+                current_value = current_value[k_segment]
+            return current_value
+        except (KeyError, TypeError, omegaconf.errors.ConfigKeyError):
+            # handle cases where path is invalid or value is not subscriptable
+            console.log(
+                f"[red]Error: Could not retrieve value for key path: {key_path}[/red]"
+            )
+            return None
 
-    def set_param_value(self, key, value):
+    def set_param_value(self, key_path, new_value):
         """
-        set parameter value in the config.
+        set parameter value in the config using a dot-separated key path.
 
         parameters
         ----------
-        key : str
-            parameter key.
-        value : any
-            parameter value.
+        key_path : str
+            parameter key path (e.g., "section.subsection.key").
+        new_value : any
+            parameter value to set.
         """
-        if "." in key:
-            section, subkey = key.split(".", 1)
-            self.params[section][subkey] = value
-        else:
-            self.params[key] = value
+        keys = key_path.split(".")
+        obj = self.params
+        try:
+            for k_segment in keys[:-1]:  # navigate to the parent dictionary
+                obj = obj[k_segment]
+
+            # attempt to convert type if original was int/float and new value is string representable as such
+            original_type = type(obj[keys[-1]]) if keys[-1] in obj else None
+
+            if original_type is int and isinstance(new_value, str):
+                try:
+                    new_value = int(new_value)
+                except ValueError:
+                    pass  # keep as string if conversion fails, omegaconf might handle or error later
+            elif original_type is float and isinstance(new_value, str):
+                try:
+                    new_value = float(new_value)
+                except ValueError:
+                    pass  # keep as string
+
+            obj[keys[-1]] = new_value  # set the value on the final key
+        except (KeyError, TypeError, omegaconf.errors.ConfigKeyError):
+            # handle cases where path is invalid or obj is not subscriptable
+            console.log(
+                f"[red]Error: Could not set value for key path: {key_path}[/red]"
+            )
