@@ -183,9 +183,15 @@ def change_tempo(in_path: str, out_path: str, tempo: int):
 
 
 def transform(
-    file_path: str, out_dir: str, bpm: int, transformations: Dict, num_beats: int = 8
+    file_path: str,
+    out_dir: str,
+    bpm: int,
+    transformations: Dict,
+    num_beats: int = 8,
 ) -> str:
-    new_filename = f"{Path(file_path).stem}_t{transformations['transpose']:02d}s{transformations['shift']:02d}"
+    # determine output filename
+    transposition_identifier = "u" if transformations["transpose"] > 0 else "d"
+    new_filename = f"{Path(file_path).stem}_{transposition_identifier}{abs(transformations['transpose']):02d}s{transformations['shift']:02d}"
     out_path = os.path.join(out_dir, f"{new_filename}.mid")
 
     if transformations["transpose"] != 0:
@@ -251,9 +257,7 @@ def transform(
                 )
 
             s_midi.instruments.append(shifted_instrument)
-
         s_midi.write(out_path)
-
     set_bpm(out_path, bpm)
 
     return out_path
@@ -1464,3 +1468,28 @@ def jitter(
             note.velocity = new_velocity
 
     return midi
+
+
+def stretch_midi(file_path: str, factor: float = 1.0) -> None:
+    """
+    stretch or compress the timing of all messages in a midi file.
+
+    NOTE: this modifies the midi file in place
+
+    Parameters
+    ----------
+    file_path : str
+        path to the midi file to modify.
+    factor : float
+        factor by which to multiply the time of each message.
+        factor > 1.0 stretches the midi file (slower).
+        factor < 1.0 compresses the midi file (faster).
+    """
+    try:
+        midi = mido.MidiFile(file_path)
+        for track in midi.tracks:
+            for msg in track:
+                msg.time = int(round(msg.time * factor))
+        midi.save(file_path)
+    except Exception as e:
+        console.log(f"[red]error stretching midi file {basename(file_path)}: {e}[/red]")

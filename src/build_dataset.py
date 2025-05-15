@@ -20,7 +20,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from utils import basename, console
 from utils.novelty import gen_ssm_and_novelty
-from utils.midi import get_bpm, set_bpm, transform, trim_piano_roll
+from utils.midi import get_bpm, set_bpm, transform, trim_piano_roll, stretch_midi
 from utils.dataset import (
     add_metronome,
     add_novelty,
@@ -51,10 +51,17 @@ class SegmentOptions:
 
 
 class AugmentOptions:
-    def __init__(self, num_shifts: int, num_transposes: int, tempo_fold: bool):
+    def __init__(
+        self,
+        num_shifts: int,
+        num_transposes: int,
+        tempo_fold: bool,
+        transpose_down: bool,
+    ):
         self.num_shifts = num_shifts
         self.num_transposes = num_transposes
         self.tempo_fold = tempo_fold
+        self.transpose_down = transpose_down
 
 
 def augment_midi(
@@ -65,9 +72,12 @@ def augment_midi(
     options: AugmentOptions,
 ) -> List[str]:
     augmented_files = []
+    if options.transpose_down:
+        num_transposes = options.num_transposes * 2
+
     task_a = p.add_task(
         f"augmenting {basename(filename)}",
-        total=len(new_segments) * options.num_transposes * options.num_shifts,
+        total=len(new_segments) * num_transposes * options.num_shifts,
     )
 
     with p:
@@ -78,6 +88,17 @@ def augment_midi(
                     range(options.num_transposes), range(options.num_shifts)
                 )
             ]
+
+            if options.transpose_down:
+                transformations.extend(
+                    [
+                        {"transpose": -t, "shift": s}
+                        for t, s in product(
+                            range(1, options.num_transposes), range(options.num_shifts)
+                        )
+                    ]
+                )
+
             for transformation in transformations:
                 augmented_files.append(
                     transform(
@@ -222,6 +243,7 @@ def process_files(
         num_shifts=args.num_beats,
         num_transposes=args.num_transposes,
         tempo_fold=args.tempo_fold,
+        transpose_down=args.transpose_down,
     )
 
     # segment files
@@ -300,6 +322,8 @@ def main(args, debug: bool = False) -> None:
                     continue
                 tracks.append(new_track)
                 copy2(track, new_track)
+                set_bpm(new_track, int(int(track_parts[1])))
+                stretch_midi(new_track, 0.5) # twice as fast
                 console.log(
                     f"doubled tempo of {basename(track)} to {basename(new_track)}"
                 )
@@ -315,6 +339,8 @@ def main(args, debug: bool = False) -> None:
                     continue
                 tracks.append(new_track)
                 copy2(track, new_track)
+                set_bpm(new_track, int(int(track_parts[1])))
+                stretch_midi(new_track, 2.0) # twice as slow
                 console.log(
                     f"halved tempo of {basename(track)} to {basename(new_track)}"
                 )
@@ -345,8 +371,6 @@ def main(args, debug: bool = False) -> None:
                 import traceback
 
                 traceback.print_exc()
-                # Decide whether to stop or continue
-                # raise  # Re-raise the exception to stop execution
                 console.log("[yellow]Continuing to next chunk...")
     else:
         with ProcessPoolExecutor() as executor:

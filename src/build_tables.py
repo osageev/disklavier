@@ -16,7 +16,6 @@ SUPPORTED_REPS = [
     "clamp",
 ]
 
-
 def main(config) -> None:
     start_time = time.time()
     # load files
@@ -64,6 +63,7 @@ def main(config) -> None:
                 resp = table_utils.specdiff(
                     augmented_files,
                     table_path,
+                    fix_time=config.fix_tempo,
                     batch_size=2,
                     device_name=config.device_name,
                 )

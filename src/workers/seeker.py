@@ -865,22 +865,6 @@ class Seeker(Worker, QtCore.QObject):
 
         return indices, similarities
 
-    def transform(self, midi_file: str = "") -> str:
-        pf_in = self.base_file(self.played_files[-1]) if midi_file == "" else midi_file
-        pf_out = os.path.join(
-            self.p_playlist,
-            f"{len(self.played_files):02d} {os.path.basename(pf_in)}",
-        )
-        pf_out = os.path.join(self.p_playlist, f"{len(self.played_files):02d} {pf_in}")
-        console.log(f"{self.tag} transforming '{pf_in}' to '{pf_out}'")
-
-        copy2(
-            os.path.join(os.path.dirname(self.p_dataset), pf_in),
-            pf_out,
-        )
-
-        return pf_out
-
     def base_file(self, filename: str) -> str:
         if "player" in filename:
             return filename

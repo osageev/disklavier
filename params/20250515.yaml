@@ -1,0 +1,38 @@
+###############################################################################
+### MAY 15, 2025
+### this dataset removes the previous tempo adjustment from 20250420.
+### it also implements a new transposition mode which transposes both up and
+### down by the same interval.
+###############################################################################
+
+# paths (a bit redundant but it's for clarity w/test datasets)
+dataset_name: 20250515
+out_dir: '/media/scratch/sageev-midi/20250515'   # path to write MIDI files to
+data_dir: '/media/scratch/sageev-midi/20250515/unsegmented'  # path to read MIDI files from
+
+limit: ~ # early stopping
+
+# segmentation
+segment: true
+num_beats: 8
+lead_window_beat_frac: 8
+metronome: 0 # metronome velocity (0 for none)
+tempo_fold_min: 50
+tempo_fold_max: 100
+beats: true
+novelty: false
+
+# augmentation
+augment: true
+tempo_fold: true
+num_transposes: 18 # 1.5 octaves up and down
+transpose_down: true
+
+# supporting tables, etc.
+representations: ["specdiff"]
+model_dir: "data/models"
+device_name: "cuda:1"
+graphs: ["specdiff"]
+n_graph_connections: 150
+find_neighbors: true
+fix_tempo: false
