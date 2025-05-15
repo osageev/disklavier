@@ -225,7 +225,7 @@ class RunWorker(QtCore.QThread):
 
                 # check if player thread is still alive
                 # will exit loop once all notes are played
-                if not self.thread_player.is_alive():
+                if not self.th_player.is_alive():
                     console.log(
                         f"{self.tag}[yellow] player thread finished or terminated[/yellow]"
                     )
@@ -284,10 +284,10 @@ class RunWorker(QtCore.QThread):
                 console.log(f"{self.tag}\tstop was requested.")
 
             # Wait for player thread to finish naturally if it hasn't already
-            if self.thread_player.is_alive():
+            if self.th_player.is_alive():
                 console.log(f"{self.tag}\twaiting for player thread to finish...")
-                self.thread_player.join(timeout=5.0)  # Wait up to 5 seconds
-                if self.thread_player.is_alive():
+                self.th_player.join(timeout=5.0)  # Wait up to 5 seconds
+                if self.th_player.is_alive():
                     console.log(
                         f"{self.tag} [yellow]Player thread did not finish cleanly."
                     )
@@ -318,10 +318,10 @@ class RunWorker(QtCore.QThread):
                 self.q_playback.get_nowait()
             except Exception:
                 pass
-        if hasattr(self, "thread_player") and self.thread_player.is_alive():
+        if hasattr(self, "th_player") and self.th_player.is_alive():
             console.log(f"{self.tag} Waiting for player thread to stop...")
-            self.thread_player.join(timeout=1.0)
-            if self.thread_player.is_alive():
+            self.th_player.join(timeout=1.0)
+            if self.th_player.is_alive():
                 console.log(
                     f"{self.tag} [yellow]Player thread did not stop after clearing queue."
                 )
