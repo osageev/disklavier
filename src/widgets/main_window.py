@@ -230,18 +230,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # --- initialize midi control listener(s) ---
         if hasattr(self.args, "midi_control") and self.args.midi_control:
-            console.log(
-                f"{self.tag} initializing midi control listener..."
-            )
+            console.log(f"{self.tag} initializing midi control listener...")
             self.midi_listener = MidiControlListener(
                 app_params=self.params.midi_control,
                 run_worker_ref=None,
                 player_ref=self.workers.player,
             )
-        else: 
-            console.log(
-                f"{self.tag} midi control listener is disabled"
-            )
+        else:
+            console.log(f"{self.tag} midi control listener is disabled")
 
     def switch_to_piano_roll(self, q_gui: Queue):
         console.log(f"{self.tag} switching to piano roll view")
@@ -270,9 +266,8 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         os.makedirs(self.p_log, exist_ok=True)
 
-        # Create parameters file in p_log
+        # create parameters file
         param_file = os.path.join(self.p_log, "parameters.yaml")
-
         try:
             with open(param_file, "w") as f:
                 yaml.dump(OmegaConf.to_container(params), f, default_flow_style=False)
@@ -299,18 +294,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status.showMessage("system initialization complete, preparing UI")
         self.status_label.setText("System initialization complete, preparing UI")
 
-        # Switch to RecordingWidget
+        # switch to recording view
         self.recording_widget.reset_widget()
         self.setCentralWidget(self.recording_widget)
         self.status.showMessage("recording view active")
         self.status_label.setText("Recording View")
 
-        # Start the main processing in a QThread
+        # start the main processing in a QThread
         self.run_thread = RunWorker(self)
         self.run_thread.s_start_time.connect(self.update_start_time)
         self.run_thread.s_status.connect(self.update_status)
         self.run_thread.s_segments_remaining.connect(self.update_segments_display)
-        # Connect RunWorker signals to RecordingWidget
+        # connect run worker signals to recording widget
         self.run_thread.s_augmentation_started.connect(
             self.recording_widget.init_augmentation_progress
         )
@@ -319,14 +314,14 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.run_thread.start()
 
-        # Enable stop button now that system is running
+        # enable stop button now that system is running
         self.stop_btn.setEnabled(True)
         self.start_btn.setEnabled(False)
 
-        # Make sure status bar is visible
+        # make sure status bar is visible
         self.status.setVisible(True)
 
-        # Start MIDI listener if it was initialized and we have a run_thread
+        # start MIDI listener if it was initialized and we have a run_thread
         if self.midi_listener is not None:
             console.log(f"{self.tag} starting midi control listener with run_thread...")
             self.midi_listener.run_worker_ref = self.run_thread
@@ -419,6 +414,29 @@ class MainWindow(QtWidgets.QMainWindow):
 
         console.log(f"{self.tag} worker thread cleanup process complete.")
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.window_height = self.height()
+        self.window_width = self.width()
+
+    def start_clicked(self):
+        """
+        handles the start button click.
+        retrieves updated parameters from the editor and initiates the save and start sequence.
+        """
+        console.log(
+            f"{self.tag} start button clicked. retrieving params and starting..."
+        )
+        if hasattr(self, "param_editor") and self.param_editor is not None:
+            updated_params = self.param_editor.get_updated_params()
+            self.params = updated_params  # Update MainWindow's params
+            self.save_and_start(self.params)
+        else:
+            console.log(f"{self.tag} [red]param_editor not found. cannot start.[/red]")
+            # Optionally, try to start with existing self.params if that's a valid fallback
+            # self.save_and_start(self.params)
+            self.status.showMessage("Error: Parameter editor not available.")
+
     def stop_clicked(self):
         self.cleanup_workers()
 
@@ -447,28 +465,8 @@ class MainWindow(QtWidgets.QMainWindow):
         console.log(f"{self.tag} close event triggered.")
         self.cleanup_workers()
         console.log(f"{self.tag} saving console log...")
+
+        with open(os.path.join(self.p_log, "console.log"), "w") as f:
+            f.write(console.export_text())
         super().closeEvent(event)
         event.accept()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.window_height = self.height()
-        self.window_width = self.width()
-
-    def start_clicked(self):
-        """
-        handles the start button click.
-        retrieves updated parameters from the editor and initiates the save and start sequence.
-        """
-        console.log(
-            f"{self.tag} start button clicked. retrieving params and starting..."
-        )
-        if hasattr(self, "param_editor") and self.param_editor is not None:
-            updated_params = self.param_editor.get_updated_params()
-            self.params = updated_params  # Update MainWindow's params
-            self.save_and_start(self.params)
-        else:
-            console.log(f"{self.tag} [red]param_editor not found. cannot start.[/red]")
-            # Optionally, try to start with existing self.params if that's a valid fallback
-            # self.save_and_start(self.params)
-            self.status.showMessage("Error: Parameter editor not available.")

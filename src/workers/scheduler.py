@@ -246,10 +246,10 @@ class Scheduler(Worker):
         if self.verbose:
             console.log(
                 f"{self.tag} segment interval is {ts_interval:.03f} seconds",
-                [
-                    f"{t:02.01f}  -> {self.td_start + timedelta(seconds=t):%H:%M:%S.%f}"
-                    for t in self.ts_transitions[:-5]
-                ],
+                # [
+                #     f"{t:02.01f}  -> {self.td_start + timedelta(seconds=t):%H:%M:%S.%f}"
+                #     for t in self.ts_transitions[:-5]
+                # ],
             )
 
         transitions = []

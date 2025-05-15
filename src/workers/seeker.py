@@ -71,12 +71,19 @@ class Seeker(Worker, QtCore.QObject):
         self.p_table = table_path
         self.p_dataset = dataset_path
         self.p_playlist = playlist_path
-        self.rng = np.random.default_rng(self.params.seed)
         self.playlist = {}
         self.filenames = []
         self.played_files = []
         self.current_path = []
         self.filename_to_index = {}
+
+        # set seed randomly if not an integer
+        if isinstance(self.params.seed, int):
+            seed = self.params.seed
+        else:
+            seed = np.random.randint(0, 10000000)
+            console.log(f"{self.tag} using random seed: {seed}")
+        self.rng = np.random.default_rng(seed)
 
         if (
             hasattr(params, "probabilities_dist")

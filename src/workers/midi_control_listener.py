@@ -11,7 +11,7 @@ class MidiControlListener:
     listens for midi control changes and note events to control application parameters.
     """
 
-    tag = "[#00AADD]midi_listener[/#00AADD]:"
+    tag = "[#00AADD]midicc[/#00AADD]:"
 
     running = False
     cc_thread = None

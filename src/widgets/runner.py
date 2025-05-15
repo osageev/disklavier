@@ -312,16 +312,15 @@ class RunWorker(QtCore.QThread):
 
     def shutdown(self):
         console.log(f"{self.tag}[yellow] Shutdown initiated...")
-        self.stop_requested = True  # Ensure flag is set
+        self.stop_requested = True
 
         # --- Stop Threads and Workers ---
-        # Stop Player by clearing queue and joining thread
         console.log(f"{self.tag} Clearing playback queue...")
         while not self.q_playback.empty():
             try:
                 self.q_playback.get_nowait()
             except Exception:
-                pass  # Ignore errors during queue clearing
+                pass
         if hasattr(self, "thread_player") and self.thread_player.is_alive():
             console.log(f"{self.tag} Waiting for player thread to stop...")
             self.thread_player.join(timeout=1.0)
@@ -329,19 +328,13 @@ class RunWorker(QtCore.QThread):
                 console.log(
                     f"{self.tag} [yellow]Player thread did not stop after clearing queue."
                 )
-
-        # Stop Metronome
         if hasattr(self, "metronome") and self.metronome.isRunning():
             console.log(f"{self.tag} Stopping metronome...")
             self.metronome.stop()
-            self.metronome.wait(500)  # Wait for thread to finish
-
-        # Stop Audio Recorder
+            self.metronome.wait(500)
         if hasattr(self, "e_audio_stop") and self.e_audio_stop is not None:
             console.log(f"{self.tag} Stopping audio recording...")
-            self.staff.audio_recorder.stop_recording()  # Assumes this handles thread shutdown
-
-        # Stop MIDI Recorder
+            self.staff.audio_recorder.stop_recording()
         if hasattr(self, "midi_stop_event") and self.midi_stop_event is not None:
             console.log(f"{self.tag} Stopping MIDI recording...")
             stopped = self.staff.midi_recorder.stop_recording()
@@ -354,7 +347,7 @@ class RunWorker(QtCore.QThread):
 
         # --- Final Saving and Cleanup ---
         console.log(f"{self.tag} Finalizing recordings and logs...")
-        # Close raw notes file if scheduler exists and file is open
+        # close raw notes file if scheduler exists and file is open
         if (
             hasattr(self.staff, "scheduler")
             and hasattr(self.staff.scheduler, "raw_notes_file")

@@ -14,7 +14,7 @@ scheduler:
   verbose: True
 seeker:
   verbose: True
-  seed: 348975667
+  seed: ~
   mode: "probabilities" # best easy repeat random sequential playlist graph probabilities
   match: "current"
   metric: "specdiff" # pitch-histogram specdiff clf-4note clf-speed clf-tpose

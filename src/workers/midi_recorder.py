@@ -371,6 +371,10 @@ class MidiRecorder(Worker, QtCore.QObject):
 
     def save_midi(self, pf_recording: str) -> bool:
         """Saves the recorded notes to a MIDI file."""
+        if len(self.recorded_notes) == 0:
+            console.log(f"{self.tag} no notes recorded, skipping save")
+            return False
+
         if self.verbose:
             console.log(
                 f"{self.tag} saving recording '{os.path.basename(pf_recording)}'"
