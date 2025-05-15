@@ -20,6 +20,7 @@ from utils.midi import TICKS_PER_BEAT, MidiAugmentationConfig
 
 from typing import Optional
 
+
 class RunWorker(QtCore.QThread):
     """
     worker thread that handles the main application run loop.
@@ -35,7 +36,7 @@ class RunWorker(QtCore.QThread):
     stop_requested: bool = False
     ts_system_start = datetime.now()
     td_playback_start = datetime.now()
-
+    player_embedding_diff_threshold = np.inf
     # signals
     s_status = QtCore.Signal(str)
     s_start_time = QtCore.Signal(datetime)
@@ -66,10 +67,12 @@ class RunWorker(QtCore.QThread):
             self.player_segment_beat_interval * TICKS_PER_BEAT
         )
 
-        # connect signals
-        self.s_switch_to_pr.connect(self.main_window.switch_to_piano_roll)
+        if hasattr(self.params, "player_embedding_diff_threshold"):
+            self.player_embedding_diff_threshold = (
+                self.params.player_embedding_diff_threshold
+            )
 
-        # file paths from main window
+        # file paths
         self.p_log = main_window.p_log
         self.p_playlist = main_window.p_playlist
         self.pf_master_recording = main_window.pf_master_recording
@@ -78,6 +81,9 @@ class RunWorker(QtCore.QThread):
         self.pf_player_accompaniment = main_window.pf_player_accompaniment
         self.pf_schedule = main_window.pf_schedule
         self.pf_playlist = main_window.pf_playlist
+
+        # connect signals
+        self.s_switch_to_pr.connect(self.main_window.switch_to_piano_roll)
 
         # metronome
         self.metronome = workers.Metronome(
@@ -248,7 +254,9 @@ class RunWorker(QtCore.QThread):
                             )
 
                 # --- player tracking ---
-                current_elapsed_s = (datetime.now() - self.td_playback_start).total_seconds()
+                current_elapsed_s = (
+                    datetime.now() - self.td_playback_start
+                ).total_seconds()
                 current_beat = current_elapsed_s * self.params.bpm / 60.0
 
                 if (
@@ -524,7 +532,9 @@ class RunWorker(QtCore.QThread):
                 console.log(
                     f"{self.tag} saved temporary player segment: {pf_temp_player_segment}"
                 )
-                console.log(f"{self.tag} segment has length {pretty_midi.PrettyMIDI(pf_temp_player_segment).get_end_time():.2f} seconds")
+                console.log(
+                    f"{self.tag} segment has length {pretty_midi.PrettyMIDI(pf_temp_player_segment).get_end_time():.2f} seconds"
+                )
             return pf_temp_player_segment
         except Exception as e:
             console.log(f"{self.tag} [red]failed to save temporary MIDI segment: {e}")
@@ -563,9 +573,9 @@ class RunWorker(QtCore.QThread):
                     f"{self.tag} player embedding diff magnitude: {diff_magnitude:.4f}"
                 )
 
-            if diff_magnitude > self.params.player_embedding_diff_threshold:
+            if diff_magnitude > self.player_embedding_diff_threshold:
                 console.log(
-                    f"{self.tag} [yellow]embedding diff threshold exceeded ({diff_magnitude:.4f} > {self.params.player_embedding_diff_threshold}). adjusting trajectory..."
+                    f"{self.tag} [yellow]embedding diff threshold exceeded ({diff_magnitude:.4f} > {self.player_embedding_diff_threshold}). adjusting trajectory..."
                 )
                 try:
                     # self._adjust_playback_trajectory(embedding_diff)

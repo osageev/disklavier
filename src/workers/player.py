@@ -46,6 +46,7 @@ class Player(Worker):
             exit(1)
         self.td_start = t_start
         self.td_last_note = t_start
+        self.current_transposition_interval = 0  # Added for transposition
 
         # if self.verbose:
         console.log(f"{self.tag} settings:\n{self.__dict__}")
@@ -133,6 +134,19 @@ class Player(Worker):
 
         return adjustment_factor
 
+    def set_transposition(self, interval: int):
+        """
+        set the transposition interval for playback.
+
+        parameters
+        ----------
+        interval : int
+            the number of semitones to transpose.
+            positive values transpose up, negative values transpose down.
+        """
+        self.current_transposition_interval = interval
+        console.log(f"{self.tag} playback transposition set to {interval} semitones.")
+
     def play(self, queue: PriorityQueue):
         console.log(
             f"{self.tag} start time is {self.td_start.strftime('%H:%M:%S.%f')[:-3]}"
@@ -147,10 +161,7 @@ class Player(Worker):
             tt_abs, msg = queue.get()
 
             # Check if message time is beyond the cutoff set by RunWorker
-            if (
-                self._runner is not None
-                and tt_abs >= self._runner.playback_cutoff_tick
-            ):
+            if self._runner is not None and tt_abs >= self._runner.playback_cutoff_tick:
                 if self.verbose:
                     console.log(
                         f"{self.tag} skipping message due to cutoff: {tt_abs} >= {self._runner.playback_cutoff_tick}"
@@ -211,7 +222,24 @@ class Player(Worker):
 
                 msg = msg.copy(velocity=adjusted_velocity)
 
-            self.midi_port.send(msg)
+            # Apply transposition before sending
+            final_msg_to_send = msg
+            if self.current_transposition_interval != 0 and msg.type in (
+                "note_on",
+                "note_off",
+            ):
+                transposed_msg = msg.copy()
+                original_note = transposed_msg.note
+                transposed_note = original_note + self.current_transposition_interval
+                # Clamp to MIDI note range [0, 127]
+                transposed_msg.note = max(0, min(127, transposed_note))
+                if self.verbose and original_note != transposed_msg.note:
+                    console.log(
+                        f"{self.tag} transposing note {original_note} to {transposed_msg.note} (interval: {self.current_transposition_interval})"
+                    )
+                final_msg_to_send = transposed_msg
+
+            self.midi_port.send(final_msg_to_send)
             self.n_notes += 1
             queue.task_done()
 

@@ -1,6 +1,6 @@
 import os
-import csv
 import yaml
+import mido
 from queue import Queue
 from threading import Event
 from omegaconf import OmegaConf
@@ -9,6 +9,7 @@ from datetime import datetime
 
 import workers
 from workers import Staff
+from workers.midi_control_listener import MidiControlListener
 from utils import console, write_log
 from widgets.runner import RunWorker
 from widgets.param_editor import ParameterEditorWidget
@@ -22,6 +23,7 @@ class MainWindow(QtWidgets.QMainWindow):
     workers: Staff
     midi_stop_event: Event
     run_thread: Optional[RunWorker] = None
+    midi_listener: Optional[MidiControlListener] = None
 
     def __init__(self, args, params):
         self.args = args
@@ -32,6 +34,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         QtWidgets.QMainWindow.__init__(self)
         self.setWindowTitle("disklavier")
+
         # toolbar
         self.toolbar = QtWidgets.QToolBar("Time Toolbar")
         self.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, self.toolbar)
@@ -216,6 +219,21 @@ class MainWindow(QtWidgets.QMainWindow):
         # connect seeker and panther
         seeker.set_panther(panther)
 
+        # --- initialize midi control listener(s) ---
+        if hasattr(self.args, "midi_control") and self.args.midi_control:
+            console.log(
+                f"{self.tag} initializing midi control listener..."
+            )
+            self.midi_listener = MidiControlListener(
+                app_params=self.params.midi_control,
+                run_worker_ref=None,
+                player_ref=self.workers.player,
+            )
+        else: 
+            console.log(
+                f"{self.tag} midi control listener is disabled"
+            )
+
     def switch_to_piano_roll(self, q_gui: Queue):
         console.log(f"{self.tag} switching to piano roll view")
         self.piano_roll = PianoRollWidget(q_gui, self)
@@ -281,6 +299,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # Make sure status bar is visible
         self.status.setVisible(True)
 
+        # Start MIDI listener if it was initialized and we have a run_thread
+        if self.midi_listener is not None:
+            console.log(f"{self.tag} starting midi control listener with run_thread...")
+            self.midi_listener.run_worker_ref = self.run_thread
+            self.midi_listener.start()
+
     def update_start_time(self, start_time):
         """
         update the system start time based on the signal from run thread.
@@ -337,7 +361,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def cleanup_workers(self):
         """
-        clean up all worker processes and threads.
+        clean up worker threads.
         """
         if not hasattr(self, "workers"):
             return
@@ -346,32 +370,46 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Stop the run thread if it exists
         if self.run_thread is not None and self.run_thread.isRunning():
-            self.run_thread.shutdown()
-            self.run_thread.requestInterruption()
-            self.run_thread.wait(1000)  # Wait up to 1 second for thread to finish
+            console.log(f"{self.tag} requesting run_thread to stop...")
+            self.run_thread.stop_requested = True
+            self.run_thread.quit()
+            if not self.run_thread.wait(5000):
+                console.log(
+                    f"{self.tag} [yellow]run_thread did not terminate gracefully, forcing termination...[/yellow]"
+                )
+                self.run_thread.terminate()
+                self.run_thread.wait()
+            else:
+                console.log(f"{self.tag} run_thread finished.")
+        self.run_thread = None
 
-        console.log(f"{self.tag} workers cleaned up")
+        if self.midi_listener is not None and self.midi_listener.running:
+            console.log(f"{self.tag} stopping midi listener during cleanup...")
+            self.midi_listener.stop()
 
-        # Update button states
-        self.stop_btn.setEnabled(False)
-        self.start_btn.setEnabled(True)
-        self.segments_label.setText("Segments Left: N/A")
+        if hasattr(self, "workers") and self.workers is not None:
+            pass
+
+        console.log(f"{self.tag} worker thread cleanup process complete.")
 
     def stop_clicked(self):
         self.cleanup_workers()
 
-        self.status.showMessage("stopped")
-        self.status_label.setText("Stopped")
-
-        # Return to parameter editor (original state)
-        if hasattr(self, "piano_roll"):
-            self.param_editor = ParameterEditorWidget(self.params, self)
-            self.setCentralWidget(self.param_editor)
-            self.status.showMessage("returned to parameter editor")
+        self.status.showMessage("stopping run...")
+        console.log(f"{self.tag} stop button clicked.")
+        self.status.showMessage("run stopped.")
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
 
     def closeEvent(self, event):
+        """
+        handle window close event.
+        """
+        console.log(f"{self.tag} close event triggered.")
         self.cleanup_workers()
+        console.log(f"{self.tag} saving console log...")
         super().closeEvent(event)
+        event.accept()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -380,8 +418,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def start_clicked(self):
         """
-        handle the start button click.
+        handles the start button click.
+        retrieves updated parameters from the editor and initiates the save and start sequence.
         """
-        params = self.param_editor.get_updated_params()
-        console.log(f"params: {params}")
-        self.save_and_start(params)
+        console.log(
+            f"{self.tag} start button clicked. retrieving params and starting..."
+        )
+        if hasattr(self, "param_editor") and self.param_editor is not None:
+            updated_params = self.param_editor.get_updated_params()
+            self.params = updated_params  # Update MainWindow's params
+            self.save_and_start(self.params)
+        else:
+            console.log(f"{self.tag} [red]param_editor not found. cannot start.[/red]")
+            # Optionally, try to start with existing self.params if that's a valid fallback
+            # self.save_and_start(self.params)
+            self.status.showMessage("Error: Parameter editor not available.")

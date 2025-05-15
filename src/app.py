@@ -79,6 +79,13 @@ def load_args(args):
         action="store_true",
         help="run again using last seed file",
     )
+    parser.add_argument(
+        "-m",
+        "--midi_control",
+        default=True,
+        action="store_true",
+        help="enable midi control",
+    )
     args = parser.parse_args()
 
     # first load template parameters
