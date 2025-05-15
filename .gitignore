@@ -9,7 +9,7 @@ notebooks/tmp
 inputs/*
 src/ml/outputs/checkpoints
 src/ml/outputs/runs
-src/ml/mt3/mt3
+src/ml/mt3
 tests/outputs
 notebooks/data
 notebooks/logs
