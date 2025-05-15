@@ -29,6 +29,8 @@ seeker:
   graph_steps: 9
   graph_track_revisit_interval: 3
   block_shift: True
+  probabilities_dist: [1/6, 1/6, 1/6, 1/6, 1/6, 1/6]
+  probability_transition_lookback: 3
 player:
   tag: "[blue]player[/blue]:"
   verbose: False

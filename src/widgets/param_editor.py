@@ -15,6 +15,11 @@ blocked_params = [
     "record",
     "channels",
     "system",
+    "user",
+    "remote_host",
+    "port",
+    "remote_dir",
+    "startup_delay",
 ]
 
 key_order = [
@@ -41,6 +46,7 @@ class ParameterEditorWidget(QtWidgets.QWidget):
                 "random",
                 "sequential",
                 "graph",
+                "probabilities",
             ],
             "seeker.metric": [
                 "pitch-histogram",
@@ -69,6 +75,33 @@ class ParameterEditorWidget(QtWidgets.QWidget):
         initialize the user interface.
         """
         main_layout = QtWidgets.QVBoxLayout(self)
+
+        # Apply a stylesheet for larger text
+        self.setStyleSheet(
+            """
+            QLabel {
+                font-size: 14px;
+            }
+            QLineEdit {
+                font-size: 14px;
+            }
+            QComboBox {
+                font-size: 14px;
+            }
+            QCheckBox {
+                font-size: 14px; /* Or adjust as needed for checkbox text if separate */
+            }
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 5px;
+            }
+        """
+        )
 
         # Scroll area setup
         scroll_area = QtWidgets.QScrollArea()
@@ -110,7 +143,9 @@ class ParameterEditorWidget(QtWidgets.QWidget):
 
         # Display top-level parameters
         keys = list(self.params.keys())
-        keys.sort(key=lambda x: key_order.index(x) if x in key_order else len(key_order))
+        keys.sort(
+            key=lambda x: key_order.index(x) if x in key_order else len(key_order)
+        )
         for key in keys:
             if (
                 isinstance(self.params[key], (int, float, str, bool))
@@ -122,7 +157,8 @@ class ParameterEditorWidget(QtWidgets.QWidget):
                 (dict, omegaconf.OmegaConf, omegaconf.dictconfig.DictConfig),
             ):
                 # Create section header
-                section_group = QtWidgets.QGroupBox(key)
+                formatted_section_title = key.replace("_", " ").title()
+                section_group = QtWidgets.QGroupBox(formatted_section_title)
                 section_layout = QtWidgets.QVBoxLayout(section_group)
 
                 # Add nested parameters
@@ -155,12 +191,25 @@ class ParameterEditorWidget(QtWidgets.QWidget):
         row_layout = QtWidgets.QHBoxLayout(frame)
         row_layout.setContentsMargins(0, 2, 0, 2)
 
-        label = QtWidgets.QLabel(key)
+        # Format display key
+        display_key = key.split(".")[-1]  # Get the part after the last dot
+        display_key = display_key.replace(
+            "_", " "
+        ).title()  # Replace underscores and capitalize
+
+        label = QtWidgets.QLabel(display_key)
         label.setFixedWidth(300)
         row_layout.addWidget(label)
 
         # Use appropriate widget based on parameter type and options
-        if key in self.param_options:
+        if key == "seeker.probabilities_dist":
+            # display list as comma-separated string
+            str_value = ", ".join(map(str, value))
+            widget = QtWidgets.QLineEdit(str_value)
+            widget.setFixedWidth(400)
+            row_layout.addWidget(widget)
+            self.param_widgets[key] = widget
+        elif key in self.param_options:
             widget = QtWidgets.QComboBox()
             widget.addItems(self.param_options[key])
             widget.setCurrentText(str(value))
@@ -204,7 +253,27 @@ class ParameterEditorWidget(QtWidgets.QWidget):
             elif isinstance(widget, QtWidgets.QLineEdit):
                 text_value = widget.text()
                 original_value = self.get_param_value(key)
-                if isinstance(original_value, int):
+
+                if key == "seeker.probabilities_dist":
+                    try:
+                        parsed_values = [
+                            float(x.strip()) for x in text_value.split(",")
+                        ]
+                        if len(parsed_values) == 6:
+                            value = parsed_values
+                        else:
+                            console.log(
+                                f"[red]Error: seeker.probabilities_dist requires 6 comma-separated numbers. "
+                                f"Got: {text_value}. Reverting to original.[/red]"
+                            )
+                            value = original_value  # revert
+                    except ValueError:
+                        console.log(
+                            f"[red]Error: Invalid input for seeker.probabilities_dist. "
+                            f"Expected comma-separated numbers. Got: {text_value}. Reverting to original.[/red]"
+                        )
+                        value = original_value  # revert
+                elif isinstance(original_value, int):
                     try:
                         value = int(text_value)
                     except ValueError:

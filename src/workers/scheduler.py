@@ -178,7 +178,10 @@ class Scheduler(Worker):
             f"{self.tag} added {ts_seg_len:.03f} seconds of music to queue ({self.n_files_queued} files in queue)"
         )
 
-        _ = self._copy_midi(pf_midi)
+        if self._copy_midi(pf_midi):
+            console.log(
+                f"{self.tag} copied {basename(pf_midi)} to playlist folder"
+            )
 
         return ts_seg_len, ts_offset, tt_max_abs_in_segment
 
@@ -319,8 +322,6 @@ class Scheduler(Worker):
         """
         midi = mido.MidiFile(pf_midi)
         out_path = os.path.join(self.p_playlist, os.path.basename(pf_midi))
-        if self.verbose:
-            console.log(f"{self.tag} copying midi to '{out_path}'")
         midi.save(out_path)
 
         return os.path.isfile(out_path)

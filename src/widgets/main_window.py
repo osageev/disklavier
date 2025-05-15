@@ -14,6 +14,7 @@ from utils import console, write_log
 from widgets.runner import RunWorker
 from widgets.param_editor import ParameterEditorWidget
 from widgets.piano_roll import PianoRollWidget
+from widgets.recording_widget import RecordingWidget
 
 from typing import Optional
 
@@ -43,6 +44,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # start by editing parameters
         self.param_editor = ParameterEditorWidget(self.params, self)
         self.setCentralWidget(self.param_editor)
+
+        # Instantiate RecordingWidget
+        self.recording_widget = RecordingWidget(self)
 
         # status bar
         self.status = self.statusBar()
@@ -217,7 +221,12 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         # connect seeker and panther
-        seeker.set_panther(panther)
+        self.workers.seeker.set_panther(self.workers.panther)
+        self.workers.midi_recorder.s_recording_progress.connect(
+            self.recording_widget.update_recording_time
+        )
+
+        self.status.showMessage("workers initialized")
 
         # --- initialize midi control listener(s) ---
         if hasattr(self.args, "midi_control") and self.args.midi_control:
@@ -282,14 +291,32 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status.showMessage("initializing workers")
         self.status_label.setText("Initializing workers")
         self.init_workers()
-        self.status.showMessage("system initialization complete")
-        self.status_label.setText("System initialization complete")
+
+        self.workers.midi_recorder.s_recording_progress.connect(
+            self.recording_widget.update_recording_time
+        )
+
+        self.status.showMessage("system initialization complete, preparing UI")
+        self.status_label.setText("System initialization complete, preparing UI")
+
+        # Switch to RecordingWidget
+        self.recording_widget.reset_widget()
+        self.setCentralWidget(self.recording_widget)
+        self.status.showMessage("recording view active")
+        self.status_label.setText("Recording View")
 
         # Start the main processing in a QThread
         self.run_thread = RunWorker(self)
         self.run_thread.s_start_time.connect(self.update_start_time)
         self.run_thread.s_status.connect(self.update_status)
         self.run_thread.s_segments_remaining.connect(self.update_segments_display)
+        # Connect RunWorker signals to RecordingWidget
+        self.run_thread.s_augmentation_started.connect(
+            self.recording_widget.init_augmentation_progress
+        )
+        self.run_thread.s_embedding_processed.connect(
+            self.recording_widget.update_augmentation_progress
+        )
         self.run_thread.start()
 
         # Enable stop button now that system is running
@@ -395,11 +422,23 @@ class MainWindow(QtWidgets.QMainWindow):
     def stop_clicked(self):
         self.cleanup_workers()
 
-        self.status.showMessage("stopping run...")
-        console.log(f"{self.tag} stop button clicked.")
-        self.status.showMessage("run stopped.")
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
+        self.status.showMessage("stopped")
+        self.status_label.setText("Stopped")
+
+        # Reset recording widget state
+        if hasattr(self, "recording_widget"):
+            self.recording_widget.reset_widget()
+
+        # Return to parameter editor (original state)
+        if hasattr(self, "piano_roll"):
+            self.param_editor = ParameterEditorWidget(self.params, self)
+            self.setCentralWidget(self.param_editor)
+            self.status.showMessage("returned to parameter editor")
+        elif hasattr(
+            self, "param_editor"
+        ):  # Ensure param_editor exists if piano_roll was never shown
+            self.setCentralWidget(self.param_editor)
+            self.status.showMessage("returned to parameter editor")
 
     def closeEvent(self, event):
         """

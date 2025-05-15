@@ -3,6 +3,7 @@ import mido
 import time
 from datetime import datetime, timedelta
 from threading import Thread, Event
+from PySide6 import QtCore
 
 from .worker import Worker
 from utils import console, tick
@@ -12,12 +13,14 @@ from utils.udp import send_udp
 from typing import List, Optional
 
 
-class MidiRecorder(Worker):
+class MidiRecorder(Worker, QtCore.QObject):
+    s_recording_progress = QtCore.Signal(float, float)
     recorded_notes: List[mido.Message] = []
     is_recording: bool = False
     stop_event: Optional[Event] = None
     midi_thread: Thread
     ts_window_duration: float = 1.0
+    first_note_timestamp: Optional[datetime] = None
 
     # published velocity statistics
     _avg_velocity: float = 0.0
@@ -67,6 +70,7 @@ class MidiRecorder(Worker):
         bpm: int,
         recording_file_path: str,
     ):
+        QtCore.QObject.__init__(self)
         super().__init__(params, bpm=bpm)
         self.pf_midi_recording = recording_file_path
         self.ts_window_duration = 60.0 / self.bpm  # 1 beat in seconds
@@ -185,7 +189,8 @@ class MidiRecorder(Worker):
                     # therefore, start recording
                     elif self.is_recording == False:
                         # start recording
-                        t_recording_start = datetime.now()
+                        self.recording_start_timestamp = datetime.now()
+                        t_recording_start = self.recording_start_timestamp
                         console.log(
                             f"{self.tag} recording at {self.bpm} BPM from {t_recording_start.strftime('%H:%M:%S.%f')}"
                         )
@@ -213,9 +218,19 @@ class MidiRecorder(Worker):
 
                 elif self.is_recording and msg.type in ["note_on", "note_off"]:
                     current_time = datetime.now()
+
+                    # emit progress if first_note_timestamp is set
+                    if self.first_note_timestamp:
+                        elapsed_seconds = (
+                            current_time - self.first_note_timestamp
+                        ).total_seconds()
+                        elapsed_beats = elapsed_seconds * (self.bpm / 60.0)
+                        self.s_recording_progress.emit(elapsed_seconds, elapsed_beats)
+
                     if len(self.recorded_notes) == 0:
                         # set times to start from this point
                         start_time = datetime.now()
+                        self.first_note_timestamp = start_time
                         console.log(f"{self.tag} start_time: {start_time}")
 
                         # calculate ticks since the start of the previous beat
@@ -266,6 +281,8 @@ class MidiRecorder(Worker):
             )
             time.sleep(wait_time)
 
+        self.passive_recording_start_timestamp = datetime.now()
+
         # initialize velocity tracking variables
         self._velocity_window = []  # list of (timestamp, velocity) tuples
 
@@ -278,6 +295,14 @@ class MidiRecorder(Worker):
             for msg in inport:
                 # record note
                 current_time = datetime.now()
+
+                # emit progress for passive recording
+                elapsed_seconds = (
+                    current_time - self.passive_recording_start_timestamp
+                ).total_seconds()
+                elapsed_beats = elapsed_seconds * (self.bpm / 60.0)
+                self.s_recording_progress.emit(elapsed_seconds, elapsed_beats)
+
                 # calculate time in ticks since last message
                 time_diff = (current_time - last_msg_time).total_seconds()
                 msg = msg.copy(time=int(time_diff * TICKS_PER_BEAT * self.bpm / 60))

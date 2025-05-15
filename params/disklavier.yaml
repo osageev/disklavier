@@ -7,17 +7,17 @@ augmentation:
   rearrange: True
   remove: 0.5
   target_notes_remaining: ~
-  notes_removed_per_step: 2
+  notes_removed_per_step: 1
   num_variations_per_step: 3
   num_plays_per_segment_version: 1
-  total_segments_for_sequence: ~
+  total_segments_for_sequence: 1
 scheduler:
   verbose: True
 seeker:
   verbose: True
   seed: 9878761
   system: "live"
-  mode: "best" # best easy repeat random sequential playlist graph
+  mode: "probabilities" # best easy repeat random sequential playlist graph probabilities
   match: "current" # current, next, prev, next 2, prev 2
   metric: "specdiff" # pitch-histogram specdiff clf-4note clf-speed clf-tpose clamp
   graph_steps: 9
