@@ -69,10 +69,6 @@ class RunWorker(QtCore.QThread):
             self.player_segment_beat_interval * TICKS_PER_BEAT
         )
 
-        if hasattr(self.params, "player_embedding_diff_threshold"):
-            self.player_embedding_diff_threshold = (
-                self.params.player_embedding_diff_threshold
-            )
         self.staff.seeker.s_embedding_calculated.connect(self.s_embedding_processed)
 
         # file paths
@@ -257,27 +253,28 @@ class RunWorker(QtCore.QThread):
                             )
 
                 # --- player tracking ---
-                current_elapsed_s = (
-                    datetime.now() - self.td_playback_start
-                ).total_seconds()
-                current_beat = current_elapsed_s * self.params.bpm / 60.0
+                if self.params.player_tracking:
+                    ts_current_elapsed = (
+                        datetime.now() - self.td_playback_start
+                    ).total_seconds()
+                    current_beat = ts_current_elapsed * self.params.bpm / 60.0
 
-                if (
-                    current_beat // self.player_segment_beat_interval
-                    > self.last_checked_beat // self.player_segment_beat_interval
-                ):
-                    if self.args.verbose:
-                        console.log(
-                            f"{self.tag} Checking player embedding at beat {current_beat:.2f}"
-                        )
-                    self.last_checked_beat = current_beat
-                    try:
-                        self._check_player_embedding()
-                    except Exception as e:
-                        console.print_exception(show_locals=True)
-                        console.log(
-                            f"{self.tag} [red]Error checking player embedding: {e}"
-                        )
+                    if (
+                        current_beat // self.player_segment_beat_interval
+                        > self.last_checked_beat // self.player_segment_beat_interval
+                    ):
+                        if self.args.verbose:
+                            console.log(
+                                f"{self.tag} checking player embedding at beat {current_beat:.2f}"
+                            )
+                        self.last_checked_beat = current_beat
+                        try:
+                            self._check_player_embedding()
+                        except Exception as e:
+                            console.print_exception(show_locals=True)
+                            console.log(
+                                f"{self.tag} [red]error checking player embedding: {e}"
+                            )
                 # small sleep to prevent busy-waiting
                 time.sleep(0.01)
 
@@ -573,7 +570,7 @@ class RunWorker(QtCore.QThread):
             diff_magnitude = np.linalg.norm(embedding_diff)
             if self.args.verbose:
                 console.log(
-                    f"{self.tag} player embedding diff magnitude: {diff_magnitude:.4f}"
+                    f"{self.tag} player embedding diff magnitude: {diff_magnitude:.4f} (threshold is: {self.player_embedding_diff_threshold:.4f})"
                 )
 
             if diff_magnitude > self.player_embedding_diff_threshold:
@@ -609,7 +606,10 @@ class RunWorker(QtCore.QThread):
     def _adjust_playback_trajectory(self, embedding_diff: np.ndarray):
         """
         Adjusts the upcoming playback based on the embedding difference.
+
+        WARNING: This function is not thread-safe and is currently disabled.
         """
+        raise NotImplementedError("this method is not implemented yet.")
         # 1. Calculate Target Time & Tick
         target_dt = datetime.now() + timedelta(seconds=self.adjustment_lookahead_s)
         target_elapsed_s = (target_dt - self.td_playback_start).total_seconds()

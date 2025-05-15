@@ -5,7 +5,7 @@ initialization: "recording" # kickstart random recording audio
 kickstart_path: "data/datasets/20250320/augmented/20240429-068-06_0084-0091_t10s03.mid"
 # kickstart_path: "data/datasets/20250320/augmented/20241229-094-10_0091-0096_t00s00.mid"
 # kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid" # path to midi or matches.json
-player_embedding_diff_threshold: 1.0
+player_tracking: false
 augmentation:
   rearrange: ~
   remove: ~
