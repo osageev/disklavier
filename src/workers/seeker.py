@@ -363,7 +363,6 @@ class Seeker(Worker, QtCore.QObject):
             new_query_file = self.neighbor_table.loc[
                 f"{track}_{segment}", self.params.match
             ]
-            # Reconstruct the key with augmentation
             new_query_file_key = f"{new_query_file}_{augmentation}"
             if new_query_file_key is not None:
                 console.log(
@@ -374,7 +373,6 @@ class Seeker(Worker, QtCore.QObject):
         # --- get query embedding ---
         # first, look in existing index then, if no embedding is found, calculate manually
         try:
-            # ue dictionary lookup instead of list.index() with fallback
             try:
                 embedding = self.faiss_index.reconstruct(int(self.filename_to_index[query_file]))  # type: ignore
             except KeyError:
@@ -394,9 +392,8 @@ class Seeker(Worker, QtCore.QObject):
             self.filenames.append(query_file)
             self.filename_to_index[query_file] = len(self.filenames) - 1
             console.log(
-                f"{self.tag} added [dark_red bold]{query_file}[/dark_red bold] to index"
+                f"{self.tag} added [green bold]{query_file}[/green bold] to index"
             )
-        # got embedding, reshape for faiss
         query_embedding = np.array(
             embedding,
             dtype=np.float32,
@@ -496,8 +493,11 @@ class Seeker(Worker, QtCore.QObject):
                 self._get_random()
             )  # TODO: modify this to get nearest neighbor from different track
 
-    def _get_neighbor(self) -> str:
-        current_file = os.path.basename(self.played_files[-1])
+    def _get_neighbor(self, filename: Optional[str] = None) -> str:
+        if filename is None:
+            current_file = basename(self.played_files[-1])
+        else:
+            current_file = basename(filename)
 
         # transforms not needed
         # TODO: panther breaks this
@@ -935,39 +935,33 @@ class Seeker(Worker, QtCore.QObject):
         console.log(f"{self.tag} probabilities mode selected action: '{chosen_action}'")
 
         # --- get query file key ---
-        current_played_file_key = basename(self.played_files[-1])
-        current_played_file_base_for_neighbor = os.path.splitext(
-            self.base_file(self.played_files[-1])
-        )[0]
-        current_augmentation_key_part = current_played_file_key.replace(
-            current_played_file_base_for_neighbor, "", 1
-        )
+        current_played_file = basename(self.played_files[-1])
+        current_played_file_base = self.base_file(current_played_file).split(".")[0]
+        augmentation_key_part = current_played_file.split("_")[-1]
+        console.log(f"{self.tag} current augmentation key part: '{augmentation_key_part}'")
+        
         query_file_base_key: str
-        augmentation_key_part: str
-
         if chosen_action == "current" or chosen_action == "transition":
-            query_file_base_key = current_played_file_base_for_neighbor
-            augmentation_key_part = current_augmentation_key_part
+            query_file_base_key = current_played_file_base
         else:  # "next", "next_2", "prev", "prev_2"
             try:
                 neighbor = self.neighbor_table.loc[
-                    current_played_file_base_for_neighbor, chosen_action
+                    current_played_file_base, chosen_action
                 ]
-                # check for NaN or None from table
+
                 if pd.isna(neighbor) or neighbor is None:
                     raise KeyError
+                
                 query_file_base_key = str(neighbor)
-                augmentation_key_part = basename(self.played_files[-1]).split("_")[-1]
             except KeyError:
                 console.log(
                     f"{self.tag} [yellow]neighbor '{chosen_action}' not found for "
-                    f"'{current_played_file_base_for_neighbor}'. falling back to 'current'.[/yellow]"
+                    f"'{current_played_file_base}'. falling back to 'current'.[/yellow]"
                 )
-                query_file_base_key = current_played_file_base_for_neighbor
-                augmentation_key_part = current_augmentation_key_part
+                query_file_base_key = current_played_file_base
 
         if "player" not in query_file_base_key:
-            full_query_file_key = query_file_base_key + augmentation_key_part
+            full_query_file_key = query_file_base_key + "_" + augmentation_key_part
         else:
             full_query_file_key = query_file_base_key
         if self.verbose:

@@ -64,13 +64,13 @@ panther:
   remote_dir: "/home/finlay/disklavier/data/outputs/uploads"
 midi_control:
   cc_listener:
-    enable: true
+    enable: false
     port_name: "nanoKONTROL2 SLIDER/KNOB"
     cc_number: 23
     min_threshold: 0.0
     max_threshold: 10.0
     map_cc_127_to_inf: true
   transpose_listener:
-    enable: true
+    enable: false
     port_name: "LPK25"
     middle_c_note_number: 60
