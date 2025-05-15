@@ -46,7 +46,8 @@ class Player(Worker):
             exit(1)
         self.td_start = t_start
         self.td_last_note = t_start
-        self.current_transposition_interval = 0  # Added for transposition
+        self.current_transposition_interval = 0
+        self.active_notes = {}
 
         # if self.verbose:
         console.log(f"{self.tag} settings:\n{self.__dict__}")
@@ -144,6 +145,22 @@ class Player(Worker):
             the number of semitones to transpose.
             positive values transpose up, negative values transpose down.
         """
+        # turn off any active notes with the current transposition before changing it
+        for original_note, transposed_note_to_turn_off in list(
+            self.active_notes.items()
+        ):
+            # we use the transposed_note_to_turn_off which was stored when the note_on was sent
+            note_off_msg = mido.Message(
+                "note_off", note=transposed_note_to_turn_off, velocity=0
+            )
+            self.midi_port.send(note_off_msg)
+            if self.verbose:
+                console.log(
+                    f"{self.tag} sending preemptive note_off for {original_note} (played as {transposed_note_to_turn_off}) due to transposition change"
+                )
+            # remove from active_notes as we've just turned it off
+            del self.active_notes[original_note]
+
         self.current_transposition_interval = interval
         console.log(f"{self.tag} playback transposition set to {interval} semitones.")
 
@@ -238,6 +255,18 @@ class Player(Worker):
                         f"{self.tag} transposing note {original_note} to {transposed_msg.note} (interval: {self.current_transposition_interval})"
                     )
                 final_msg_to_send = transposed_msg
+
+            # track active notes based on original note pitch
+            if final_msg_to_send.type == "note_on" and final_msg_to_send.velocity > 0:
+                # store the original note and the actual pitch it was played at (after transposition)
+                # msg.note is the original note before transposition for note_on
+                self.active_notes[msg.note] = final_msg_to_send.note
+            elif final_msg_to_send.type == "note_off" or (
+                final_msg_to_send.type == "note_on" and final_msg_to_send.velocity == 0
+            ):
+                # msg.note is the original note before transposition for note_off
+                if msg.note in self.active_notes:
+                    del self.active_notes[msg.note]
 
             self.midi_port.send(final_msg_to_send)
             self.n_notes += 1

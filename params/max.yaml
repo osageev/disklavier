@@ -35,3 +35,11 @@ audio:
   verbose: True
   midi_port: "LPK25"
   record: 64
+midi_control:
+  cc_listener:
+    enable: false
+    port_name: "nanoKONTROL2 SLIDER/KNOB"
+    cc_number: 23
+  transpose_listener:
+    enable: false
+    port_name: "LPK25"

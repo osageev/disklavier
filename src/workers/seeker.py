@@ -929,7 +929,6 @@ class Seeker(Worker, QtCore.QObject):
         current_played_file = basename(self.played_files[-1])
         current_played_file_base = self.base_file(current_played_file).split(".")[0]
         augmentation_key_part = current_played_file.split("_")[-1]
-        console.log(f"{self.tag} current augmentation key part: '{augmentation_key_part}'")
         
         query_file_base_key: str
         if chosen_action == "current" or chosen_action == "transition":
@@ -1002,7 +1001,7 @@ class Seeker(Worker, QtCore.QObject):
                 if candidate_track in blocked_tracks:
                     if self.verbose:
                         console.log(
-                            f"{self.tag} probabilities: skipping transition from '{candidate_filename_key}' to blocked track '{candidate_track}'"
+                            f"{self.tag}\t\t[grey50 italic]probabilities: skipping transition from '{candidate_filename_key}' to blocked track '{candidate_track}'[/grey50 italic]"
                         )
                     continue
 

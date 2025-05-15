@@ -65,12 +65,12 @@ panther:
 midi_control:
   cc_listener:
     enable: false
-    port_name: "nanoKONTROL2 SLIDER/KNOB"
-    cc_number: 23
+    port_name: "USB Oxygen 8 v2" #"nanoKONTROL2 SLIDER/KNOB"
+    cc_number: 72 # 23
     min_threshold: 0.0
     max_threshold: 10.0
     map_cc_127_to_inf: true
   transpose_listener:
     enable: false
-    port_name: "LPK25"
+    port_name: "USB Oxygen 8 v2" #"LPK25"
     middle_c_note_number: 60
