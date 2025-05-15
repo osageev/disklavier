@@ -260,9 +260,16 @@ class ParameterEditorWidget(QtWidgets.QWidget):
             row_layout.addWidget(widget)
             self.param_widgets[key] = widget
         elif isinstance(value, bool):
+            value_container = QtWidgets.QWidget()
+            value_container.setFixedWidth(400)
+            inner_layout = QtWidgets.QHBoxLayout(value_container)
+            inner_layout.setContentsMargins(0, 0, 0, 0)
+            inner_layout.addSpacing(4)
             widget = QtWidgets.QCheckBox()
             widget.setChecked(value)
-            row_layout.addWidget(widget)
+            inner_layout.addWidget(widget)
+            inner_layout.addStretch(1)
+            row_layout.addWidget(value_container)
             self.param_widgets[key] = widget
         elif isinstance(value, (int, float)):
             widget = QtWidgets.QLineEdit(str(value))
