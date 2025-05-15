@@ -1,6 +1,5 @@
 import os
 import yaml
-import mido
 from queue import Queue
 from threading import Event
 from omegaconf import OmegaConf
@@ -10,7 +9,7 @@ from datetime import datetime
 import workers
 from workers import Staff
 from workers.midi_control_listener import MidiControlListener
-from utils import console, write_log
+from utils import console, write_log, midi
 from widgets.runner import RunWorker
 from widgets.param_editor import ParameterEditorWidget
 from widgets.piano_roll import PianoRollWidget
@@ -357,7 +356,6 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         self.status.showMessage(message)
         self._update_status_style(message)
-        # self.segments_label.setText("Segments Left: N/A")
 
     def _update_status_style(self, message: str):
         # default style
@@ -412,6 +410,29 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "workers") and self.workers is not None:
             pass
 
+        # Generate piano roll visualization
+        if hasattr(self, "pf_master_recording") and os.path.exists(
+            self.pf_master_recording
+        ):
+            console.log(f"{self.tag} Generating piano roll visualization...")
+            try:
+
+                midi.generate_piano_roll(self.pf_master_recording)
+            except ImportError:
+                console.log(
+                    f"{self.tag} [red]Failed to import midi module for piano roll generation.[/red]"
+                )
+            except Exception as e:
+                console.log(f"{self.tag} [yellow]Failed to generate piano roll: {e}")
+        elif hasattr(self, "pf_master_recording"):
+            console.log(
+                f"{self.tag} [yellow]Master recording not found at {self.pf_master_recording}, skipping piano roll generation."
+            )
+        else:
+            console.log(
+                f"{self.tag} [yellow]pf_master_recording attribute not found, skipping piano roll generation."
+            )
+
         console.log(f"{self.tag} worker thread cleanup process complete.")
 
     def start_clicked(self):
@@ -422,16 +443,9 @@ class MainWindow(QtWidgets.QMainWindow):
         console.log(
             f"{self.tag} start button clicked. retrieving params and starting..."
         )
-        if hasattr(self, "param_editor") and self.param_editor is not None:
-            updated_params = self.param_editor.get_updated_params()
-            self.params = updated_params  # Update MainWindow's params
-            self.save_and_start(self.params)
-        else:
-            console.log(f"{self.tag} [red]param_editor not found. cannot start.[/red]")
-            # Optionally, try to start with existing self.params if that's a valid fallback
-            # self.save_and_start(self.params)
-            self.status.showMessage("Error: Parameter editor not available.")
-
+        updated_params = self.param_editor.get_updated_params()
+        self.params = updated_params
+        self.save_and_start(self.params)
 
     def stop_clicked(self):
         self.cleanup_workers()
@@ -462,12 +476,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cleanup_workers()
         console.log(f"{self.tag} saving console log...")
 
-        with open(os.path.join(self.p_log, "console.log"), "w") as f:
-            f.write(console.export_text())
+        # save console log
+        try:
+            console.save_text(os.path.join(self.p_log, f"console.log"))
+        except Exception as e:
+            print(
+                f"Error saving console log: {e}"
+            )  # Use print as console might be broken
         super().closeEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.window_height = self.height()
         self.window_width = self.width()
-

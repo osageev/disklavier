@@ -342,7 +342,7 @@ class RunWorker(QtCore.QThread):
                     f"{self.tag} [yellow]MIDI recorder was not active or failed to stop."
                 )
 
-        # --- Final Saving and Cleanup ---
+        # --- final saving and cleanup ---
         console.log(f"{self.tag} Finalizing recordings and logs...")
         # close raw notes file if scheduler exists and file is open
         if (
@@ -368,7 +368,7 @@ class RunWorker(QtCore.QThread):
                 f"{self.tag} [yellow]Raw notes file not found, skipping system recording generation."
             )
 
-        # Print playlist
+        # print playlist
         if os.path.exists(self.pf_playlist):
             table = Table(title="PLAYLIST")
             try:
@@ -391,33 +391,20 @@ class RunWorker(QtCore.QThread):
                 f"{self.tag} [yellow]Playlist file not found: {self.pf_playlist}"
             )
 
-        # Generate piano roll visualization
-        if os.path.exists(self.pf_master_recording):
-            console.log(f"{self.tag} Generating piano roll visualization...")
-            try:
-                midi.generate_piano_roll(self.pf_master_recording)
-            except Exception as e:
-                console.log(f"{self.tag} [yellow]Failed to generate piano roll: {e}")
-        else:
-            console.log(
-                f"{self.tag} [yellow]Master recording not found, skipping piano roll generation."
-            )
-
-        # Save console log
-        try:
-            console.save_text(
-                os.path.join(
-                    self.p_log, f"{self.td_system_start.strftime('%y%m%d-%H%M%S')}.log"
-                )
-            )
-        except Exception as e:
-            print(
-                f"Error saving console log: {e}"
-            )  # Use print as console might be broken
+        # # save console log
+        # try:
+        #     console.save_text(
+        #         os.path.join(
+        #             self.p_log, f"{self.td_system_start.strftime('%y%m%d-%H%M%S')}.log"
+        #         )
+        #     )
+        # except Exception as e:
+        #     print(
+        #         f"Error saving console log: {e}"
+        #     )  # Use print as console might be broken
 
         console.log(f"{self.tag}[green bold] Shutdown complete.")
-        # Optional: Signal main window about completion?
-        # self.finished.emit() # If using QThread's finished signal
+        self.finished.emit()
 
     def _queue_file(self, file_path: str, similarity: Optional[float] = None) -> None:
         # Check if file exists before queueing
@@ -450,21 +437,8 @@ class RunWorker(QtCore.QThread):
             self.n_files_queued,
             start_time.strftime("%y-%m-%d %H:%M:%S"),
             file_path,
-            f"{similarity:.5f}" if similarity is not None else "----",
+            f"{similarity:.4f}" if similarity is not None else "----",
         )
-        # Ensure playlist path is valid before writing
-        if hasattr(self, "pf_playlist") and self.pf_playlist:
-            write_log(
-                self.pf_playlist,
-                self.n_files_queued,
-                start_time.strftime("%y-%m-%d %H:%M:%S"),
-                file_path,
-                f"{similarity:.4f}" if similarity is not None else "----",
-            )
-        else:
-            console.log(
-                f"{self.tag} [yellow]Playlist path not set, skipping log write."
-            )
 
     def _extract_player_segment(self) -> Optional[str]:
         """

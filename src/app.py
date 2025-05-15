@@ -16,6 +16,7 @@ def main(args, params):
     main_window = MainWindow(args, params)
     main_window.args = args
     main_window.show()
+    console.log(f"session complete")
     sys.exit(app.exec())
 
 
