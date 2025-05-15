@@ -19,6 +19,7 @@ class Scheduler(Worker):
     n_files_queued: int = 0
     n_beats_per_segment: int = 8
     queued_files: list[str] = []
+    first_file_avg_velocity: Optional[float] = None
 
     def __init__(
         self,
@@ -61,7 +62,6 @@ class Scheduler(Worker):
         midi_in = mido.MidiFile(pf_midi)
 
         # --- calculate offset ---
-        # --- determine times ---
         # number of seconds/ticks from the start of playback to start playing the file
         if (
             self.recording_mode
@@ -103,6 +103,73 @@ class Scheduler(Worker):
                 f"{self.tag}[red] midi file ticks per beat mismatch!\n\tfile has {midi_in.ticks_per_beat} tpb but expected {TICKS_PER_BEAT}"
             )
 
+        # --- velocity normalization ---
+        if self.params.scale_velocity:
+            note_on_messages = []
+            for track in midi_in.tracks:
+                if track[0].type == "track_name" and track[0].name == "metronome":
+                    continue
+                for msg in track:
+                    if msg.type == "note_on" and msg.velocity > 0:
+                        note_on_messages.append(msg)
+
+            if note_on_messages:
+                velocities = [m.velocity for m in note_on_messages]
+                current_avg_velocity = (
+                    sum(velocities) / len(velocities) if velocities else 0.0
+                )
+
+                if self.first_file_avg_velocity is None:
+                    if current_avg_velocity > 0:
+                        self.first_file_avg_velocity = current_avg_velocity
+                        console.log(
+                            f"{self.tag} first file enqueued, average velocity set to {self.first_file_avg_velocity:.2f}"
+                        )
+                    else:
+                        console.log(
+                            f"{self.tag} [yellow]first file enqueued, but no valid notes with positive velocity to set average velocity.[/yellow]"
+                        )
+                elif self.first_file_avg_velocity is not None:
+                    console.log(
+                        f"{self.tag} normalizing to target average velocity: {self.first_file_avg_velocity:.2f}. Original avg: {current_avg_velocity:.2f}"
+                    )
+
+                    # 1. clamp velocity to below max
+                    for msg in note_on_messages:
+                        if msg.velocity > self.params.max_velocity:
+                            console.log(
+                                f"{self.tag}\t[grey50]clamping velocity: {msg.velocity} -> {self.params.max_velocity}[/grey50]"
+                            )
+                            msg.velocity = self.params.max_velocity
+
+                    velocities_after_clamp = [m.velocity for m in note_on_messages]
+                    avg_velocity_after_clamp = (
+                        sum(velocities_after_clamp) / len(velocities_after_clamp)
+                        if velocities_after_clamp
+                        else 0.0
+                    )
+
+                    # 2. rescale velocity
+                    scale_factor = (
+                        self.first_file_avg_velocity / avg_velocity_after_clamp
+                    )
+                    console.log(f"{self.tag} scaling velocity by {scale_factor:.2f}")
+                    for msg in note_on_messages:
+                        new_velocity = int(round(msg.velocity * scale_factor))
+                        msg.velocity = max(
+                            0, min(self.params.max_velocity, new_velocity)
+                        )
+
+                    final_velocities = [m.velocity for m in note_on_messages]
+                    final_avg_vel = sum(final_velocities) / len(final_velocities)
+                    console.log(
+                        f"{self.tag} velocities normalized. avg after clamp: {avg_velocity_after_clamp:.2f}, final avg: {final_avg_vel:.2f}"
+                    )
+            else:
+                console.log(
+                    f"{self.tag} no note_on messages found in {basename(pf_midi)} for velocity normalization."
+                )
+
         console.log(
             f"{self.tag} adding file {self.n_files_queued} to queue '{pf_midi}' with offset {tt_offset} ({ts_offset:.02f} s -> {self.td_start + timedelta(seconds=ts_offset):%H:%M:%S.%f})"
         )
@@ -137,7 +204,9 @@ class Scheduler(Worker):
                         else:
                             current_tt_abs = tt_upper_bound
                     self.tt_all_messages.append(current_tt_abs)
-                    tt_max_abs_in_segment = max(tt_max_abs_in_segment, current_tt_abs)  # update max tick time
+                    tt_max_abs_in_segment = max(
+                        tt_max_abs_in_segment, current_tt_abs
+                    )  # update max tick time
 
                     # console.log(f"{self.tag} adding message to queue: ({current_tt_abs}, ({msg}))")
 
@@ -179,9 +248,7 @@ class Scheduler(Worker):
         )
 
         if self._copy_midi(pf_midi):
-            console.log(
-                f"{self.tag} copied {basename(pf_midi)} to playlist folder"
-            )
+            console.log(f"{self.tag} copied {basename(pf_midi)} to playlist folder")
 
         return ts_seg_len, ts_offset, tt_max_abs_in_segment
 

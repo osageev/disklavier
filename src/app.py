@@ -16,7 +16,6 @@ def main(args, params):
     main_window = MainWindow(args, params)
     main_window.args = args
     main_window.show()
-    console.log(f"session complete")
     sys.exit(app.exec())
 
 
@@ -112,6 +111,7 @@ def load_args(args):
     # copy these so that they only have to be specified once
     params.scheduler.n_beats_per_segment = params.n_beats_per_segment
     params.metronome.n_beats_per_segment = params.n_beats_per_segment
+    params.player.max_velocity = params.scheduler.max_velocity
 
     if args.replay:
         # get path to last seed file

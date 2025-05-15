@@ -87,8 +87,8 @@ class Player(Worker):
             return True
 
     def adjust_playback_based_on_velocity(self):
-        if self._avg_velocity > 0:  # and self.verbose:
-            if self._last_factor != self._velocity_adjustment_factor:
+        if self._avg_velocity > 0:
+            if self._last_factor != self._velocity_adjustment_factor and self.verbose:
                 console.log(
                     f"{self.tag} adjusting playback based on velocity: avg={self._avg_velocity:.2f}, min={self._min_velocity}, max={self._max_velocity}"
                 )
@@ -227,7 +227,7 @@ class Player(Worker):
             if msg.type == "note_on" and msg.velocity > 0:
                 original_velocity = msg.velocity
                 adjusted_velocity = min(
-                    127,
+                    self.params.max_velocity,
                     max(1, int(original_velocity * self._velocity_adjustment_factor)),
                 )
 

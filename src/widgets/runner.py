@@ -36,7 +36,6 @@ class RunWorker(QtCore.QThread):
     stop_requested: bool = False
     ts_system_start = datetime.now()
     td_playback_start = datetime.now()
-    player_embedding_diff_threshold = np.inf
     # signals
     s_status = QtCore.Signal(str)
     s_start_time = QtCore.Signal(datetime)
@@ -51,6 +50,7 @@ class RunWorker(QtCore.QThread):
     q_gui = PriorityQueue()
 
     # player tracking
+    player_embedding_diff_threshold: float = 3.0
     last_checked_beat: float = 0.0
     previous_player_embedding: Optional[np.ndarray] = None
     playback_cutoff_tick: float = float("inf")
@@ -205,14 +205,8 @@ class RunWorker(QtCore.QThread):
 
             # queue recording augmentations
             if self.pf_augmentations is not None:
-                # get average velocity of next match
-                next_avg_velocity = midi.get_average_velocity(self.pf_augmentations[-1])
                 console.log(
-                    f"{self.tag} first match average velocity: {next_avg_velocity}"
-                )
-                # scale velocity of next match
-                midi.ramp_vel(
-                    self.pf_augmentations[:-1], next_avg_velocity, self.args.bpm
+                    f"{self.tag} queueing {len(self.pf_augmentations)} augmentations for player recording."
                 )
                 for aug in self.pf_augmentations:
                     self._queue_file(aug, None)
@@ -243,7 +237,7 @@ class RunWorker(QtCore.QThread):
                     pass
 
                 # add midi to buffer if needed
-                if remaining_seconds < self.params.startup_delay + 1:
+                if remaining_seconds < self.params.startup_delay / 2:
                     if self.n_files_queued < self.params.n_transitions:
                         pf_next_file, similarity = self.staff.seeker.get_next()
                         self._queue_file(pf_next_file, similarity)
@@ -286,7 +280,7 @@ class RunWorker(QtCore.QThread):
             # Wait for player thread to finish naturally if it hasn't already
             if self.th_player.is_alive():
                 console.log(f"{self.tag}\twaiting for player thread to finish...")
-                self.th_player.join(timeout=5.0)  # Wait up to 5 seconds
+                self.th_player.join(timeout=0.1)
                 if self.th_player.is_alive():
                     console.log(
                         f"{self.tag} [yellow]Player thread did not finish cleanly."
@@ -549,7 +543,7 @@ class RunWorker(QtCore.QThread):
 
             if diff_magnitude > self.player_embedding_diff_threshold:
                 console.log(
-                    f"{self.tag} [yellow]embedding diff threshold exceeded ({diff_magnitude:.4f} > {self.player_embedding_diff_threshold}). adjusting trajectory..."
+                    f"{self.tag} [chartreuse2 bold]embedding diff threshold exceeded ({diff_magnitude:.4f} > {self.player_embedding_diff_threshold}). adjusting trajectory..."
                 )
                 try:
                     # self._adjust_playback_trajectory(embedding_diff)
@@ -564,11 +558,6 @@ class RunWorker(QtCore.QThread):
                     )
                     # reset cutoff just in case it was set before error
                     self.playback_cutoff_tick = float("inf")
-            else:
-                if self.args.verbose:
-                    console.log(
-                        f"{self.tag} player embedding difference below threshold."
-                    )
         else:
             if self.args.verbose:
                 console.log(

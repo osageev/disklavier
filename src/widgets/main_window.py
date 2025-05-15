@@ -474,15 +474,15 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         console.log(f"{self.tag} close event triggered.")
         self.cleanup_workers()
-        console.log(f"{self.tag} saving console log...")
+        console.log(
+            f"{self.tag} saving console log to '{os.path.join(self.p_log, f'console.log')}'"
+        )
 
         # save console log
         try:
             console.save_text(os.path.join(self.p_log, f"console.log"))
         except Exception as e:
-            print(
-                f"Error saving console log: {e}"
-            )  # Use print as console might be broken
+            print(f"Error saving console log: {e}")
         super().closeEvent(event)
 
     def resizeEvent(self, event):

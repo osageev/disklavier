@@ -18,6 +18,8 @@ scheduler:
   tag: "[green]schedl[/green]:"
   verbose: False
   lead_bar: True
+  scale_velocity: true
+  max_velocity: 90
 seeker:
   tag: "[yellow]seeker[/yellow]:"
   verbose: True
