@@ -113,24 +113,20 @@ class Player(Worker):
         float
             Factor to scale message velocities.
         """
-        # TODO: move this to class variables
-        min_expected_velocity = 10
-        max_expected_velocity = 100
-        min_adjustment = 0.2  # minimum adjustment factor
-        max_adjustment = 1.5  # maximum adjustment factor
 
         # default for middle-range velocity
         if self._avg_velocity == 0:
             return 1.0
 
         # calculate adjustment factor
-        normalized_velocity = (self._avg_velocity - min_expected_velocity) / (
-            max_expected_velocity - min_expected_velocity
-        )
+        normalized_velocity = (
+            self._avg_velocity * self.params.velocity_proportion
+            - self.params.min_expected_velocity
+        ) / (self.params.max_expected_velocity - self.params.min_expected_velocity)
         normalized_velocity = max(0.0, min(1.0, normalized_velocity))  # clamp to [0, 1]
 
-        adjustment_factor = min_adjustment + normalized_velocity * (
-            max_adjustment - min_adjustment
+        adjustment_factor = self.params.min_adjustment + normalized_velocity * (
+            self.params.max_adjustment - self.params.min_adjustment
         )
 
         return adjustment_factor

@@ -37,6 +37,11 @@ player:
   tag: "[blue]player[/blue]:"
   verbose: False
   midi_port: "Disklavier"
+  velocity_proportion: 0.8
+  min_expected_velocity: 10
+  max_expected_velocity: 100
+  min_adjustment: 0.2
+  max_adjustment: 1.5
 metronome:
   tag: "[magenta]metro[/magenta] :"
   verbose: False
@@ -70,8 +75,7 @@ midi_control:
     port_name: "USB Oxygen 8 v2" #"nanoKONTROL2 SLIDER/KNOB"
     cc_number: 72 # 23
     min_threshold: 0.0
-    max_threshold: 10.0
-    map_cc_127_to_inf: true
+    max_threshold: 8.0
   transpose_listener:
     enable: false
     port_name: "USB Oxygen 8 v2" #"LPK25"

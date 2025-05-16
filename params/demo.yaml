@@ -1,42 +1,39 @@
-n_transitions: 64
-initialization: "recording" # kickstart random recording audio
+n_transitions: 30
+initialization: "recording"
 kickstart_path: "data/datasets/20250420/augmented/20240429-068-06_0084-0091_t10s03.mid"
-# kickstart_path: "data/datasets/20250420/augmented/20241229-094-10_0091-0096_t00s00.mid"
-# kickstart_path: "data/datasets/test/intervals-060-09_1_t00s00.mid"
 player_tracking: true
 augmentation:
   rearrange: True
-  remove: 0.1
+  remove: 0.15
   target_notes_remaining: ~
   notes_removed_per_step: 1
   num_variations_per_step: 3
   num_plays_per_segment_version: 1
   total_segments_for_sequence: 1
 scheduler:
-  verbose: True
+  verbose: False
   scale_velocity: true
 seeker:
-  verbose: True
+  verbose: False
   seed: ~
   system: "live"
   mode: "probabilities" # best easy repeat random sequential playlist graph probabilities
   match: "current" # current, next, prev, next 2, prev 2
   metric: "specdiff" # pitch-histogram specdiff clf-4note clf-speed clf-tpose clamp
-  graph_steps: 9
-  graph_track_revisit_interval: 3
   block_shift: true
+  probabilities_dist: [0.3, 0.15, 0.15, 0.15, 0.15, 0.1]
 player:
   verbose: false
-  midi_port: "Disklavier"
+  midi_port: "UM-2G Port 1"
 metronome:
   verbose: False
   do_tick: True
 recorder:
   verbose: False
-  midi_port: "Disklavier"
+  midi_port: "UM-2G Port 1"
 audio:
-  verbose: True
-  midi_port: "Disklavier"
+  verbose: false
+  midi_port: "UM-2G Port 1"
 midi_control:
   cc_listener:
     enable: true
