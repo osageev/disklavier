@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QWidget
 from utils import console
 from utils.midi import TICKS_PER_BEAT
 
-from typing import Optional
+from typing import List, Optional, Tuple
 
 
 @dataclass
@@ -343,9 +343,9 @@ class PianoRollView(QGraphicsView):
         self.draw_notes(painter)
         self.draw_keyboard(painter)
 
-    def update_transitions(self, transitions: list[float]):
+    def update_transitions(self, transitions: List[Tuple[float, bool]]):
         self.tms_transition_times = [
-            t * 1000 - self.tms_roll_length for t in transitions
+            t[0] * 1000 - self.tms_roll_length for t in transitions
         ]
 
     def draw_transition_lines(self, painter):
