@@ -16,7 +16,7 @@ seeker:
   verbose: True
   seed: 123
   mode: "probabilities" # best easy repeat random sequential playlist graph probabilities
-  probabilities_dist: [1,0,0,0,0,0]
+  probabilities_dist: [0, 0,0,0,0,1]
   match: "current"
   metric: "specdiff" # pitch-histogram specdiff clf-4note clf-speed clf-tpose
   graph_steps: 9

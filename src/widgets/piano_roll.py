@@ -108,6 +108,7 @@ class PianoRollView(QGraphicsView):
         "grid": QColor(178, 178, 178, 128),
         "background": QColor(38, 38, 38),
         "transition": QColor(0, 200, 0, 128),
+        "track_change_highlight": QColor(100, 50, 50, 100),
     }
     min_note = 21  # A0
     max_note = 108  # C8
@@ -126,7 +127,7 @@ class PianoRollView(QGraphicsView):
     active_notes: dict[int, Note] = {}
     playing_notes = [0] * note_range
     current_tempo = default_bpm
-    tms_transition_times = []
+    processed_transitions: List[Tuple[float, bool]] = []  # (time_ms, is_new_track)
 
     def __init__(self, parent=None):
         # --- pull attribs from parent ---
@@ -338,14 +339,36 @@ class PianoRollView(QGraphicsView):
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
 
+        # fill the main rolling area background first
+        painter.fillRect(
+            self.key_width,
+            0,
+            self.window_width - self.key_width,
+            self.window_height,
+            self.colors["background"],
+        )
+
+        # draw track change highlights
+
+        # draw remaining elements on top
         self.draw_grid(painter)
+        self.draw_track_change_backgrounds(painter)
         self.draw_transition_lines(painter)
         self.draw_notes(painter)
         self.draw_keyboard(painter)
 
     def update_transitions(self, transitions: List[Tuple[float, bool]]):
-        self.tms_transition_times = [
-            t[0] * 1000 - self.tms_roll_length for t in transitions
+        """
+        update the list of transition times and track change indicators.
+
+        parameters
+        ----------
+        transitions : List[Tuple[float, bool]]
+            list of (time_seconds, is_new_track) tuples.
+        """
+        console.log(f"updating transitions: {transitions}")
+        self.processed_transitions = [
+            (t[0] * 1000 - self.tms_roll_length, t[1]) for t in transitions
         ]
 
     def draw_transition_lines(self, painter):
@@ -353,8 +376,8 @@ class PianoRollView(QGraphicsView):
         draw vertical green lines at transition points.
         """
         painter.setPen(QPen(self.colors["transition"], 2))
-        for transition_time in self.tms_transition_times:
-            x = self.time_to_x(transition_time)
+        for transition_time in self.processed_transitions:
+            x = self.time_to_x(transition_time[0])
             # only draw if in visible area
             if self.key_width <= x <= self.window_width:
                 painter.drawLine(x, 0, x, self.window_height)
@@ -481,6 +504,45 @@ class PianoRollView(QGraphicsView):
             # note border
             painter.setPen(QPen(QColor(51, 51, 51, 204), 0.5))
             painter.drawRect(start_x, y, note_width, self.note_height)
+
+    def draw_track_change_backgrounds(self, painter):
+        """
+        draw highlighted backgrounds for segments that start with a new track.
+        """
+        if not self.processed_transitions:
+            return
+
+        highlight_color = self.colors["track_change_highlight"]
+
+        for i, (start_ms, is_new_track_here) in enumerate(self.processed_transitions):
+            if is_new_track_here:
+                # calculate start x position
+                x_start_region = self.time_to_x(start_ms)
+
+                # calculate end x position
+                end_ms_region = -1
+                if i + 1 < len(self.processed_transitions):
+                    end_ms_region = self.processed_transitions[i + 1][
+                        0
+                    ]  # start of next segment
+                else:
+                    # last segment, extend highlight to cover visible area + more
+                    end_ms_region = self.dtms_current_time + self.tms_roll_length * 1.5
+
+                x_end_region = self.time_to_x(end_ms_region)
+
+                # clip to the piano roll area (excluding keys)
+                draw_x_start = max(x_start_region, self.key_width)
+                draw_x_end = min(x_end_region, self.window_width)
+
+                if draw_x_start < draw_x_end:  # ensure there's something to draw
+                    painter.fillRect(
+                        draw_x_start,
+                        0,
+                        draw_x_end - draw_x_start,
+                        self.window_height,
+                        highlight_color,
+                    )
 
 
 class PianoRollWidget(QWidget):

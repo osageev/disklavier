@@ -91,7 +91,7 @@ class Scheduler(Worker):
                         )
             else:
                 # kickstarting from a file
-                ts_offset, tt_offset = 0, 0
+                ts_offset, tt_offset = self._get_next_transition()
         else:
             # not first segment
             ts_offset, tt_offset = self._get_next_transition()
