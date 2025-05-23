@@ -1576,4 +1576,4 @@ def calculate_kl_divergence(p: np.ndarray, q: np.ndarray) -> float:
     float
         the kl divergence.
     """
-    return entropy(p, q)
+    return float(entropy(p, q))
