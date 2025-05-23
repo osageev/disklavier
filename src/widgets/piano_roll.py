@@ -364,7 +364,7 @@ class PianoRollView(QGraphicsView):
         transitions : List[Tuple[float, bool]]
             list of (time_seconds, is_new_track) tuples.
         """
-        console.log(f"{self.tag} updating transitions: {[f'{t[0]:.01f} {t[1]}' for t in transitions]}")
+        # console.log(f"{self.tag} updating transitions: {[f'{t[0]:.01f} {t[1]}' for t in transitions]}")
         self.processed_transitions = [
             (t[0] * 1000 - self.tms_roll_length, t[1]) for t in transitions
         ]

@@ -109,6 +109,7 @@ class Scheduler(Worker):
             [
                 f"[{t[1]}] {t[0]:02.01f}  -> {self.td_start + timedelta(seconds=t[0]):%H:%M:%S.%f}"
                 for t in self.ts_transitions
+                if self.td_start + timedelta(seconds=t[0]) < datetime.now() + timedelta(seconds=12)
             ],
         )
 

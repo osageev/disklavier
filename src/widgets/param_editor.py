@@ -18,6 +18,7 @@ blocked_params = [
     "user",
     "remote_host",
     "port",
+    "port_name",
     "remote_dir",
     "startup_delay",
 ]
@@ -25,9 +26,10 @@ blocked_params = [
 key_order = [
     "bpm",
     "n_transitions",
+    "initialization",
+    "player_tracking",
     "seeker",
-    "seed_rearrange",
-    "seed_remove",
+    "augmentation",
     "scheduler",
     "player",
     "recorder",
@@ -63,10 +65,34 @@ class ParameterEditorWidget(QtWidgets.QWidget):
                 "next 2",
                 "prev 2",
             ],
+            "recorder.pedal_type": [
+                "regular",
+                "inverted",
+            ],
         }
 
         self.params = params
         self.param_widgets = {}
+
+        if self.params.seeker.system == "demo":
+            blocked_params.append("kickstart_path")
+            blocked_params.append("graph_steps")
+            blocked_params.append("graph_track_revisit_interval")
+            blocked_params.append("metric")
+            blocked_params.append("probability_transition_lookback")
+            blocked_params.append("max_velocity")
+            blocked_params.append("velocity_proportion")
+            blocked_params.append("min_expected_velocity")
+            blocked_params.append("max_expected_velocity")
+            blocked_params.append("min_adjustment")
+            blocked_params.append("max_adjustment")
+            blocked_params.append("cc_number")
+            blocked_params.append("min_threshold")
+            blocked_params.append("max_threshold")
+            blocked_params.append("middle_c_note_number")
+            # blocked_params.append("")
+            # blocked_params.append("")
+            # blocked_params.append("")
 
         self.init_ui()
 

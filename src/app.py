@@ -23,7 +23,11 @@ def load_args(args):
     # load/build arguments and parameters
     parser = ArgumentParser(description="Argparser description")
     parser.add_argument(
-        "-d", "--dataset", type=str, default="20250420", help="name of the dataset"
+        "-d",
+        "--dataset",
+        type=str,
+        default="20250320",
+        help="name of the dataset (default '20250320')",
     )
     parser.add_argument(
         "--dataset_path", type=str, default=None, help="path to MIDI files"
@@ -33,14 +37,14 @@ def load_args(args):
         "--params",
         type=str,
         default="max",
-        help="name of parameter file (must be located at 'params/[NAME].yaml')",
+        help="name of parameter file (must be located at 'params/[NAME].yaml') (default 'max')",
     )
     parser.add_argument(
         "-o",
         "--output",
         type=str,
         default="data/outputs/logs",
-        help="directory in which to store outputs (logs, recordings, etc...)",
+        help="directory in which to store outputs (logs, recordings, etc...) (default 'data/outputs/logs')",
     )
     parser.add_argument(
         "-t",
@@ -65,32 +69,32 @@ def load_args(args):
         "-b",
         "--bpm",
         type=int,
-        help="bpm to record and play at, in bpm",
+        default=75,
+        help="bpm to record and play at, in bpm (default 75)",
     )
     parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
-        help="enable verbose output",
+        help="enable verbose output (default False)",
     )
     parser.add_argument(
         "-r",
         "--replay",
         action="store_true",
-        help="run again using last seed file",
+        help="run again using last seed file (default False)",
     )
     parser.add_argument(
         "-m",
         "--midi_control",
         default=True,
         action="store_true",
-        help="enable midi control",
+        help="enable midi control (default True)",
     )
     args = parser.parse_args()
 
     # first load template parameters
     template_params = OmegaConf.load("params/template.yaml")
-
     # then load specified parameters and merge with template
     # (specified parameters override template parameters)
     specific_params = OmegaConf.load(f"params/{args.params}.yaml")
