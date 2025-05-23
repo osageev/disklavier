@@ -13,7 +13,7 @@ from utils import console, write_log, midi
 from widgets.runner import RunWorker
 from widgets.param_editor import ParameterEditorWidget
 from widgets.piano_roll import PianoRollWidget
-from widgets.recording_widget import RecordingWidget
+from widgets.recording_view import RecordingWidget
 
 from typing import Optional
 
