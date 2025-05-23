@@ -13,7 +13,7 @@ from utils import console, write_log, midi
 from widgets.runner import RunWorker
 from widgets.param_editor import ParameterEditorWidget
 from widgets.piano_roll import PianoRollWidget
-from widgets.recording_widget import RecordingWidget
+from widgets.recording_view import RecordingWidget
 
 from typing import Optional
 
@@ -50,22 +50,27 @@ class MainWindow(QtWidgets.QMainWindow):
         # status bar
         self.status = self.statusBar()
         self.status.showMessage("parameter editor loaded")
-        self.status.setVisible(True)  # Ensure it's always visible by default
+        self.status.setVisible(True)
 
         # Add buttons to status bar
         self.stop_btn = QtWidgets.QPushButton("Stop")
         self.stop_btn.clicked.connect(self.stop_clicked)
-        self.stop_btn.setEnabled(False)  # Disabled by default
+        self.stop_btn.setEnabled(False)
         self.status.addPermanentWidget(self.stop_btn)
         self.start_btn = QtWidgets.QPushButton("Start")
-        self.start_btn.setDefault(True)  # Make it the default button
+        self.start_btn.setDefault(True)
         self.start_btn.clicked.connect(self.start_clicked)
         self.status.addPermanentWidget(self.start_btn)
 
-        # Window dimensions
+        # window dimensions
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(800, 600)
         self.resize(int(geometry.width() * 0.8), int(geometry.height() * 0.8))
+
+        # update status with parameter file path
+        param_path = os.path.join(os.getcwd(), "params", f"{self.args.params}.yaml")
+        self.status.showMessage(f"loaded parameter file: '{param_path}'")
+        self.status_label.setText(f"parameter file editor")
 
     def _build_timer(self):
         # Create velocity label (left side)

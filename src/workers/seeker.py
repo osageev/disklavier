@@ -38,6 +38,7 @@ class Seeker(Worker, QtCore.QObject):
 
     # probability distribution for probabilities mode
     probabilities_dist: list[float] = [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6]
+    probabilities_tolerance = 1e-6
 
     # velocity tracking
     # TODO: unused, will be used to guide selection
@@ -101,9 +102,9 @@ class Seeker(Worker, QtCore.QObject):
             and all(isinstance(p, (int, float)) for p in self.probabilities_dist)
         ):
             console.log(
-                f"{self.tag} [yellow]Warning: seeker.probabilities_dist is invalid. "
-                f"Expected a list of 6 numbers. Got: {self.probabilities_dist}. "
-                f"Reverting to default: {[1/6]*6}[/yellow]"
+                f"{self.tag} [yellow]warning: seeker.probabilities_dist is invalid. "
+                f"expected a list of 6 numbers between 0 and 1. got: {self.probabilities_dist}. "
+                f"reverting to default: {[1/6]*6}[/yellow]"
             )
             self.probabilities_dist = [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6]
 
@@ -115,63 +116,13 @@ class Seeker(Worker, QtCore.QObject):
             self.probabilities_dist = [max(0.0, p) for p in self.probabilities_dist]
 
         current_sum = sum(self.probabilities_dist)
-        tolerance = 1e-6
 
-        if abs(current_sum - 1.0) > tolerance:
+        if abs(current_sum - 1.0) > self.probabilities_tolerance:
             console.log(
                 f"{self.tag} [yellow]Warning: seeker.probabilities_dist (sum: {current_sum:.4f}) "
                 f"does not sum to 1.0. Adjusting probabilities.[/yellow]"
             )
-            if current_sum < 1.0:
-                if current_sum == 0:  # avoid division by zero if all are zero
-                    console.log(
-                        f"{self.tag} [yellow]All probabilities were zero. Setting to uniform distribution.[/yellow]"
-                    )
-                    self.probabilities_dist = [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6]
-                else:  # only add to first element if sum is positive
-                    diff = 1.0 - current_sum
-                    self.probabilities_dist[0] += diff
-            else:  # current_sum > 1.0
-                surplus = current_sum - 1.0
-                # try to subtract from actions 2-6 (indices 1-5)
-                # Calculate the total amount that can be reduced from elements 1-5
-                reducible_amount_1_5 = sum(
-                    max(0, self.probabilities_dist[i] - 0) for i in range(1, 6)
-                )
-
-                if reducible_amount_1_5 >= surplus:
-                    # Distribute the surplus reduction proportionally among elements 1-5
-                    for i in range(1, 6):
-                        if (
-                            self.probabilities_dist[i] > 0 and reducible_amount_1_5 > 0
-                        ):  # ensure reducible_amount_1_5 is not zero
-                            reduction = surplus * (
-                                self.probabilities_dist[i] / reducible_amount_1_5
-                            )
-                            self.probabilities_dist[i] -= reduction
-                            if self.probabilities_dist[i] < 0:
-                                self.probabilities_dist[i] = 0.0  # clamp
-                else:
-                    # Reduce elements 1-5 to 0 and subtract remaining surplus from element 0
-                    for i in range(1, 6):
-                        surplus -= self.probabilities_dist[i]
-                        self.probabilities_dist[i] = 0.0
-                    self.probabilities_dist[0] -= surplus
-                    if self.probabilities_dist[0] < 0:
-                        self.probabilities_dist[0] = 0.0
-
-            # final normalization
-            final_sum = sum(self.probabilities_dist)
-            if final_sum > 0:
-                self.probabilities_dist = [
-                    p / final_sum for p in self.probabilities_dist
-                ]
-            else:  # if sum is still zero
-                console.log(
-                    f"{self.tag} [yellow]All probabilities became zero after adjustment. Setting to uniform distribution.[/yellow]"
-                )
-                self.probabilities_dist = [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6]
-
+            self.probabilities_dist = [p / current_sum for p in self.probabilities_dist]
             console.log(
                 f"{self.tag} Adjusted probabilities: {[f'{p:.4f}' for p in self.probabilities_dist]}"
             )
@@ -986,6 +937,8 @@ class Seeker(Worker, QtCore.QObject):
                 blocked_tracks = []
                 seen_tracks = set()
                 for segment in reversed(self.played_files):
+                    if "/" in segment:
+                        segment = segment.split("/")[-1]
                     segment_track = segment.split("_")[0]
                     if segment_track not in seen_tracks:
                         seen_tracks.add(segment_track)
