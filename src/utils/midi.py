@@ -1,5 +1,4 @@
 import os
-import sys
 import mido
 import numpy as np
 import pretty_midi
@@ -8,6 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from scipy.ndimage import zoom
 from bisect import bisect_left
+from scipy.stats import entropy
 
 from typing import Dict, Tuple, Optional
 from dataclasses import dataclass
@@ -1499,3 +1499,81 @@ def stretch_midi(file_path: str, factor: float = 1.0) -> None:
         midi.save(file_path)
     except Exception as e:
         console.log(f"[red]error stretching midi file {basename(file_path)}: {e}[/red]")
+
+
+def get_pitch_histogram(
+    midi_path: str, normalize: bool = True, smooth: float = 1e-6
+) -> np.ndarray:
+    """
+    calculate the pitch histogram for a midi file over the full pitch range (0-127).
+
+    parameters
+    ----------
+    midi_path : str
+        path to the midi file.
+    smooth : float
+        smoothing factor added to all bins to avoid zeros.
+
+    returns
+    -------
+    np.ndarray or none
+        normalized pitch histogram (128 bins), or none if midi cannot be loaded.
+    """
+    midi_data = pretty_midi.PrettyMIDI(midi_path)
+    hist = np.zeros(128)
+
+    for instrument in midi_data.instruments:
+        if not instrument.is_drum:
+            for note in instrument.notes:
+                if 0 <= note.pitch <= 127:
+                    if normalize:
+                        hist[note.pitch] += note.end - note.start
+                    else:
+                        hist[note.pitch] += 1
+
+    if normalize:
+        # Use total non-zero duration for normalization, or 1 if total duration is 0
+        total_duration = hist.sum()
+        # Add smoothing and normalize by duration
+        hist += smooth * total_duration
+        hist /= hist.sum()
+
+    return hist
+
+
+def shift_histogram(hist: np.ndarray, offset: int) -> np.ndarray:
+    """
+    circularly shift a pitch histogram.
+
+    parameters
+    ----------
+    hist : np.ndarray
+        the pitch histogram (12 bins).
+    offset : int
+        the number of semitones to shift (positive or negative).
+
+    returns
+    -------
+    np.ndarray
+        the shifted histogram.
+    """
+    return np.roll(hist, offset)
+
+
+def calculate_kl_divergence(p: np.ndarray, q: np.ndarray) -> float:
+    """
+    calculate kl divergence d_kl(p || q).
+
+    parameters
+    ----------
+    p : np.ndarray
+        first probability distribution.
+    q : np.ndarray
+        second probability distribution.
+
+    returns
+    -------
+    float
+        the kl divergence.
+    """
+    return entropy(p, q)
