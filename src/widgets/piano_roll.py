@@ -88,9 +88,7 @@ class PianoRollBuilder(QThread):
 
 
 class PianoRollView(QGraphicsView):
-    """
-    graphical view that displays a piano roll with scrolling notes.
-    """
+    tag = "[#90DD90]pr vw[/#90DD90]:"
 
     # constants
     debug = True
@@ -137,7 +135,7 @@ class PianoRollView(QGraphicsView):
             self.bpm = parent.bpm
         else:
             console.log(
-                f"[orange bold] no start time found, using current time [/orange bold]"
+                f"{self.tag}[orange bold] no start time found, using current time [/orange bold]"
             )
             self.start_time = datetime.now()
 
@@ -272,7 +270,7 @@ class PianoRollView(QGraphicsView):
             ):
                 if self.debug:
                     console.log(
-                        f"\t\tending stuck note {note_num} started at {note.start_time}"
+                        f"{self.tag}\tending stuck note {note_num} started at {note.start_time}"
                     )
                 self.note_off(int(note_num), now_dt)
 
@@ -300,7 +298,7 @@ class PianoRollView(QGraphicsView):
         if note.pitch in self.active_notes:
             if self.debug:
                 console.log(
-                    f"\twarning: note {note.pitch} already active, ending previous note"
+                    f"{self.tag}\twarning: note {note.pitch} already active, ending previous note"
                 )
             self.note_off(
                 note.pitch, self.active_notes[note.pitch].start_time or datetime.now()
@@ -316,20 +314,20 @@ class PianoRollView(QGraphicsView):
             self.active_notes[pitch].is_active = False
             del self.active_notes[pitch]
         elif self.debug:
-            console.log(f"\twarning: received noteOff for inactive note: {pitch}")
+            console.log(f"{self.tag}\twarning: received noteOff for inactive note: {pitch}")
 
     def set_tempo(self, bpm: int):
         if bpm > 0:
             if self.debug:
-                console.log(f"\ttempo changed to: {bpm} BPM")
+                console.log(f"{self.tag}\ttempo changed to: {bpm} BPM")
             self.current_tempo = bpm
         elif self.debug:
-            console.log(f"\tinvalid tempo value: {bpm}")
+            console.log(f"{self.tag}\tinvalid tempo value: {bpm}")
 
     def cleanup(self):
         active_note_nums = list(self.active_notes.keys())
         if self.debug:
-            console.log(f"\tcleaning up {len(active_note_nums)} active notes")
+            console.log(f"{self.tag}\tcleaning up {len(active_note_nums)} active notes")
 
         now_dt = datetime.now()
         for note_num in active_note_nums:
@@ -366,7 +364,7 @@ class PianoRollView(QGraphicsView):
         transitions : List[Tuple[float, bool]]
             list of (time_seconds, is_new_track) tuples.
         """
-        console.log(f"updating transitions: {transitions}")
+        console.log(f"{self.tag} updating transitions: {[f'{t[0]:.01f} {t[1]}' for t in transitions]}")
         self.processed_transitions = [
             (t[0] * 1000 - self.tms_roll_length, t[1]) for t in transitions
         ]
